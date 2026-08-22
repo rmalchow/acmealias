@@ -184,6 +184,82 @@ then the way to touch a customer's data unobserved is to use the emergency path 
 gradient points exactly the wrong way. So `SourceCLI` entries that touch a tenant's inventory surface
 in that tenant's trail too, attributed the same way as any other staff action.
 
+### The button that stops an account, and why it is not a support session
+
+Selling DNS to strangers means that sooner or later — realistically within weeks of opening — someone
+registers an account, points a zone at a phishing page, and the abuse report arrives naming *our*
+nameservers. That message is answered by one person, who may be asleep, and what they need is a single
+action that stops the account. Not an investigation, not a session inside the customer's console: a
+stop.
+
+It would be easy to reach for the mechanism this change already builds — time-boxed access into an
+account — and shut things off from inside. That is the wrong shape. It means impersonating a tenant in
+order to shut one down, which records an enforcement action as a support visit, and it makes the most
+urgent operation in the system depend on the most carefully constrained one. So **suspension is its
+own permission and its own route**, taking an account and a reason, opening no session and reading
+nothing inside the account.
+
+**One press reaches everything**, because a stop that leaves a way to continue is not a stop. It marks
+the account suspended, which the satellite fleet applies as a single event that overrides every zone,
+recordset, check and key without rewriting any of them; it blocks the identities behind that account
+so the same people cannot register again in the next minute; and it adds the offending zone names to a
+list so those names cannot be re-added elsewhere. Because it overrides rather than rewrites, lifting
+it puts everything back exactly as it was — including the one zone the customer had disabled
+themselves, which a cascade would have quietly re-enabled.
+
+**Blocking the people is deliberate, and it has a victim worth naming.** Belonging to two accounts is
+ordinary: invitations exist precisely to create that. So the person you are blocking may also be an
+operator at a legitimate, paying customer — and if they happen to be that customer's only owner, that
+account now has nobody who can sign in, add a member, or buy credits, while it keeps accruing charges.
+A paying customer, taken offline by someone else's phishing, silently.
+
+The answer is not to soften the block, because an abuser with a foothold in a legitimate account would
+keep it. The answer is that **the button tells you what else it is about to break** before you press
+it: every other account these identities belong to, with a mark against any where one of them is the
+last owner. One query, nothing in the common case, and in the uncommon case an invisible outage
+becomes a decision somebody made on purpose.
+
+**The commitment is twelve hours**, published and best-effort. A shorter number that a single person
+who sleeps cannot honour is worse than a longer one that is always met.
+
+### Two blocklists, written in plain text, applied where they are told
+
+Alongside the button there are lists, and both are deliberately blunt instruments.
+
+The **identity list** holds email addresses, canonicalized so that `Ruben+test@Example.com` and
+`ruben@example.com` are recognized as one mailbox, and separately holds email *domains*, matched by
+suffix. The **zone list** holds domain names, also suffix-matched, so blocking `evilcorp.com` also
+blocks `login.evilcorp.com`, and an entry may be an entire top-level domain.
+
+Every entry records **where it applies** — to registration and sign-in, to zone creation, or to both.
+That distinction is not fussiness. Refusing registrations from a top-level domain whose abuse ratio is
+intolerable is a decision about who becomes a customer; refusing to *host* a domain is a decision
+about what our nameservers serve. They are wanted separately, and a single list forcing one answer to
+both questions would be wrong in one direction every time.
+
+**The entries are stored readable, not hashed.** Hashing looks like the careful choice and is worse
+here. A hashed list can only be matched exactly, so the canonicalization rule is frozen the day it is
+written — learn later that a provider ignores dots in local parts and every existing entry is stranded
+under the old rule. It is unreadable to its own operator: no reviewing what is on it, no answering
+"why am I blocked", no unblocking by inspection. And it protects very little, because email addresses
+have low entropy and an unsalted hash of one falls to a dictionary in seconds, while a salted hash
+cannot be looked up at all. A readable table behind staff-only access, with a reason and a date on
+every row, is the honest version — and the audit trail already holds far more about people than this
+list ever will.
+
+Two rules keep the lists from causing the harm they exist to prevent. Identity entries are checked
+when an invitation is **accepted**, not when it is sent, so a legitimate administrator inviting a
+blocked address is told plainly instead of watching an invitation vanish. And **adding an entry is not
+retroactive**: it refuses new registrations and new zones, while existing accounts and zones that
+match are flagged for review rather than cut off. Adding a top-level domain to the list at 14:00 must
+not take three paying customers off the internet at 14:01 as a side effect of an edit.
+
+What this costs is worth stating rather than glossing: **suffix and top-level-domain entries will turn
+away legitimate customers.** A perfectly ordinary company hosting a site under a blocked top-level
+domain is someone we will refuse. That is accepted on purpose — being able to be selective is worth
+more than the marginal signup — and writing it down means the first refusal is a known consequence
+instead of a surprise.
+
 ### Not in scope
 
 - **Any change to how tenants authorize themselves.** The tenant plane is `tenancy-and-permissions`
@@ -195,6 +271,9 @@ in that tenant's trail too, attributed the same way as any other staff action.
 - **Customer-initiated support sessions** — the customer opening access from their own console.
   Attractive for privacy, useless in the two cases that matter most (a customer locked out, and an
   abuse investigation where consent will not be given).
+- **Deleting a suspended account's data.** Suspension stops serving; it does not delete. What
+  happens after a long terminal period is one question shared with `metering-and-credits` and should
+  be answered once, for both.
 
 ### What we considered and rejected
 

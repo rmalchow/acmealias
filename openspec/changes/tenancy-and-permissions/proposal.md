@@ -316,6 +316,49 @@ ever be pointed at.
 So both may *ask*, and only the real owner can *validate*. DNS delegation arbitrates, and no
 dispute-resolution tooling needs to exist.
 
+### Two mechanisms means two mechanisms, and one of them belongs in the database
+
+The isolation argument above says a permission bug should over-permit inside one account rather than
+leak across accounts, because `Scope` fences the query before any grant is consulted. That argument
+is only as good as the fence, so it is worth being exact about what the fence catches.
+
+`Scope` is an argument to every store method. A method written without it does not compile. That
+genuinely removes the most common way tenant filters go missing — someone adds a query and forgets.
+
+It does not remove two others. The first is a query that *has* a valid `Scope` and does not use it:
+a handler for `GET /accounts/acme/load-balancers/{id}` builds the caller's `Scope` correctly and
+passes the `id` straight from the URL, and whether that returns another account's load balancer
+comes down to whether this one method's SQL included `AND account_id = $1`. The compiler sees the
+argument being passed; it cannot see whether the `WHERE` clause used it.
+
+The second is bigger. Several things this design's successors need must read across accounts by
+definition, so they cannot take a `Scope` at all: the process that builds each satellite's zone feed,
+the job that totals zone-time for billing, the path that ingests health-check reports, `adminctl`,
+and every migration. None of those is behind the fence. The zone feed is the one to worry about —
+a mistake there does not leak a row into an API response, it hands one customer's zone to a
+satellite that then answers the internet with it.
+
+So this change turns on Postgres **row-level security**: each table carrying `account_id` gets a
+policy saying a row is visible only when its `account_id` equals a value set on the connection, and
+the code that builds a `Scope` sets that value. A query that forgets its predicate now returns
+nothing, because the database applied the predicate instead. The components that legitimately read
+across accounts connect as a separate database role that is exempt — which is the second benefit:
+the list of code that can cross tenants stops being "whatever bypassed the store package" and
+becomes a short, named, greppable set.
+
+This was deferred in the earlier proposal, and the reason it is affordable now is P2 of the design.
+Once `account_id` is a real column on every row, held true by a composite foreign key, each policy is
+a single column comparison. Had ownership stayed reachable only by joining up to `projects`, each
+policy would have needed a subquery — which Postgres evaluates under the *caller's* policies, and
+which can fail outright with `infinite recursion detected in policy`. The denormalization that made
+`Scope` fast is what makes this cheap.
+
+One table is deliberately left out. `challenges` and `challenge_interactions` carry no `account_id`;
+they are reached only through an alias that was itself fetched under a `Scope`, and they sit on the
+certificate-issuance critical path this change promises not to slow down. That exemption is written
+into the design rather than left implicit, so it reads later as a decision and not as a table someone
+missed.
+
 ### Not in scope
 
 - **The staff/administrative plane.** Acting inside an account without being a member of it —
@@ -324,9 +367,7 @@ dispute-resolution tooling needs to exist.
 - **Zones, recordsets, satellites, checks and credits.** The `dns_record` selector is specified here
   because the grant grammar must accommodate it, but no zone or record is stored by this change.
 - **Local accounts, signup, email confirmation, billing, editions, the marketing site.** All still
-  belong to `add-accounts-and-public-edition`.
-- **Row-level security in Postgres.** Still attractive as defence in depth behind the `Scope`
-  helper, still deferred for the reasons given in E3 of the in-flight change.
+  belong to `public-edition`.
 
 ### Relationship to `add-accounts-and-public-edition`
 

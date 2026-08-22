@@ -85,3 +85,58 @@ so that a charge can be traced to the activity that produced it.
 
 - **WHEN** events are requested for one kind over one period
 - **THEN** only those are returned
+
+### Requirement: A metered event carrying no price produces no deduction
+
+The service SHALL record a metered event whose price is zero without writing a deduction for it. The
+deduction record SHALL exist only where a balance moved.
+
+#### Scenario: A zero-priced event writes no deduction
+
+- **WHEN** an event of a type priced at zero is recorded
+- **THEN** the event exists, the balance is unchanged, and no deduction is written
+
+### Requirement: Checking is billed per checked node per period, not per probe
+
+The service SHALL derive the billable checking quantity from the nodes an account has configured for
+checking, expressed as a count over an interval and emitted by the same periodic job that emits
+zone-time. Individual probe results SHALL be metered without price.
+
+The billable quantity SHALL NOT vary with the number of satellites probing, the probe interval, or
+the number of address families probed.
+
+#### Scenario: The invoice does not change when the fleet does
+
+- **WHEN** the number of satellites assigned to a node changes
+- **THEN** the billable checking quantity for that node is unchanged
+
+#### Scenario: A probe result carries no charge
+
+- **WHEN** a probe result is recorded
+- **THEN** it is metered and no balance moves
+
+### Requirement: Probe results are retained outside the ledger
+
+Probe results SHALL be stored separately from events and deductions, SHALL be retained for a bounded
+period, and SHALL be removable without affecting any charge.
+
+#### Scenario: Expired probe results leave charges intact
+
+- **WHEN** probe results older than the retention period are removed
+- **THEN** every event, deduction and balance is unchanged
+
+### Requirement: Periodic charges are backfilled after an interruption, and late reports are not billed
+
+The periodic job SHALL write the rate events for every period since it last ran, including periods
+during which it was not running. A probe result describing a cycle beyond the permitted delivery
+delay SHALL produce no billable event.
+
+#### Scenario: An interrupted job charges for the periods it missed
+
+- **WHEN** the periodic job runs after an interruption spanning several periods
+- **THEN** one rate event exists for each of those periods, and running it again adds none
+
+#### Scenario: A delivered backlog does not charge
+
+- **WHEN** a satellite delivers results describing cycles beyond the permitted delay
+- **THEN** no deduction is written for them

@@ -40,7 +40,8 @@ Constraints that shaped everything below:
 
 - Payment processing, invoicing, tax, currency.
 - Deciding actual prices.
-- Committed spend, tiers, discounts.
+- Committed spend, discounts, negotiated pricing.
+- Product tiers as an entitlement. Deliberately absent, and M10 explains why.
 - Metering as an observability product — these events exist to be charged for, and `usage-reporting`
   continues to answer operational questions separately.
 
@@ -175,6 +176,90 @@ path — and because rate changes mid-period turn a subtraction into a piecewise
 **Rejected: per-zone ticks.** Most granular, and rejected on volume for information one row already
 carries.
 
+### M10. There is no tier column: what a customer bought is what they configured
+
+The product is sold at three levels — challenge answering alone; challenge answering plus
+authoritative DNS; both plus reachability checking. That is the sales conversation, and it is
+tempting to make it a column: `accounts.tier`, gates on zone creation, a monthly base charge per
+level.
+
+**Rejected, and this is a decision rather than a deferral.** A tier is a second mechanism that can
+stop an account, sitting beside the one that already exists. Every gate has to be written, tested,
+supported and explained; every upgrade and downgrade is a state transition with a partial state in the
+middle (what happens to the six zones of a customer who downgrades to challenge-only?); and none of it
+answers a question the ledger does not already answer. A customer on "LE + DNS" is a customer who
+created a zone. A customer on "LE only" is one who did not. The level is an *observation* about their
+configuration, not a permission granted to them.
+
+So the levels are real on the marketing page and absent from the schema. What a customer configures
+produces events; events cost credits; credits run out. **One mechanism can stop an account, and it is
+the balance.**
+
+Two things this does forfeit, named so the trade is explicit. There is no recurring base charge, so
+revenue is entirely usage-shaped — a customer who configures nothing pays nothing, however long they
+have been a customer. And there is no way to sell a capability without selling its usage, so
+"unlimited DNS for a fixed monthly fee" is not expressible. Both are acceptable at this size and both
+are reversible: adding an entitlement later is additive, whereas removing one that customers have
+bought is not.
+
+### M11. Zero-priced events write no deduction, and the billable check event is derived
+
+`dns.query` is metered and priced at zero (M2). `health-checks` adds a much larger zero-priced
+producer: with quorum, dual-stack addressing and a thirty-second interval, one four-node load balancer
+probed by three satellites generates 3 × 4 × 2 × 2,880 ≈ **69,000 probe results a day**, which is a
+couple of million rows a month for one small customer before anyone has bought anything.
+
+Two rules keep that from landing in the ledger.
+
+**A zero-priced event writes an event and no deduction.** A deduction of zero credits is not a fact
+anyone will ever dispute; it is a row that doubles the highest-volume table in the system to record
+that nothing happened to a balance. The `deductions` table stays what M1 wants it to be — the
+evidence for money that moved.
+
+**What is billed for checking is a rate event emitted by the tick job, not the probes.** The tick job
+of M5, which already walks accounts to emit `zone.active`, emits `node.checked` in the same pass: one
+row per account per period per checked node, a count over an interval exactly like zone-time.
+
+The reason is that the customer configured a *node to be checked*. They did not configure the quorum
+size, the probe interval, or the number of address families, and all three are ours to change. Billing
+per probe would mean a customer's invoice rising by a third because we added a fourth satellite for
+our own confidence, or doubling because a node gained an IPv6 address that we then chose to check
+twice over. Billing per checked node per hour makes the invoice a function of what they asked for, and
+leaves quorum, interval and family count as engineering decisions with engineering costs.
+
+This supersedes nothing in M4 — a *delivered* report is still what proves a node was being checked in
+that period, and a late report still bills nothing (H11 in `health-checks`) — but the billable row is
+the derived one.
+
+**Probe results live outside the ledger.** They are operational data: their own table, partitioned by
+month, dropped at ninety days, with the downsampling H7 describes. The ledger keeps `events` and
+`deductions` indefinitely, because those are the evidence for a charge, and they stay small enough to
+be read by a person in a dispute.
+
+### M12. A tick the job missed is backfilled; a check result that arrives late is not billed
+
+M5 already makes the tick job catch up: a job down for six hours writes six rows on its next run,
+because the period key makes it idempotent. Two questions follow from an outage at the centre, and
+they get opposite answers on purpose.
+
+**Zone-time is backfilled.** The zones existed throughout the outage and the satellites were serving
+them throughout the outage — frozen, but answering. The customer received the service. That the job
+which counts it was not running is our operational problem, not a discount, and M5's `ON CONFLICT`
+already produces exactly this behaviour with no extra code. The same argument covers `node.checked`,
+with one condition: a node is billed as checked for a period only if it was configured for checking in
+that period, which the tick job can determine from state it holds rather than from reports it did not
+receive.
+
+**Late check results are not billed.** The opposite answer, for a reason that is about who caused the
+problem rather than about consistency. A satellite reconnecting after four hours delivers a backlog;
+billing it on delivery, as M4 says, would charge four hours of checks in one instant and could push a
+customer into suspension — because *our* centre was down. So a result describing a cycle beyond the
+permitted delay produces no billable event at all. It is recorded as history, and the derived
+`node.checked` rate for those periods is what carries the charge, if anything does.
+
+Stated as one rule: **the meter follows what the customer configured, not what our infrastructure
+managed to observe.**
+
 ### M6. Soft suspension, then terminal — and the rule that keeps the overdraft honest
 
 | Balance | Publishes | Checks | Zone serving | Zone-time accrual |
@@ -290,6 +375,11 @@ made, which is also the recommended way to deploy it.
   reversible in seconds; deleting a zone is not. Deletion after a long terminal period is a separate
   decision with legal dimensions.
 - **How long are events retained?** They are the evidence for disputes, so longer than deductions
-  might suggest; and `dns.query` events are the highest-volume and least valuable of them.
+  might suggest; and `dns.query` events are the highest-volume and least valuable of them. M11 puts
+  probe results outside the ledger at ninety days, which leaves `dns.query` as the remaining
+  high-volume zero-priced type and the case to decide.
+- **Is `node.checked` billed for a period in which no satellite reported at all?** M12 says the
+  configuration governs, which bills it. The opposite reading — that a period nobody observed was not
+  a period of service — is defensible and would need a rule for how much silence is too much.
 - **Should the price book be per account?** Committed spend and negotiated pricing would need it, and
   the table is already shaped for it, but nothing requires it yet.

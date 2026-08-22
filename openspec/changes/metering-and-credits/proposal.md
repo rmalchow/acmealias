@@ -167,14 +167,69 @@ about six hours" is actionable for both, requires no per-tier tuning, and is the
 already being done to know when the terminal state arrives. What still slips through is covered by the
 staff plane's credit-granting permission.
 
+### The three levels we sell are not three things the system knows about
+
+The service is sold at three levels: challenge answering on its own; challenge answering plus
+authoritative DNS; both plus reachability checking. That is how the product is described to a buyer,
+and the obvious next step is to make it a field — a `tier` on the account, checks that refuse zone
+creation below the middle level, a monthly fee per level.
+
+This change does not do that, deliberately.
+
+A tier is a **second thing that can stop an account**, next to the one that already exists. It brings
+gates to write and test, upgrade and downgrade paths that each have a half-finished middle (what
+becomes of the six zones belonging to a customer who downgrades to challenge-only — refused, deleted,
+served but uneditable?), a support burden of explaining which level someone is on, and a second answer
+to "why can't I do this" that has to be kept consistent with the first.
+
+And it answers nothing the ledger does not. A customer on "LE + DNS" is a customer who created a zone.
+A customer on "LE only" is one who did not. The level is a **description of what someone configured**,
+not a permission they were granted. Configuring more produces more events; more events cost more
+credits; credits are what run out. One mechanism stops an account, and it is the balance.
+
+The honest cost of this: there is no recurring base charge, so a customer who configures nothing pays
+nothing however long they stay, and there is no way to sell "unlimited DNS for a flat monthly fee".
+Both are fine at this size, and both are reversible in the easy direction — an entitlement can be
+added later, whereas one that customers have already bought cannot be taken away.
+
+### Charging for checks is where the multiplication has to stop
+
+Reachability checking multiplies. To decide that a node is down we need several satellites to agree,
+because one satellite with a bad transit path is not evidence. A node with both an IPv4 and an IPv6
+address is two things to check, not one, because those paths fail independently. So a load balancer
+with four nodes, checked by three satellites, on both families, every thirty seconds, produces about
+**69,000 probe results a day** — a couple of million rows a month, for one small customer.
+
+Every one of those is recorded. None of them is what the customer is billed for.
+
+The reason is that the customer chose *"check this node"*. They did not choose the quorum size, the
+probe interval, or the fact that we check two address families — those are our decisions, made for our
+confidence, and we change them. If the bill were per probe, adding a fourth satellite next year would
+raise every customer's invoice by a third for a benefit they never asked for, and a node acquiring an
+IPv6 address would double its checking cost.
+
+So the ledger charges **per checked node per hour**, emitted by the same small job that already counts
+zone-time, and the probes themselves are metered at zero and kept in their own table for ninety days
+as operational data. The invoice is a function of what the customer configured. The multiplication
+stays on our side of the line, where the engineering decisions that cause it are also made.
+
+A related rule falls out of the same principle. When our centre is unreachable, satellites keep
+probing and queue their results; when it comes back, hours of results arrive at once. Billing those on
+delivery would charge a customer four hours of checks in a single instant — possibly suspending them —
+because *we* were down. Late results are therefore recorded and not billed. Conversely, zone-time
+*is* backfilled across the same outage, because the zones existed and the satellites were answering
+for them the whole time: the customer had the service, and our counting job's absence is not a
+discount.
+
 ### Not in scope
 
 - **Payment.** Taking money and turning it into credits is a separate integration. This change is the
   ledger those credits land in.
 - **Invoicing, tax, currency.** The ledger is in credits.
 - **Setting prices.** The price book exists; what goes in it is commercial.
-- **Usage-based tiers, committed spend, discounts.** A price book per account is where they would go,
-  and nothing here forecloses it.
+- **Committed spend, discounts, negotiated pricing.** A price book per account is where they would
+  go, and nothing here forecloses it.
+- **Product tiers as an entitlement.** Not deferred — decided against, for the reasons above.
 
 ### What we considered and rejected
 

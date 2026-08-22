@@ -151,8 +151,47 @@ billing and failover decisions, counting twice is a wrong invoice and a wrongly-
 - **Metering.** The reports channel carries events; the ledger and the price book are
   `metering-and-credits`.
 - **DNSSEC.** Deferred; `dns-records` shapes the pipeline for it.
-- **Customer-run satellites.** We run the fleet. Nothing here forecloses it later, but no part of this
-  change scopes a stream to a tenant.
+- **Customer-run satellites.** Decided against rather than deferred, and the reason is in the
+  section above: a satellite holds every other customer's zone data and answers the internet on their
+  behalf. Both of those are fine on hardware we control and are a different proposition on hardware
+  we do not.
+- **Partitioned replicas.** Every satellite holds every zone. Splitting the replica per satellite is
+  an optimization for a size we are nowhere near, and it would turn one stream and one position into
+  one of each per satellite.
+
+### How a satellite proves it is ours
+
+A satellite opens a connection to us and asks for every customer's zone data. Something has to
+establish that the thing on the other end is a machine we deployed, and this proposal settles it
+rather than leaving it to implementation.
+
+**Staff create the satellite first, and get a token.** A member of staff registers the satellite in
+the console and is shown a long random string once — an *enrolment token* — which is stored only as a
+hash and expires within hours. That token goes into the new machine's configuration alongside our
+address.
+
+**The token is spent on first start.** The satellite calls one endpoint, hands over the token, and
+receives a credential that belongs to that machine alone. The centre marks the token permanently
+used in the same breath. A second machine presenting the same token is refused; so is the same
+machine after a reinstall, which is deliberate — re-enrolling is staff issuing a new token, and that
+leaves a record of who did it and when.
+
+What this buys, concretely, is the ability to **kill one satellite**. A machine is stolen, or a
+provider account is compromised, or a satellite is simply decommissioned badly: revoke its
+credential, and its stream closes and will not re-open, while every other satellite carries on. It
+also means no long-lived secret lives in configuration management, because the only secret that ever
+sits in a config file is a token that stops working within hours.
+
+The two obvious alternatives were weighed and set aside. A **shared secret** in every satellite's
+configuration is one value authenticating the whole fleet — unrotatable without redeploying
+everything, unrevokable per machine, and catastrophic in a single leaked config file. **Mutual TLS
+with our own certificate authority** is genuinely stronger and is where this goes at a larger size,
+but running a CA is a job with a key to protect, renewals to schedule and revocation to publish, and
+it is not a job worth taking on to authenticate a handful of machines.
+
+The sync stream and the report channel share the one credential. They are the same machine; issuing
+it two secrets would double the rotation work and protect against nothing, since a satellite that can
+be impersonated on either channel is already lost.
 
 ### What we considered and rejected
 

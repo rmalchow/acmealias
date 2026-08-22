@@ -74,3 +74,19 @@ route or notification concerning payment, and SHALL NOT require a balance for an
 
 - **WHEN** an operator performs any operation in that edition
 - **THEN** it succeeds without reference to a balance
+
+### Requirement: Credit purchase is governed by configuration, and staff grants remain the only alternative source
+
+The service SHALL refuse the credit purchase endpoints with a stated reason whenever payment is not
+enabled by configuration. While payment is disabled, a balance SHALL be established only by an
+audited staff credit grant, and no interface within an account SHALL set a balance.
+
+#### Scenario: Purchase is refused while payment is disabled
+
+- **WHEN** a purchase is initiated while payment is disabled
+- **THEN** it is refused with a reason and no balance changes
+
+#### Scenario: A staff grant still funds an account
+
+- **WHEN** staff grant credits to an account while payment is disabled
+- **THEN** the balance rises, the grant is audited, and the account can see it

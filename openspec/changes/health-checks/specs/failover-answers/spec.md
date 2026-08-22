@@ -28,7 +28,7 @@ served again when that node returns to service, without being re-added.
 - **WHEN** a recordset is not marked health-checked
 - **THEN** all its stored values are served regardless of node state
 
-### Requirement: A health-checked recordset is never served empty
+### Requirement: A health-checked recordset is never served empty, and emptiness is judged per address family
 
 When every value of a health-checked recordset would be excluded by node state, the service SHALL
 serve all of its stored values.
@@ -82,3 +82,18 @@ through the same mechanism that distributes any other change to what is served.
 
 - **WHEN** a satellite cannot reach the centre and a failover decision is made
 - **THEN** it continues to serve what it last received until it reconnects
+
+### Requirement: Filtering applies each family's state to that family's recordset
+
+The service SHALL filter an address recordset using the state of the address family that recordset
+carries, and SHALL evaluate the never-empty rule within that recordset alone.
+
+#### Scenario: One family is filtered while the other is not
+
+- **WHEN** a node is unavailable in one address family only
+- **THEN** that family's recordset omits the node's value and the other family's recordset is unchanged
+
+#### Scenario: A family whose values all fail is served in full
+
+- **WHEN** every value of one address family fails while the other family remains healthy
+- **THEN** the failing family's recordset is served in full rather than empty, and the condition is reported

@@ -105,3 +105,35 @@ A satellite SHALL NOT be required to retain a batch it cannot deliver.
 
 - **WHEN** a satellite cannot deliver a batch
 - **THEN** it may discard it, and nothing is recorded for it
+
+### Requirement: A blocked account is distributed as one event that overrides nested state
+
+The distribution stream SHALL carry the owning account of every zone, and SHALL carry a suspension
+state for an account as a single event. A satellite receiving it SHALL re-render its replica from
+that event alone.
+
+An account suspension SHALL override the enabled state of every zone, recordset and check belonging
+to that account without altering any of them, so that lifting the suspension restores the state that
+existed beforehand.
+
+The suspension SHALL carry its reason. A suspension for abuse SHALL cause the satellite to cease
+being authoritative for that account's zones and to refuse queries for them. A suspension arising
+from an exhausted balance SHALL NOT by itself change what is answered.
+
+#### Scenario: One event suspends every zone of an account
+
+- **WHEN** an account is suspended at the centre
+- **THEN** a single event is distributed, and each satellite ceases serving that account's zones without receiving a change for any individual zone
+
+#### Scenario: Lifting a suspension restores prior state
+
+- **WHEN** an account whose zones included one the customer had themselves disabled is suspended and later restored
+- **THEN** that zone remains disabled and every other zone is served again
+
+#### Scenario: The reason determines what is answered
+
+- **WHEN** an account is suspended for abuse
+- **THEN** queries for its zones are refused
+
+- **WHEN** an account is suspended for an exhausted balance
+- **THEN** its zones continue to be answered until the terminal state withdraws them

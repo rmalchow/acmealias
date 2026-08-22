@@ -307,3 +307,24 @@ tokens SHALL cease to resolve.
 
 - **WHEN** an account holding outstanding invitations is deleted
 - **THEN** their tokens no longer resolve
+
+### Requirement: A blocked address is refused when the invitation is accepted
+
+The service SHALL check the invited address against the identity blocklist at acceptance, and SHALL
+refuse acceptance while the address is blocked. Issuing an invitation SHALL NOT be refused on that
+basis, so that the outcome is reported to the account rather than silently withheld.
+
+#### Scenario: Acceptance by a blocked address is refused
+
+- **WHEN** an invitation to a blocked address is accepted
+- **THEN** acceptance is refused, no membership is created, and the token is not consumed
+
+#### Scenario: The account is told the address cannot be used
+
+- **WHEN** an invitation whose address is blocked remains outstanding
+- **THEN** the account's outstanding list reports that the address cannot accept
+
+#### Scenario: Issuing is not refused for a blocked address
+
+- **WHEN** an invitation is issued to a blocked address
+- **THEN** issuing succeeds and the refusal happens at acceptance

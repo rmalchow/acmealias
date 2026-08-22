@@ -20,6 +20,16 @@
 - [ ] 3.2 Advance the `SOA` serial on every change to the zone
 - [ ] 3.3 Refuse management operations that would create, change or delete apex `SOA` or `NS`
 - [ ] 3.4 Permit `NS` below the apex, subject to a grant covering the `NS` type
+- [ ] 3.5 Read the fleet's nameserver names from configuration (design R9); refuse startup unless there are at least two names spanning at least two parent domains in two top-level domains
+- [ ] 3.6 Keep every nameserver and zone name in documentation and fixtures illustrative, so no concrete name is depended on before it is chosen
+
+## 3a. Delegation signer pre-flight (design R8)
+
+- [ ] 3a.1 Query the parent for `DS` at the zone name when a zone is added, using the same resolver path as delegation verification
+- [ ] 3a.2 Refuse the zone while a `DS` exists, with a message naming the cause and the remedy
+- [ ] 3a.3 Refuse the zone when the parent cannot be queried, rather than assuming unsigned
+- [ ] 3a.4 Add a periodic re-check over served zones and raise an alert when a `DS` appears
+- [ ] 3a.5 Tests: signed parent refused, unreachable parent refused, unsigned parent accepted, `DS` appearing later alerts
 
 ## 4. Permission enforcement
 

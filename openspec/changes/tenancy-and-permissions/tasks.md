@@ -21,6 +21,12 @@
 - [ ] 2.8 Thread `Scope` through `internal/inventory` and `internal/reporting`
 - [ ] 2.9 Add a test asserting every exported store read takes a `Scope`, so a new query cannot be added without one
 - [ ] 2.10 Add tests that an object of another account is refused as though it did not exist, for read, list, count and write
+- [ ] 2.11 Add the RLS migration (design P20): `ENABLE ROW LEVEL SECURITY` and a `tenant_isolation` policy comparing the materialized `account_id` to `current_setting('app.account_id')` on `load_balancers`, `lb_nodes`, `domains`, `aliases` and `api_keys`; not on `challenges` or `challenge_interactions`
+- [ ] 2.12 Create the `BYPASSRLS` role for cross-account components, granting only the privileges the zone feed, usage aggregation, check ingest, `adminctl` and migrations need
+- [ ] 2.13 Set `app.account_id` with `SET LOCAL` from the `Scope` when a connection is checked out, inside the explicit transaction every scoped query runs in
+- [ ] 2.14 Add a test that a store query with its ownership predicate deliberately removed still returns no row of another account
+- [ ] 2.15 Add a pooler test: borrow a connection for account A, return it, borrow it for account B, assert no residual `app.account_id`; document PgBouncer transaction mode as supported and statement mode as not
+- [ ] 2.16 Verify the challenge benchmarks are unchanged by the transaction wrapper, since `challenges` carries no policy (design P20)
 
 ## 3. Permission model
 

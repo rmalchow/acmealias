@@ -1,3 +1,20 @@
+> **Superseded — archived without being implemented.**
+>
+> This change argued for two things at once: the data model that puts an account above `projects`,
+> and the public edition as a product. Both halves have been taken over in far more detail, and
+> nothing here is being built.
+>
+> - The data-model half — accounts, object-anchored authorization, query confinement — is
+>   `tenancy-and-permissions`, which additionally replaces the four fixed roles with a permission
+>   model and adds database-enforced isolation.
+> - The product half — local authentication, signup, credit purchase, abuse limits, the marketing
+>   site — is `public-edition`.
+> - Its plan-based economics are replaced by `metering-and-credits`, which rejects subscriptions
+>   outright.
+>
+> It is archived rather than deleted so the reasoning that led here remains readable. Nothing should
+> be implemented from it, and where it disagrees with the changes named above, they are correct.
+
 ## Why
 
 ### Two products, one service

@@ -113,3 +113,101 @@ session.
 
 - **WHEN** the staff group mapping is changed and the service is restarted while a staff session is open
 - **THEN** the next request derives permissions from the new mapping
+
+### Requirement: Suspending an account is a staff operation that requires no access into it
+
+The service SHALL provide a staff permission and operation that suspends an account, taking the
+account and a reason, without opening an access grant into that account and without consulting any
+tenant grant.
+
+Suspension SHALL mark the account suspended with its reason and the acting staff identity, SHALL
+block the identities whose only membership is that account, SHALL refuse and invalidate their
+sessions, and SHALL add the account's zone names to the zone blocklist.
+
+Suspension SHALL be an override: it SHALL NOT alter the enabled state of any zone, recordset, check or
+credential it suppresses, and lifting it SHALL restore the state that existed beforehand.
+
+#### Scenario: Suspension needs no support access
+
+- **WHEN** an account is suspended
+- **THEN** no access grant is opened and no tenant data is read beyond what the operation reports
+
+#### Scenario: A reason is required
+
+- **WHEN** suspension is requested without a reason
+- **THEN** it is refused
+
+#### Scenario: Lifting a suspension restores prior state
+
+- **WHEN** an account whose customer had disabled one zone is suspended and later restored
+- **THEN** that zone is still disabled and the others are served again
+
+#### Scenario: Blocked identities cannot start again
+
+- **WHEN** a user blocked by a suspension registers a new account or signs in
+- **THEN** the attempt is refused
+
+### Requirement: Suspension reports its collateral before it is applied
+
+Before applying a suspension, the service SHALL report every other account the affected identities
+belong to, and SHALL indicate any such account in which an affected identity is the last remaining
+owner.
+
+#### Scenario: Other memberships are surfaced
+
+- **WHEN** a suspension would block an identity that belongs to another account
+- **THEN** that account is named in the report presented before the suspension is applied
+
+#### Scenario: A last owner is flagged
+
+- **WHEN** an affected identity is the only owner of another account
+- **THEN** the report marks that account as being left without an owner
+
+### Requirement: Blocklists are readable, reasoned, and scoped to where they apply
+
+The service SHALL hold a blocklist of identity entries — canonicalized email addresses and email
+domains — and a blocklist of zone names. Domain and zone entries SHALL match by suffix, and a zone
+entry MAY be a top-level domain.
+
+Each entry SHALL record what it applies to — registration and sign-in, zone creation, or both — and
+SHALL carry a reason and the time it was added. Entries SHALL be readable only through the staff
+plane, and SHALL be retained for a stated period.
+
+Identity entries SHALL be checked at registration, at sign-in, and when an invitation is accepted.
+
+#### Scenario: An entry applies only where it is scoped
+
+- **WHEN** an entry scoped to registration is present and a zone of the same name is created
+- **THEN** the zone is not refused by that entry
+
+#### Scenario: A suffix entry covers subordinate names
+
+- **WHEN** a zone entry names a domain and a zone beneath it is created
+- **THEN** the zone is refused
+
+#### Scenario: A blocked address is refused at invitation acceptance
+
+- **WHEN** an invitation to a blocked address is accepted
+- **THEN** acceptance is refused and the account administrator is told the address cannot be used
+
+#### Scenario: An entry states why it exists
+
+- **WHEN** a blocklist entry is read by staff
+- **THEN** it carries its reason and the time it was added
+
+### Requirement: Adding a blocklist entry does not itself stop existing service
+
+Adding an entry SHALL refuse subsequent registrations, sign-ins or zone creations that it matches, and
+SHALL NOT by itself suspend an existing account or withdraw an existing zone. Matching existing
+objects SHALL be flagged for review, and enforcing an entry against one SHALL be a separate explicit
+action.
+
+#### Scenario: An existing zone keeps serving
+
+- **WHEN** an entry is added that matches a zone already being served
+- **THEN** that zone continues to be served and is flagged for review
+
+#### Scenario: A new zone matching the entry is refused
+
+- **WHEN** a zone matching an entry is created after the entry is added
+- **THEN** it is refused

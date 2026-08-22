@@ -68,6 +68,55 @@ The number required to return a node to service SHALL be greater than one.
 - **WHEN** the configured number of consecutive cycles agree a node is unreachable
 - **THEN** it is marked unavailable
 
+### Requirement: State is held per address family
+
+A node's availability SHALL be determined and held separately for each address family it is reachable
+by. Agreement, consecutive-cycle counting and recovery SHALL be evaluated within one family, and a
+node MAY be available in one family while unavailable in another.
+
+#### Scenario: One family fails while the other is healthy
+
+- **WHEN** a node's addresses of one family fail while those of the other succeed
+- **THEN** the node is unavailable in the failing family and available in the other
+
+#### Scenario: Agreement is counted within a family
+
+- **WHEN** satellites agree that a node is unavailable in one family
+- **THEN** only that family's state changes
+
+### Requirement: A result delivered late is recorded but does not decide
+
+A probe result describing a cycle older than the permitted delivery delay SHALL be retained as
+history and SHALL NOT contribute to agreement, to consecutive-cycle counting, or to any change of
+state.
+
+#### Scenario: A backlog does not change state
+
+- **WHEN** a satellite reconnects and delivers results describing cycles beyond the permitted delay
+- **THEN** those results appear in the history and no node's state changes because of them
+
+#### Scenario: A fresh result still decides
+
+- **WHEN** a result describing the current cycle is delivered
+- **THEN** it contributes to agreement as usual
+
+### Requirement: A family failing across unrelated accounts suppresses withdrawal fleet-wide
+
+The service SHALL detect one address family failing for values belonging to many unrelated accounts
+within a single interval. On detecting it, the service SHALL suppress withdrawal for that family
+across every account, SHALL serve every recordset of that family in full, and SHALL raise an operator
+alert naming the family.
+
+#### Scenario: Correlated failure is treated as ours
+
+- **WHEN** one address family fails simultaneously across unrelated accounts
+- **THEN** no value of that family is withdrawn from any recordset, and an alert is raised
+
+#### Scenario: A single account's family failure is not suppressed
+
+- **WHEN** one address family fails for one account only
+- **THEN** withdrawal proceeds normally for that account
+
 ### Requirement: Probe results are retained as history, separately from current state
 
 The service SHALL retain probe results as an append-only history recording the target, the satellite,
@@ -105,3 +154,8 @@ result SHALL produce no event.
 
 - **WHEN** a satellite discards a batch it cannot deliver
 - **THEN** no event is recorded for its contents
+
+#### Scenario: A late result is not billed
+
+- **WHEN** a result describing a cycle beyond the permitted delivery delay is delivered
+- **THEN** it is recorded as history and no billable event is produced

@@ -45,7 +45,8 @@ Constraints that shaped everything below:
 
 **Non-Goals:**
 
-- DNSSEC signing, key management or rollover.
+- DNSSEC signing, key management or rollover. Refusing to accept a zone that is *already* signed is
+  in scope and is R8 — it is a pre-flight check, not an implementation of DNSSEC.
 - Health-checked recordsets and failover.
 - Zone transfer between centre and satellite.
 - Registrar integration, or secondary DNS for a zone whose primary is elsewhere.
@@ -180,6 +181,85 @@ the worst kind. The `SOA` minimum governs negative caching, which is exactly the
 What a customer needs — delegating a subtree to their own nameservers — is `NS` *below* the apex, which
 is theirs to write, subject to a grant permitting the `NS` type.
 
+### R8. A zone that is already signed is refused at delegation time
+
+DNSSEC is out of scope, and that has one consequence that must be handled here rather than later,
+because it is the worst failure this design can produce and the customer causes it by doing exactly
+what the documentation tells them to.
+
+The sequence: a customer's zone `example.com` is DNSSEC-signed today, wherever it is hosted. Signing
+means their registrar publishes a `DS` record in the parent zone — for `example.com`, in `.com` —
+which is a fingerprint of the key their current provider signs with. Every validating resolver, which
+today is most of them, reads that `DS`, learns "answers for `example.com` must carry a signature that
+matches this key", and refuses any answer that does not.
+
+They then delegate the zone to us. We are not signing anything. So we answer correctly, unsigned, and
+every validating resolver on the internet compares our unsigned answer against the `DS` still sitting
+in `.com`, concludes the zone has been tampered with, and returns `SERVFAIL`. Not a wrong answer — no
+answer. Web, mail and everything else for that domain is hard-down for the majority of the internet,
+within one TTL, and the customer's own resolver may well be one of the minority that still works,
+which makes it maddening to diagnose.
+
+**The decision: when a zone is added, query the parent for a `DS` record at that name, and refuse the
+zone if one exists**, with a message naming the cause and the remedy — remove the `DS` at your
+registrar, wait for the parent's TTL to expire, then add the zone here.
+
+Three things worth being explicit about:
+
+- **This is not DNSSEC work.** It is one query for one record type against the same resolver
+  machinery this change already needs for delegation verification, plus a refusal. It does not touch
+  keys, signing, `NSEC`, or rollover, all of which remain firmly out of scope.
+- **It fails closed on doubt, not open.** If the parent cannot be reached or the query times out, the
+  zone is *not* accepted with a shrug; the customer is told to retry, because a false negative here
+  costs them their domain and a false positive costs them a minute.
+- **It has to be re-checked, not only checked once.** A customer can add a zone here first and add a
+  `DS` at their registrar afterwards — enabling DNSSEC at a provider they have not finished leaving.
+  So the check also runs periodically for served zones, and a `DS` appearing on a zone we serve
+  unsigned raises an alert on the zone rather than silently continuing.
+
+**Rejected: warning instead of refusing.** A warning in a console someone has already closed does not
+prevent the outage, and the outage is total.
+
+**Rejected: accepting the zone and serving `REFUSED` until the `DS` is gone.** Indistinguishable from
+a broken delegation, and it makes us the visible cause of an outage we were trying to prevent.
+
+**Rejected: deferring the check until DNSSEC signing exists.** The check is what makes deferring
+DNSSEC *safe*. Shipping the product without it means the first customer with a signed zone discovers
+the gap by taking their own domain off the internet.
+
+### R9. The fleet's nameserver names are load-bearing, and their registration is a single point of failure
+
+R6 generates apex `NS` records "from the fleet's identity". That identity — the hostnames customers
+put in their registrar's delegation — is the most irreversible decision in this change, and it is not
+a naming preference.
+
+Once a hundred zones are delegated to `ns1.example.net` and `ns2.example.net`, those names are
+permanent in a way nothing else here is. Changing them means a coordinated change at a hundred
+registrars, performed by a hundred customers, each of whom must be persuaded to do it, with the old
+names answering throughout. There is no migration that a small operator completes.
+
+What follows is a constraint rather than a name:
+
+- **At least two nameserver names**, which every registry requires anyway.
+- **Spread across at least two parent domains, in at least two different top-level domains,
+  registered at two different registrars.** The failure this prevents is one expired registration,
+  one registrar dispute, one registry-level suspension, or one compromised registrar account taking
+  *every customer's DNS down at once* — because every delegation points into the same parent. It is
+  the only mitigation available to an operator who cannot run their own anycast, and it costs the
+  price of a second domain.
+- **Registry lock and auto-renew on both**, with renewal reminders held by a person, not only by the
+  registrar's mail.
+- **Glue records** at the parent for any nameserver name that lives inside a domain we ourselves
+  serve, since otherwise resolving the nameserver requires asking the nameserver.
+
+The concrete names are not decided in this change. Every name appearing in these documents —
+`acme.example.net`, `ns1.example.net` — is illustrative, and the eventual names are configuration
+read by the apex generator in R6, not constants.
+
+**Rejected: one domain with `ns1`/`ns2`/`ns3` under it.** The common arrangement, and the reason it is
+common is that large operators mitigate the shared-parent risk with contracts and registry locks and
+staff. At this size the second domain is cheaper than the mitigation.
+
 ### R7. One answering path for challenge TXT and customer records
 
 The challenge alias labels do not get a separate mechanism. They become recordsets in the served
@@ -244,6 +324,10 @@ challenge acceptance suite, which must pass unchanged before anything is delegat
   that cannot be distributed in one event.
 - **Does a customer import an existing zone, and how?** Zone-file import is the obvious onboarding
   path and is not specified here.
+- **How often is the `DS` re-check run for served zones (R8), and what does it do beyond alerting?**
+  Daily is the obvious cadence. Whether a `DS` appearing on a served zone should eventually suspend
+  the zone — trading a deliberate outage for an accidental one — is deliberately left open until
+  there is an operator to answer the alert.
 - **Where does the challenge zone's own delegation live** once the fleet serves many zones — is it a
   zone row like any other, or configuration? Treating it as a row is more uniform and makes it
   visible in a way configuration is not.

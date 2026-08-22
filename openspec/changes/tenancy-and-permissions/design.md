@@ -31,8 +31,12 @@ Constraints that shaped everything below:
    name, no account visible anywhere.
 2. **The challenge path must not get slower.** `POST /present` is on a certificate issuance critical
    path and already does an alias lookup and a zone-view refresh. Authorization must add no query.
-3. **A forgotten scope must not compile.** The failure mode being designed against is a new query
-   written without a tenant filter, and conventions do not survive that.
+3. **A forgotten scope must not compile, and a mis-aimed one must not return rows.** The failure
+   mode being designed against is a new query written without a tenant filter, and conventions do
+   not survive that. Making `Scope` a parameter covers the first half — a store method that omits it
+   does not build. It does not cover a *valid* `Scope` pointed at another account's row, which is a
+   property of each query's `WHERE` clause rather than of its signature, nor any read that does not
+   go through the store package at all. P20 puts the second half in the database.
 
 ## Goals / Non-Goals
 
@@ -41,7 +45,8 @@ Constraints that shaped everything below:
 - Authorization that takes an object, expressive enough for per-project API keys and per-name DNS
   record grants, with roles the customer defines rather than four the code defines.
 - Tenant isolation that does not depend on the permission evaluator being correct — two independent
-  mechanisms, the outer one structural.
+  mechanisms, the outer one structural, and the outer one enforced by the database rather than by
+  the shape of the Go code alone (P20).
 - A migration that is reversible and that runs while the only data belongs to us.
 - No regression on the DNS or challenge answering path.
 
@@ -50,9 +55,9 @@ Constraints that shaped everything below:
 - The staff/administrative plane. Acting inside an account without being a member of it is a
   separate authorization system in a separate change.
 - Storing zones or records. The `dns_record` selector is designed here; nothing writes one yet.
-- Local accounts, signup, billing, editions, marketing. Those stay in
-  `add-accounts-and-public-edition`.
-- Postgres row-level security. Still wanted as defence in depth; still deferred.
+- Local accounts, signup, billing, editions, marketing. Those stay in `public-edition`.
+- DNSSEC, zone storage, satellites. Named here only because P20's bypass role is what the jobs in
+  those changes will connect as.
 
 ## Decisions
 
@@ -166,6 +171,122 @@ of invisible objects.
 **Rejected: materializing deeper chains speculatively.** Only ancestor types a grant may name earn a
 column. Adding one for an object type that cannot anchor a grant buys nothing and costs a composite key
 on every insert.
+
+### P20. Row-level security is the second half of tenant isolation, and `P2` already paid for it
+
+`Scope` is a Go parameter. That gets one guarantee and not the one the earlier draft claimed.
+
+**What it does guarantee.** A new store method written without a `Scope` argument does not compile,
+and a wrongly-scoped *write* cannot produce a row whose ownership disagrees with its parent, because
+of P2's composite foreign keys.
+
+**What it does not.** Consider a handler for `GET /api/v1/accounts/acme/load-balancers/{id}`. It
+builds a `Scope` from the caller's membership — account `acme`, correct, unforgeable, exactly as
+designed — and calls `store.LoadBalancer(ctx, scope, id)` with the `id` from the path. If that `id`
+belongs to another account, whether the caller sees the row depends entirely on whether this
+particular method's SQL remembered its second predicate:
+
+```sql
+SELECT * FROM load_balancers
+ WHERE id = $2
+   AND account_id = $1   -- omit this line and it still compiles, and returns the other account's row
+```
+
+The compiler sees `scope` being passed. It cannot see whether the SQL used it. So the fence is
+really "every store method's SQL is correct", upheld by review.
+
+There is a second gap with a larger blast radius: **code that legitimately reads across accounts and
+therefore cannot take a `Scope` at all.** By the end of this design's sequence that includes the
+satellite feed builder in `satellite-sync`, the zone-time tick job in `metering-and-credits`, the
+check-report ingest path in `health-checks`, every migration, and `internal/adminctl` — which its own
+documentation calls *"the surface with the most authority, not the least."* The satellite feed is the
+one that matters most, because a partitioning bug there does not leak a row into an API response; it
+ships one account's zone to a satellite, which then answers the internet with it.
+
+**The decision: enable Postgres row-level security on every table that carries `account_id`, with the
+tenant read from a per-connection setting.**
+
+```sql
+ALTER TABLE load_balancers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON load_balancers
+  USING (account_id = current_setting('app.account_id')::uuid);
+```
+
+`current_setting('app.account_id')` reads a variable set on the connection. The single place that
+already produces a `Scope` sets it when the connection is checked out:
+
+```go
+// inside the transaction the scoped query runs in
+tx.Exec(ctx, "SET LOCAL app.account_id = $1", scope.AccountID())
+```
+
+Now the broken query above returns nothing, not because the Go code was right but because the
+database refused. Isolation stops being a property of every query and becomes a property of every
+table.
+
+**This is cheap only because of P2.** A policy can hold any boolean expression, including a join to
+the parent:
+
+```sql
+CREATE POLICY tenant_isolation ON lb_nodes USING (
+  EXISTS (SELECT 1 FROM load_balancers lb JOIN projects p ON p.id = lb.project_id
+           WHERE lb.id = lb_nodes.load_balancer_id
+             AND p.account_id = current_setting('app.account_id')::uuid));
+```
+
+and that form is a trap. A subquery inside a policy is evaluated *as the querying user*, so the
+policies on `load_balancers` and `projects` apply inside it, and Postgres can refuse the whole query
+with `infinite recursion detected in policy for relation "load_balancers"`. The usual escape is to
+hide the lookup in a `SECURITY DEFINER` function owned by a role that bypasses RLS — which puts the
+isolation rule inside a function that deliberately ignores isolation. It is also slow: the predicate
+is evaluated against every row the plan touches, before the query's own selective `WHERE` gets a
+chance, which is precisely the cost P2 identified as *"every index that should lead with the tenant
+cannot."*
+
+P2 already put `account_id` on the row and made it unforgeable, so none of that applies: every policy
+is a plain column comparison against the same tenant-leading index the design already wanted. The
+denormalization that made `Scope` cheap makes RLS cheap. That is not a coincidence — both mechanisms
+want the same thing, the tenant on the row.
+
+**`challenges` and `challenge_interactions` are a deliberate exception.** P2 leaves them without an
+`account_id`, because they reach the account through the alias and load balancer they already
+reference. They therefore get no policy, and the join form is not used for them. Three reasons, in
+order of weight: a challenge row is only ever reached through an alias that was itself fetched under
+a `Scope`, so the fence sits one level up rather than absent; `POST /present` is on a certificate
+issuance critical path and constraint 2 forbids making it slower; and the alternative is exactly the
+`SECURITY DEFINER` helper described above, which is the one construction that pays both costs at
+once. This exception is written down here so that a later reader finds a decision rather than an
+oversight.
+
+**Cross-account jobs connect as a role with `BYPASSRLS`.** With policies in place they would
+otherwise see nothing, which is the point: the set of code that can read across tenants stops being
+"whatever does not happen to go through the store package" and becomes a short list of components
+that explicitly asked for the privilege, greppable by the role name in their connection string. A
+future author adding a cross-account query has to reach for it consciously.
+
+**The failure mode to test first is the connection pool.** `SET LOCAL` is scoped to a transaction
+and discarded at commit, so it cannot survive into the next borrower of that connection — but only if
+the scoped query genuinely runs inside an explicit transaction. A plain `SET` outside one, on a
+pooled connection, leaves account `acme`'s tenant setting on a connection that then serves a request
+for another account: the same class of bug this decision exists to prevent, arriving by a new route.
+So every scoped query runs in a transaction, and the pooler is verified early — pgx's own pool and
+PgBouncer in transaction mode are both fine, PgBouncer in statement mode is not.
+
+**Rejected: `Scope` alone, with the design text corrected.** The cheapest option, and it was the
+previous position ("still wanted as defence in depth; still deferred"). Rejected because it leaves
+the satellite feed — the one path that can publish another account's data to the internet — with no
+mechanism in front of it at all.
+
+**Rejected: `Scope` alone plus cross-tenant tests.** A fixture with two accounts, and an assertion
+per store method that account `acme`'s `Scope` cannot reach account `globex`'s row. This is a genuine
+improvement and catches the missing-`WHERE` bug, so it is kept as a task regardless. It is not
+sufficient on its own: it tests the store package, and the exposure is outside it.
+
+**Rejected: doing this after the first customers arrive.** RLS on an empty database is a migration.
+RLS on a live one is a change to what running queries return, applied to tables people are reading,
+with no safe way to rehearse the failure. The whole argument for sequencing this change first is that
+its data is still only ours.
 
 ### P13. Reads are ACL-gated in the query, and one function serves every read of an existing object
 
@@ -448,6 +569,20 @@ any account the user belongs to — losing the blast-radius property for nothing
 - **A new store query forgets its `Scope`** → `Scope` is a parameter, not a convention, so omission
   does not compile; the composite foreign keys of P2 mean a wrongly-scoped *write* cannot even
   produce a row whose ownership disagrees.
+- **A store query carries a valid `Scope` but omits the tenant predicate in its SQL** → the RLS
+  policy of P20 applies the predicate at the table, so the query returns nothing; cross-tenant tests
+  over every store method catch it in CI as well.
+- **A read that never goes through the store package — the satellite feed builder, the zone-time
+  tick, check ingest, `adminctl`, a migration — crosses accounts** → those connect as the `BYPASSRLS`
+  role by name, which makes the set of cross-tenant readers enumerable and reviewable rather than
+  implicit. Everything else sees policies.
+- **The tenant setting leaks between pooled connections** → `SET LOCAL` inside the explicit
+  transaction the scoped query already runs in, discarded at commit; a pooler test asserting that a
+  connection returned to the pool and re-borrowed carries no tenant setting; PgBouncer statement mode
+  documented as unsupported.
+- **`challenges` and `challenge_interactions` have no policy** → accepted and reasoned in P20: they
+  are reachable only through an alias fetched under a `Scope`, and the alternative costs both the
+  challenge hot path and a `SECURITY DEFINER` bypass.
 - **Custom roles let an account build something incomprehensible** → the console shows effective
   permissions per object rather than only the grant list; `ADMIN` is uneditable, so there is always a
   way back.
@@ -476,10 +611,17 @@ any account the user belongs to — losing the blast-radius property for nothing
    editions).
 7. For every `api_keys` row, insert `[load_balancer, <load_balancer_id>, challenge.publish]`; then
    drop `api_keys.load_balancer_id`.
-8. Regenerate `internal/store/schema.sql` via the golden test.
+8. Create the `BYPASSRLS` role the cross-account jobs connect as; grant it the privileges those
+   jobs need and nothing more.
+9. `ENABLE ROW LEVEL SECURITY` and create the `tenant_isolation` policy on `load_balancers`,
+   `lb_nodes`, `domains`, `aliases` and `api_keys`. Not on `challenges` or
+   `challenge_interactions` (P20).
+10. Regenerate `internal/store/schema.sql` via the golden test.
 
 **Rollback**: steps are reversible in reverse order; the only lossy step is 7, which is recoverable
-because the dropped column's value is reconstructible from the grant it created.
+because the dropped column's value is reconstructible from the grant it created. Steps 8 and 9 are
+`DROP POLICY` / `DISABLE ROW LEVEL SECURITY`, which restore exactly the previous behaviour, since
+`Scope` is doing the filtering either way.
 
 ## Open Questions
 
@@ -491,6 +633,7 @@ because the dropped column's value is reconstructible from the grant it created.
 - **Should the internal edition expose the role editor at all?** Its four seeded roles are exactly
   what its operators need, and hiding the editor keeps constraint 1 ("no observable change") strictly
   true. Leaning: seed them, show the editor, change nothing by default.
-- **Row-level security as defence in depth.** Deferred again, but P2's materialized `account_id`
-  makes it dramatically easier than E3 assumed — a policy on a real column rather than one requiring
-  a join.
+- **Should the cross-account jobs share one `BYPASSRLS` role or hold one each?** One role is
+  simpler and is what the migration creates. One role per job — `svc_satellite_feed`,
+  `svc_metering` — would make an audit of who read what across tenants sharper, at the cost of more
+  credentials to rotate. Leaning: one role now, split if the list grows past a handful.

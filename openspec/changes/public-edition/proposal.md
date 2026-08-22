@@ -134,6 +134,47 @@ commercial cadence for commercial reasons, it must serve people who have no acco
 and a copy change must never require redeploying a DNS service. Static site, its own pipeline, its
 own domain; the only coupling is a link into the public edition's registration route.
 
+### The first customers arrive by invitation, and the signup route is switched off at the server
+
+Everything above describes a stranger finding a marketing page and being productive within minutes.
+That is what the public edition is for, and it is not what the first months look like. The first
+customers are people we know, invited by name, given credits by hand while payment integration does
+not yet exist.
+
+That does not make self-service registration something to build later. It makes it something to
+build now and **switch off**, and the interesting part is where the switch lives.
+
+The tempting version is to hide the "sign up" button. That is not a switch, it is a decoration: the
+route is still on the internet, still reachable by anyone who reads the JavaScript bundle, and still
+creates accounts when called. So the check goes in the **handler** — one configuration value, one
+refusal, close enough to the work that no other entry point can get past it, and covered by a test
+that calls the endpoint directly rather than clicking through the console.
+
+Keeping the code present and inert has a second benefit beyond honesty about the boundary: the path
+is exercised by tests in both positions, so opening registration one day is a configuration change
+rather than the first time that code has ever run against a real request.
+
+The same applies to buying credits. The purchase endpoints exist and refuse while payment is
+disabled, and the only way a balance rises in the meantime is the audited staff credit grant that
+`staff-plane` already specifies for wrongful suspensions and payments in flight. The rule this
+proposal cares most about survives intact: nothing inside a customer's own account can set a balance.
+
+Meanwhile accounts arrive through `account-invitations`, which is a different route with a different
+flow and is not governed by either switch — an invited person registers by accepting an invitation,
+which is exactly what an invite-only period needs.
+
+### One sentence the marketing site has to contain
+
+`dns-records` defers DNSSEC and, to keep that deferral safe, refuses to host a zone whose registrar
+still publishes a delegation signer. That refusal happens at the end of onboarding — after someone has
+read the site, registered, and tried to add their domain.
+
+So the capability page says it before any of that: **DNSSEC is not currently supported, and a domain
+that is signed today must have its delegation signer removed at the registrar before it can be hosted
+here.** Every provider a buyer is comparing us with gives DNSSEC away for free, so the gap is going to
+be noticed regardless. Saying it plainly costs a sale occasionally; being caught not saying it costs
+the trust that is most of what a DNS customer is buying.
+
 ### Not in scope
 
 - **Anything about tenancy, permissions, roles or query confinement.** All of it belongs to
@@ -144,6 +185,8 @@ own domain; the only coupling is a link into the public edition's registration r
   *through* an invitation link.
 - **Certificate issuance, storage or distribution.** Unchanged: we answer challenges.
 - **Social sign-in, SSO for public customers, SCIM.** The identity seam makes them additive.
+- **Choosing when to open self-registration.** The switch is specified here; the decision to turn it
+  on is commercial.
 
 ## What this change no longer contains
 

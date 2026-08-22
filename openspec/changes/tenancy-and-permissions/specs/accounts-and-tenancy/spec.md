@@ -48,6 +48,38 @@ holds.
 - **WHEN** an operation is evaluated whose permission check would permit it
 - **THEN** the query is still confined to the account it was evaluated against
 
+### Requirement: Confinement is enforced by the database, not only by the query
+
+Every table carrying a materialized owning account SHALL have a database policy restricting rows to
+the account named by a per-connection setting, and that setting SHALL be established by the same
+mechanism that produces the confinement value for the request. A query that omits the ownership
+predicate SHALL still return no row of another account.
+
+The setting SHALL be scoped to the transaction in which the query runs, so that a connection
+returned to a pool carries no residual account.
+
+Components that must read across accounts — zone distribution, usage aggregation, check ingestion,
+command-line administration and migrations — SHALL connect as a distinct database role exempt from
+the policy, and no other component SHALL use that role.
+
+Records of challenge activity SHALL be exempt from the policy, being reachable only through an alias
+that is itself confined.
+
+#### Scenario: A query missing its ownership predicate still returns nothing
+
+- **WHEN** a read is executed for one account against a table carrying an owning account, without an ownership predicate in the query itself
+- **THEN** no row belonging to another account is returned
+
+#### Scenario: The account setting does not survive a pooled connection
+
+- **WHEN** a connection used for one account's request is returned to the pool and re-used for another account's request
+- **THEN** the second request observes only its own account
+
+#### Scenario: A cross-account component uses a named exempt role
+
+- **WHEN** a component that must read across accounts connects to the database
+- **THEN** it authenticates as the exempt role, and a component connecting as the ordinary role observes the policy
+
 ### Requirement: A query cannot be issued without naming an account
 
 The service SHALL require every inventory query to carry the account it is confined to, in a form

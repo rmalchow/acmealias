@@ -61,3 +61,14 @@
 - [ ] 9.2 Document the never-empty rule and why the check system fails open
 - [ ] 9.3 Document the difference between these checks and the advisory checks in `internal/resolvercheck`
 - [ ] 9.4 Document the certificate observation limitation for servers offering different certificates per server name
+
+## 7. Address families and late reports
+
+- [ ] 7.1 Key node state by `(node, address family)` throughout: quorum, hysteresis, and the serve-time filter (design H10)
+- [ ] 7.2 Apply the IPv4 state to `A` recordsets and the IPv6 state to `AAAA` recordsets
+- [ ] 7.3 Evaluate the never-empty rule within one recordset, so a family whose values all fail serves in full
+- [ ] 7.4 Add a test for the empty-`AAAA`-beside-healthy-`A` case, asserting the family serves in full
+- [ ] 7.5 Detect one family failing across unrelated accounts within an interval; suppress withdrawal for that family fleet-wide and alert (design H10)
+- [ ] 7.6 Mark results describing cycles older than the permitted delay as late; write them to history and exclude them from quorum and hysteresis (design H11)
+- [ ] 7.7 Emit no billable event for a late result
+- [ ] 7.8 Test that a reconnecting satellite's backlog changes no state and produces no deduction

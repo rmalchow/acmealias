@@ -175,6 +175,24 @@ Invitations expire, are revocable, are re-sendable (which invalidates the previo
 if the role they name has been deleted, and are rate limited per account and per invited address. Each
 of those is specified, and the reasoning is in the design document rather than here.
 
+### This is the entry path while self-registration is closed
+
+`public-edition` specifies a switch that turns self-service registration off at the server, and the
+first months of the product run with it off: the first customers are people we know, invited by name.
+That makes this change the *only* way a person becomes a user during that period, which raises its
+priority relative to everything downstream of it, and adds one interaction worth naming here.
+
+`staff-plane` keeps a blocklist of email addresses belonging to people who have abused the service.
+An invitation to a blocked address is checked when the invitation is **accepted**, not when it is
+issued. Issuing succeeds; acceptance is refused; the account's outstanding list says the address
+cannot accept.
+
+That ordering is deliberate. Refusing at issue would tell whoever is inviting that a particular
+address is on our blocklist — information about a third party that an account administrator has no
+business receiving from us. Refusing at acceptance keeps the fact where it belongs, while still
+giving the administrator a plain answer about why nobody ever joined, rather than an invitation that
+silently disappears.
+
 ### Not in scope
 
 - **Several verified addresses per user.** The obvious relief for the friction above, and a change of

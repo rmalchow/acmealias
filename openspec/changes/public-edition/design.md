@@ -178,6 +178,63 @@ overdraft mechanism with it. Rejected because it puts a third-party payment call
 metered activity, so a provider outage becomes a service outage, and because prepayment is what
 makes the balance a number the customer controls rather than a bill they discover.
 
+### U9. Self-registration is a configuration switch, and the switch is enforced on the server
+
+The first customers are people we know, invited by name. Self-service registration is what the
+product needs when strangers arrive, and that is later. The question is what to do with the
+registration routes in the meantime.
+
+**They exist, and they are inert.** `POST /api/v1/register` and the account-creation route are
+present in the running binary and answer a single refusal — "registration is not open" — whenever
+their configuration switch is off. They are not compiled out, not hidden behind a feature-flagged
+router, not merely absent from the console's navigation.
+
+The reasoning is about where the enforcement lives. A route removed from the user interface is not
+removed from the internet: it is discoverable by anyone reading the JavaScript bundle, and it works.
+So the decision is not *whether the route is visible* but *whether the server does the thing*, and
+that must be a check in the handler, close enough to the work that no other entry point can reach
+past it. One switch, one check, verified by a test that calls the endpoint directly rather than
+through the console.
+
+Keeping the routes present also keeps them honest: they are exercised by tests in both positions, so
+turning registration on is a configuration change rather than the first time that code path has ever
+run in anger.
+
+The same switch governs whether the marketing site shows a "sign up" call to action at all, and the
+console's registration links follow it. Those are presentation; the handler check is the enforcement.
+
+**While it is off, accounts arrive by invitation.** `account-invitations` is the entry path: an
+operator creates the account and invites an address, and the invited person completes registration
+through the invitation's own flow — which is not the open registration route and is not governed by
+this switch.
+
+**Credits arrive by hand.** With payment integration deferred, the credit purchase flow of U5 is
+likewise configuration-gated, and balances are established by the staff plane's operator credit grant
+— the exception U5 already names, audited and visible to the customer. That keeps U5's central rule
+intact: no interface in the account's own billing screen sets a balance, and every increase traces to
+either a verified provider notification or a recorded staff action.
+
+**Rejected: deleting the routes until they are needed.** It sounds cleaner and it is worse. The code
+would be written under deadline pressure at the moment it first matters, with no test history, and
+the "add signup" change would arrive as a large one rather than a switch.
+
+**Rejected: gating in the console only.** The route would be live and undefended, discoverable by
+anyone who reads the bundle. The interface is not a security boundary.
+
+### U10. The marketing site states that DNSSEC is not supported
+
+`dns-records` defers DNSSEC signing and refuses zones whose parent already publishes a delegation
+signer. That refusal is the safe behaviour, and it means a customer can reach the end of onboarding
+before discovering the limitation — which is exactly the moment not to discover it.
+
+So the capability page says it plainly: **DNSSEC is not currently supported; a domain that is signed
+today must have its delegation signer removed at the registrar before it can be hosted here.** Not
+omitted, not deferred to a support conversation, not phrased as "coming soon" without a date.
+
+The reasoning is commercial rather than technical. Every provider a buyer compares us against offers
+DNSSEC at no charge, so the gap will be noticed. Being caught having omitted it costs more than the
+sale it loses, and a stranger's trust in a DNS provider is most of what they are buying.
+
 ### U6. Protective limits are not credits, and apply in every edition
 
 The original's quotas conflated two things under one name. The product half — how many domains your
@@ -287,6 +344,9 @@ an internal deployment.
   keeps the number of authentication implementations we own at one and deletes every obligation in
   U4. What it costs, and whether it constrains registration in ways the marketing site would object
   to, is not known. This is worth answering *before* building `localauth`, not after.
+- **When does self-registration open?** The switch of U9 exists; the trigger for turning it on — a
+  number of invited customers, a working payment integration, or a date — is a commercial decision
+  and is not made here.
 - **Free tier, or trial only?** A free tier needs U6's limits to be right on day one and invites
   abuse; a time-limited trial needs a card up front and loses "try now" as a frictionless promise. A
   prepaid credit model offers a third option the original did not have — a small starting balance —

@@ -116,6 +116,45 @@ only supposed to be watching.
 A recordset serving all values while all of them fail checks is an alarm-worthy state, and is
 reported as such. It is not, however, a state in which we stop answering.
 
+### H10. Health state is per address family, and so is every rule built on it
+
+A node has an IPv4 address and, increasingly, an IPv6 address. They are reached over different
+transit, through different firewalls, and they fail independently — an IPv6 path breaking while IPv4
+stays healthy is one of the most common partial failures on the internet, and it is invisible to any
+check that treats a node as a single thing.
+
+So the unit of state is **(node, address family)**, not node. `node3` may be up on IPv4 and down on
+IPv6 simultaneously, and that is a normal condition rather than an inconsistency to be resolved.
+Quorum in H2 is counted per family; hysteresis in H5 is counted per family; the recordset filter in
+H9 applies the IPv4 state to the `A` recordset and the IPv6 state to the `AAAA` recordset.
+
+**H3's fail-open rule must be evaluated per family as well, and this is the part that is easy to get
+wrong.** If it were evaluated across both families together, the following happens: our satellites'
+IPv6 transit breaks, all six of a customer's IPv6 addresses fail quorum, the `A` recordset is still
+healthy so "not everything failed" is true, and the `AAAA` recordset is filtered down to nothing.
+The customer's `A` records answer normally, so a dual-stack visitor is fine and nobody notices —
+except IPv6-only clients, who now receive an empty `AAAA` answer for a name that plainly exists, and
+simply cannot reach the site. An empty `AAAA` alongside a healthy `A` is worse than either extreme:
+it is a real outage for a minority, invisible in the aggregate, and caused entirely by our own
+transit.
+
+Evaluated per family, the same event serves the `AAAA` recordset in full, exactly as H3 intends —
+possibly-dead addresses beat certainly-no-addresses — and raises the alarm H3 already describes.
+
+**Correlated failure across accounts is our problem, not theirs.** One family failing for one customer
+is a customer event. The same family failing for *many* customers at once has one overwhelmingly
+likely cause: our own satellites' connectivity for that family. So when a family's failures cross a
+threshold across unrelated accounts within one interval, family-wide withdrawal is suppressed
+globally — every recordset of that family serves in full — and an operator alert is raised naming the
+family and the satellites involved. This is H3's reasoning applied one level up: the shared dependency
+is ours, and monitoring must not take down what it is only watching, at fleet scale as well as at
+recordset scale.
+
+**Cost, stated plainly.** This doubles the probe volume, and `metering-and-credits` bills what the
+customer configured rather than what our quorum multiplies it into, so the doubling lands on us. It is
+the correct place for it: the customer asked for a dual-stack node to be checked, not for one probe
+per family per satellite.
+
 ### H4. The time to live dominates, so choose it with the interval
 
 The apparent cost of central decision-making is latency: report interval, then decision, then push.
@@ -201,6 +240,34 @@ advance a hysteresis counter past its threshold.
 So the centre records results keyed such that re-delivery is a no-op, and quorum counts **distinct
 satellites**, not reports — a satellite reporting the same cycle twice contributes one opinion.
 
+### H11. A report that arrives late is history, not evidence
+
+A satellite that could not reach the centre keeps probing. When it reconnects it has a backlog, and
+what to do with that backlog has three parts, which are decided differently.
+
+**Serving, while disconnected, is frozen.** H1 already settles this: satellites probe and the centre
+decides, so with the centre unreachable there is nobody to change a recordset and every satellite
+continues to serve the last state it was pushed. That is the intended behaviour, not a degradation to
+be worked around.
+
+**Backlogged results are recorded, and excluded from quorum.** A satellite reconnecting after four
+hours delivers 480 cycles' worth of opinions about a node. Feeding those into H2 and H5 means running
+quorum and hysteresis *over the past*: the backlog can supply the majority that ejects a node which
+recovered two hours ago, and it is precisely the hazard H8 identifies — a re-delivered or delayed
+report pushing a counter past its threshold. So late results are written to the history of H7, where
+they answer "when did this start" and populate the status display, and they are marked such that the
+decision path ignores them. Only fresh reports — those within one interval of the cycle they describe
+— count towards quorum.
+
+**Backlogged results are not billed.** `metering-and-credits` bills checks on delivery. A four-hour
+backlog arriving at once would bill four hours of checks in a single moment, which can push an account
+into suspension because of *our* outage. Late results are therefore free. The customer gets four hours
+of unbilled checking; the alternative is a suspension caused by our own downtime, and there is no
+version of that argument we want to have with a customer.
+
+The asymmetry is deliberate and worth stating in one line: **a late result is good enough to look at
+and not good enough to act on or charge for.**
+
 ### H9. Health-checked recordsets are filtered at serve time from state, not rewritten
 
 A health-checked recordset stores its full set of values. What is served is those values filtered by
@@ -261,6 +328,12 @@ inert until enabled per recordset; disabling it restores unfiltered serving imme
   bounding it.
 - **How long is certificate history kept?** Longer than reachability history, since its value is a
   trend measured in weeks — but a number is wanted.
+- **What threshold makes a family-wide failure "correlated" (H10)?** Some fraction of unrelated
+  accounts showing the same family failing within one interval. The fraction wants real data; the
+  suppression rule does not depend on the number.
+- **How long may a result be delayed and still count as fresh (H11)?** One interval is the working
+  answer, which is the shortest defensible one. A satellite that is merely slow rather than
+  disconnected should not silently lose its vote.
 - **Should an all-down recordset be reported to the customer as an incident?** It is our strongest
   signal that something is badly wrong, and it is exactly when a customer most wants to be told; but
   it is also the signal most likely to be caused by our own checking being broken.

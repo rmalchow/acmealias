@@ -54,3 +54,17 @@
 - [ ] 8.1 Document the two planes, what each authorizes, and why staff never call the tenant evaluator
 - [ ] 8.2 Document the access grant lifecycle and what an account sees
 - [ ] 8.3 Document the staff permission vocabulary and its group settings
+
+## 6. Suspension and blocklists
+
+- [ ] 6.1 Add the `platform.suspend` staff permission and the suspend/restore routes, taking an account and a reason, requiring no access grant (design S10)
+- [ ] 6.2 Store suspension as account state carrying reason and acting staff identity; distribute it as the single event `satellite-sync` Y10 specifies
+- [ ] 6.3 Block identities whose only membership is the suspended account; refuse new sessions and invalidate existing ones
+- [ ] 6.4 Add the account's zone names to the zone blocklist on suspension
+- [ ] 6.5 Report collateral before applying: other accounts of affected identities, flagging any where one is the last owner (design S11)
+- [ ] 6.6 Create the identity blocklist (canonicalized address entries and suffix-matched domain entries) and the zone blocklist (suffix-matched, may be a top-level domain), both plain text with reason, timestamp and `applies_to` (design S12)
+- [ ] 6.7 Check identity entries at registration, sign-in and invitation acceptance; refuse acceptance with a message naming the address
+- [ ] 6.8 Make entry addition non-retroactive: flag matching existing accounts and zones for review, with enforcement as a separate action
+- [ ] 6.9 Restrict blocklist reads to the staff plane and give entries a stated retention
+- [ ] 6.10 Tests: suspend/restore round-trips a customer-disabled zone as disabled; a suspension opens no access grant; a suffix entry catches a subdomain; adding an entry serves an existing matching zone unchanged
+- [ ] 6.11 Document the published abuse response commitment of twelve hours alongside the operation

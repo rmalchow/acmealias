@@ -71,3 +71,17 @@
 - [ ] 10.2 Document why the challenge path is charged per publish and never per query
 - [ ] 10.3 Document the lifecycle, the overdraft rule, and why the terminal state refuses rather than denies
 - [ ] 10.4 Document the relationship between this ledger and the existing per-project usage reporting
+
+## 8. Derived check billing, retention and backfill
+
+- [ ] 8.1 Record probe results in their own table, partitioned by month, dropped at ninety days (design M11); keep them out of `events` and `deductions`
+- [ ] 8.2 Write no deduction for an event type priced at zero
+- [ ] 8.3 Emit `node.checked` from the tick job as a count over an interval, one row per account per period per configured node
+- [ ] 8.4 Assert in a test that the billable quantity is unchanged when satellite count, interval or address-family count changes
+- [ ] 8.5 Backfill `zone.active` and `node.checked` for periods the tick job missed, idempotently by period key (design M12)
+- [ ] 8.6 Produce no billable event for a probe result delivered beyond the permitted delay
+- [ ] 8.7 Test that a four-hour backlog delivered at once moves no balance and suspends nobody
+
+## 9. No tier column
+
+- [ ] 9.1 Confirm by test that no capability is gated by anything other than the balance and the permission model (design M10) — creating a zone, enabling checks and publishing a challenge each require credits and a grant, and nothing else

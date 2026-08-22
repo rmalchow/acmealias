@@ -114,9 +114,58 @@ construction — the entire purpose of publishing a record is that strangers can
 **write**: a satellite serving answers nobody authorized. Central signing is the eventual answer to
 that, and shaping for it now is what keeps the answer available.
 
+### Deferring DNSSEC is only safe if we refuse zones that are already signed
+
+There is one way that deferring DNSSEC hurts a customer badly, and it costs about twenty lines to
+close.
+
+A domain that has DNSSEC enabled today has a `DS` record — a "delegation signer", a fingerprint of
+the signing key — published by its registrar in the parent zone. For `example.com` that record lives
+in `.com`, and it is an instruction to the whole internet: *answers for this domain must carry a
+signature matching this key, and if they do not, discard them.* Most resolvers people actually use
+follow that instruction.
+
+Now that customer delegates `example.com` to us. We do not sign, because signing is deferred. Our
+answers are correct and unsigned. Every validating resolver compares them against the `DS` still
+sitting in `.com`, concludes the domain has been tampered with, and returns `SERVFAIL` — not a wrong
+answer, no answer at all. Website, mail, everything, hard-down for most of the internet within one
+TTL, caused by a customer following our onboarding instructions exactly.
+
+So this change adds a **pre-flight check, not a feature**: when a zone is added we ask the parent
+whether a `DS` exists for that name, and refuse the zone if one does, telling the customer to remove
+it at their registrar and wait for the TTL before trying again. If the parent cannot be reached we
+also refuse, because being wrong in the permissive direction costs them their domain while being
+wrong in the strict direction costs them a retry. And we re-run the check on zones we already serve,
+because a customer can enable DNSSEC at the provider they are midway through leaving.
+
+None of that touches keys, signing, `NSEC`, or rollover. Those stay deferred. The check is what makes
+deferring them safe rather than merely convenient.
+
+### The nameserver names are the one decision here that cannot be undone
+
+Customers delegate to us by typing our nameserver hostnames into their registrar. Once a hundred
+zones point at those names, the names are permanent: changing them means persuading a hundred
+customers to each edit their delegation, with both sets answering until the last one finishes. That
+is not a migration a small operator ever completes.
+
+The names themselves are not chosen in this change — every name in these documents is illustrative.
+What is decided is the shape they must have, and one requirement in particular that is easy to skip:
+the nameserver names must live in **more than one parent domain, under more than one top-level
+domain, registered at more than one registrar**.
+
+The reason is that every customer's delegation points into those parents. If all of them sit under
+one domain, then one lapsed renewal, one registrar account compromise, one registry suspension or one
+billing dispute takes down DNS for every customer simultaneously — no partial failure, no failover,
+nothing to be done from our side because the failure is above us in the tree. Anycast and a large
+operations team are the usual mitigations and neither is available here. A second domain at a second
+registrar costs perhaps thirty euros a year and is the entire defence.
+
 ### Not in scope
 
 - **DNSSEC itself** — key management, signing, `DS` publication, key rollover. Shaped for, not built.
+  Refusing an already-signed zone *is* in scope, for the reason given above.
+- **Choosing the fleet's nameserver hostnames.** The constraint on them is specified; the names are
+  configuration and are decided outside this change.
 - **Health-checked records and failover.** A recordset whose contents depend on check results is
   `health-checks`.
 - **Zone transfer (AXFR/IXFR) as a distribution mechanism.** `satellite-sync` distributes state; DNS

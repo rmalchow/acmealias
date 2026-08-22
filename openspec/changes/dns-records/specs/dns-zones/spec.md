@@ -73,6 +73,50 @@ Validation SHALL occur when the change is written, and an invalid state SHALL NO
 - **WHEN** a value that is not valid for its record type is written
 - **THEN** the request is refused and nothing is stored
 
+### Requirement: A zone whose parent publishes a delegation signer is refused
+
+The service SHALL query a zone's parent for a delegation signer record at that name when the zone is
+added, and SHALL refuse the zone while one exists. The refusal SHALL state that the domain is
+signed, that the service does not sign, and that the delegation signer must be removed at the
+registrar and its time to live allowed to expire before the zone can be added.
+
+If the parent cannot be queried, the zone SHALL NOT be accepted.
+
+The service SHALL repeat this check periodically for zones it already serves, and SHALL raise an
+alert against a zone for which a delegation signer subsequently appears.
+
+#### Scenario: A signed zone is refused
+
+- **WHEN** a zone is added whose parent publishes a delegation signer for that name
+- **THEN** the zone is not created, and the refusal names the delegation signer as the cause
+
+#### Scenario: An unreachable parent is not treated as unsigned
+
+- **WHEN** the parent cannot be queried for a delegation signer
+- **THEN** the zone is not created, and the caller is told to retry
+
+#### Scenario: A delegation signer appearing later is detected
+
+- **WHEN** a zone already served unsigned acquires a delegation signer at its parent
+- **THEN** the periodic check raises an alert against that zone
+
+### Requirement: The fleet is delegated through names in more than one parent domain
+
+The apex nameserver records SHALL be generated from configuration rather than from constants, and
+the configured set SHALL contain at least two names in at least two distinct parent domains under
+at least two distinct top-level domains. A configuration providing fewer SHALL be refused at
+startup.
+
+#### Scenario: A single-parent nameserver set is refused
+
+- **WHEN** the service starts with nameserver names that all share one parent domain
+- **THEN** startup fails with an error naming the requirement
+
+#### Scenario: Apex delegation reflects the configured names
+
+- **WHEN** a zone is created
+- **THEN** its apex nameserver records are those configured for the fleet
+
 ### Requirement: The apex housekeeping records are maintained by the service
 
 The service SHALL generate and maintain the `SOA` and the apex `NS` records of every zone it serves,

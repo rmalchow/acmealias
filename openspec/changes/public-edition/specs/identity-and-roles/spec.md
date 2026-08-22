@@ -81,3 +81,26 @@ Repeated authentication attempts against one user or from one source SHALL be ra
 
 - **WHEN** authentication is attempted repeatedly against one user or from one source
 - **THEN** further attempts are refused until the limit clears
+
+### Requirement: Self-registration is governed by configuration and refused by the server when closed
+
+The service SHALL expose its registration and account-creation endpoints in every deployment, and
+SHALL refuse them with a stated reason whenever self-registration is not enabled by configuration.
+
+The refusal SHALL be applied by the endpoint itself, and SHALL NOT depend on the interface omitting
+a link. Accepting an invitation SHALL remain possible while self-registration is closed.
+
+#### Scenario: A closed deployment refuses the endpoint directly
+
+- **WHEN** the registration endpoint is called directly while self-registration is disabled
+- **THEN** it refuses with a reason, and no user or account is created
+
+#### Scenario: Invitation acceptance is unaffected
+
+- **WHEN** an invited person completes registration through an invitation while self-registration is disabled
+- **THEN** registration succeeds
+
+#### Scenario: Enabling registration requires no code change
+
+- **WHEN** the configuration enabling self-registration is set
+- **THEN** the same endpoint accepts registrations

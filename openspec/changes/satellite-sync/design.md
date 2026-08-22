@@ -49,9 +49,8 @@ Constraints that shaped everything below:
 **Non-Goals:**
 
 - Real DNS records, health checks, metering ledgers, DNSSEC — each is its own change.
-- Customer-run satellites.
-- Satellite identity and enrolment, which is genuinely unsettled and is left as an open question
-  rather than answered badly.
+- Customer-run satellites. Not deferred: decided against, in Y6.
+- Per-satellite partitioning of the replica. Every satellite holds every zone (Y6).
 
 ## Decisions
 
@@ -179,12 +178,94 @@ A satellite has no owning account and holds no tenant-specific authorization. It
 observed and retired under `platform.admin` from `staff-plane`, and does not appear in any tenant's
 console.
 
+**Every satellite holds every zone.** Partitioning the replica — giving each satellite only the zones
+it is delegated for — is a plausible optimization and is rejected for now on both counts that would
+motivate it. It does not improve the security position, because the reason a full replica is
+acceptable is that DNS records are public data, and that argument does not get stronger by holding
+fewer of them. And it complicates the reconciliation of Y4, which currently compares one position
+against one stream; per-satellite partitions mean per-satellite streams, per-satellite positions, and
+a re-partitioning event whenever the fleet changes shape. It becomes worth doing when a single zone
+set no longer fits comfortably in a satellite's memory, which is a long way off.
+
+**Satellites are ours.** A customer-run satellite — offered for latency, or because a customer wants
+one in their own datacentre — would hold every *other* customer's zone data and would answer the
+internet for them from hardware we do not control. Whatever the disclosure argument above says about
+public data, "an outsider can serve stale or withheld answers for every other customer" is a different
+threat model from the one this design reasons about. It is easier to decide this now than to withdraw
+the option from someone who has been sold it.
+
 The security consequence to state plainly: a satellite holds every tenant's zone data. That is
 tolerable because **DNS records are public data by construction** — the purpose of publishing a record
 is that strangers can read it — and a satellite holds nothing else: no credentials, no billing data,
 no personal data. The threat that matters is a compromised satellite serving *forged* answers, which
 is a write problem, not a read problem, and which `dns-records` addresses by deciding where signing
 happens.
+
+### Y9. Enrolment is a staff-issued single-use token exchanged for a per-satellite credential
+
+This was the one open question in this design, and it is now decided.
+
+**The mechanism.** A member of staff holding `platform.admin` creates a satellite row and receives an
+**enrolment token**: a high-entropy string, shown once, stored only as a hash, with an expiry measured
+in hours. The satellite is configured with that token and the centre's address. On first start it
+calls a single enrolment endpoint, presenting the token; the centre verifies it, marks it **used and
+permanently invalid**, generates a per-satellite credential, and returns it. The satellite persists
+that credential locally and uses it for every subsequent sync connection and report. The token is
+never valid again — not for a second satellite, not for a re-install, not for the same satellite after
+a disk wipe. Re-enrolling means staff issuing a new token, which is a deliberate, recorded act.
+
+**Why not the two simpler things.** A long-lived shared secret in every satellite's configuration is
+one value that authenticates the whole fleet: it cannot be rotated without redeploying every
+satellite, one leaked configuration file compromises all of them, and there is no way to revoke a
+single machine. Mutual TLS with a private certificate authority is stronger and is the right answer at
+a larger size, but it means operating a certificate authority — issuance, renewal, revocation lists or
+OCSP, and the consequences of losing the CA key — which is a standing job rather than a feature. The
+token-for-credential exchange sits between them and buys the two properties that actually matter here:
+**per-satellite revocation** (kill one machine from the console without touching the fleet) and **no
+long-lived secret in configuration management** (the token is spent within hours of being issued).
+
+**What it gives you when a satellite is stolen.** Revoke that satellite's credential. Its sync
+connection is closed and will not re-establish; it keeps serving whatever it last held until someone
+removes it from the delegation or its addresses are withdrawn. That is the same bounded outcome Y6
+already describes for a compromised satellite — it can withhold or serve stale answers, it cannot
+forge new ones — but now it can be *stopped* without redeploying every other satellite.
+
+**One credential, both channels.** The sync stream and the report channel share the per-satellite
+credential. They are the same principal, and issuing two credentials to one machine doubles the
+rotation work while halving nothing: a satellite that can be impersonated on one channel is already
+lost. This settles the fourth open question.
+
+### Y10. A blocked account is one event, and the satellite re-renders from it
+
+Suspension arrives from `staff-plane` and `metering-and-credits` as a state on the account, not as a
+rewrite of that account's zones. The distribution stream therefore carries the account identifier on
+every zone, and a single `account.blocked` event is enough for a satellite to re-render.
+
+**The rule: an account-level block overrides every nested `active` flag** — on zones, on recordsets,
+on health checks, on API keys — without changing any of them. That is what makes it an override rather
+than a cascade. Nothing is rewritten on block, so nothing has to be reconstructed on unblock: clearing
+the account state restores exactly the state that existed before, including the zones the customer had
+themselves disabled. A cascade would have to remember what it changed, and would get it wrong the
+first time an unblock followed a customer edit.
+
+**What a blocked zone answers depends on why.** The two triggers are deliberately different:
+
+- **Abuse suspension** withdraws the zone. The satellite stops being authoritative for it and answers
+  `REFUSED`. The domain goes dark, which is the intent — the point of the block is that the zone is
+  serving phishing.
+- **Credit exhaustion** is soft, and does not touch answering at first. The customer's console goes
+  read-only, no new zones can be created, mail is sent, and only the terminal state described in M7 of
+  `metering-and-credits` withdraws the zone.
+
+They share a mechanism and must not share a behaviour: a paying customer whose card expired and a
+phishing operator should not experience the same thing. The suspension state therefore carries its
+reason, and the satellite branches on it.
+
+**Propagation is one sync plus one TTL**, and it is bounded by the same staleness the rest of this
+design has: if the centre is unreachable, the block does not reach the fleet until it returns.
+Accepted rather than worked around — the alternative is a second, hand-edited authority path on each
+satellite, which would drift from the centre and become a way to change what the internet is told
+without a record of who changed it.
 
 ### Y7. One image, satellite selected by configuration
 
@@ -245,11 +326,9 @@ delegation is changed to point at them, and reverting delegation is the rollback
 
 ## Open Questions
 
-- **How does a satellite prove it is ours?** Not settled. The options — an enrolment token exchanged
-  for a credential, mutual TLS with a private certificate authority, a signed hardware or platform
-  identity — differ substantially in how they handle a compromised satellite and how they handle
-  bootstrapping a new one. This must be answered before the sync endpoint is exposed, and it is the
-  one part of this change deliberately left open rather than decided in passing.
+- **How long is an enrolment token valid before it expires unused?** Y9 says hours. The exact
+  number trades an operator's convenience during a slow install against the window in which a leaked
+  token is usable.
 - **How long are deltas retained?** Long enough that a routine restart resumes rather than
   re-snapshots; short enough not to become a second store. A number is wanted once the event rate is
   known.
@@ -257,6 +336,5 @@ delegation is changed to point at them, and reverting delegation is the rollback
   empty view answers NXDOMAIN for names that exist. A satellite must therefore not accept queries
   before its first successful load — which the readiness rule in Y7 implies but which needs stating in
   the startup sequence.
-- **Should the report channel and the sync stream share authentication?** They are separate endpoints
-  with the same principal; whether they share a credential depends on the answer to the enrolment
-  question above.
+- **Is a satellite credential rotated on a schedule, or only on suspicion?** Y9 makes rotation
+  possible per satellite; whether it is routine is an operational question, not a design one.

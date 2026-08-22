@@ -82,3 +82,9 @@
 
 - [ ] 11.1 Document the invitation flow in `docs/`, including why a forwarded link confers nothing
 - [ ] 11.2 Document the mismatched-identity case and its resolution, since it will generate support questions
+
+## 12. Blocklist interaction
+
+- [ ] 12.1 Check the invited address against the identity blocklist at acceptance, not at issue (`staff-plane` design S12)
+- [ ] 12.2 Refuse acceptance without consuming the token, and report the state in the account's outstanding list
+- [ ] 12.3 Test that a blocked address can be invited, cannot accept, and that the invitation remains revocable

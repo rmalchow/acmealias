@@ -27,6 +27,23 @@
 - [ ] 4.4 Batch and post reports; discard an undeliverable batch rather than spooling
 - [ ] 4.5 Track and report applied position and the time it was applied
 
+## 4a. Enrolment and credentials (design Y9)
+
+- [ ] 4a.1 Add satellite registration under `platform.admin`, producing a single-use enrolment token shown once and stored hashed with an expiry
+- [ ] 4a.2 Add the enrolment endpoint: verify the token, mark it permanently used, issue a per-satellite credential, return it once
+- [ ] 4a.3 Authenticate the distribution stream and the report channel with the same per-satellite credential
+- [ ] 4a.4 Add per-satellite revocation that closes an open stream and refuses resumption
+- [ ] 4a.5 Persist the credential on the satellite and use the token only on first start
+- [ ] 4a.6 Tests: token reuse refused, expired token refused, revocation isolates one satellite, both channels accept the credential
+
+## 4b. Account suspension in the stream (design Y10)
+
+- [ ] 4b.1 Carry the owning account on every distributed zone
+- [ ] 4b.2 Emit `account.blocked` / `account.unblocked` as single events carrying the reason
+- [ ] 4b.3 Apply suspension as an override at render time, leaving nested enabled flags untouched
+- [ ] 4b.4 Branch on reason: abuse withdraws the zone and answers `REFUSED`; balance exhaustion does not change answering
+- [ ] 4b.5 Tests: one event suspends every zone; unblock restores a customer-disabled zone as disabled; reason changes the answer
+
 ## 5. Run mode
 
 - [ ] 5.1 Add the satellite run mode to `cmd/acmeservice`, selected by configuration, reported at startup and on readiness
