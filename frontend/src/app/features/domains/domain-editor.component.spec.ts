@@ -20,7 +20,7 @@ describe('DomainEditorComponent', () => {
         provideHttpClientTesting(),
         provideNoopAnimations(),
         provideNzIconsTesting(),
-        { provide: NZ_MODAL_DATA, useValue: { loadBalancerId: 7 } },
+        { provide: NZ_MODAL_DATA, useValue: { loadBalancerId: '00000000-0000-7000-8000-000000000007' } },
         {
           provide: NzModalRef,
           useValue: { close: (v?: boolean) => closed.push(v) },
@@ -51,13 +51,13 @@ describe('DomainEditorComponent', () => {
     fixture.componentInstance.name = ' shop.example.com ';
     fixture.componentInstance.submit();
 
-    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains');
+    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/00000000-0000-7000-8000-000000000007/domains');
     expect(req.request.body).toEqual({ name: 'shop.example.com' });
     req.flush({
-      id: 1,
+      id: '00000000-0000-7000-8000-000000000001',
       name: 'shop.example.com',
       aliasLabel: 'k7m3q9x2r4tv8w1p',
-      domains: [{ id: 1, name: 'shop.example.com' }],
+      domains: [{ id: '00000000-0000-7000-8000-000000000001', name: 'shop.example.com' }],
       warnings: [],
     });
 
@@ -73,8 +73,8 @@ describe('DomainEditorComponent', () => {
 
     fixture.componentInstance.name = 'shop.example.com';
     fixture.componentInstance.submit();
-    http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains').flush({
-      id: 1,
+    http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/00000000-0000-7000-8000-000000000007/domains').flush({
+      id: '00000000-0000-7000-8000-000000000001',
       name: 'shop.example.com',
       aliasLabel: 'k7m3q9x2r4tv8w1p',
       warnings: ['already covered by the wildcard "*.example.com"'],
@@ -124,12 +124,12 @@ describe('DomainEditorComponent', () => {
     const fixture = withName('example.com');
     fixture.componentInstance.submit();
 
-    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains');
+    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/00000000-0000-7000-8000-000000000007/domains');
     expect(req.request.body).toEqual({ name: 'example.com' });
     req.flush({
-      id: 1,
+      id: '00000000-0000-7000-8000-000000000001',
       name: 'example.com',
-      domains: [{ id: 1, name: 'example.com' }],
+      domains: [{ id: '00000000-0000-7000-8000-000000000001', name: 'example.com' }],
       warnings: [],
     });
     expect(closed).toEqual([true]);
@@ -140,18 +140,18 @@ describe('DomainEditorComponent', () => {
     fixture.componentInstance.includeWildcard = true;
     fixture.componentInstance.submit();
 
-    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains');
+    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/00000000-0000-7000-8000-000000000007/domains');
     expect(req.request.body).toEqual({
       name: 'example.com',
       includeWildcard: true,
     });
     req.flush({
-      id: 1,
+      id: '00000000-0000-7000-8000-000000000001',
       name: 'example.com',
       warnings: [],
       domains: [
-        { id: 1, name: 'example.com' },
-        { id: 2, name: '*.example.com' },
+        { id: '00000000-0000-7000-8000-000000000001', name: 'example.com' },
+        { id: '00000000-0000-7000-8000-000000000002', name: '*.example.com' },
       ],
     });
     expect(closed).toEqual([true]);
@@ -164,7 +164,7 @@ describe('DomainEditorComponent', () => {
     fixture.componentInstance.includeWildcard = true;
     fixture.componentInstance.submit();
 
-    http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains').flush(
+    http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/00000000-0000-7000-8000-000000000007/domains').flush(
       {
         message:
           'cannot also add "*.co.uk": invalid dns name: "*.co.uk" would cover the whole public suffix "co.uk"',

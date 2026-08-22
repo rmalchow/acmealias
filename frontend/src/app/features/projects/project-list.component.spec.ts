@@ -10,7 +10,7 @@ import { ProjectListComponent } from './project-list.component';
 import { Project } from '../models';
 
 function project(over: Partial<Project> = {}): Project {
-  return { id: 1, slug: 'shop', name: 'Shop', createdAt: '2026-01-01T00:00:00Z', ...over };
+  return { id: '00000000-0000-7000-8000-000000000001', slug: 'shop', name: 'Shop', createdAt: '2026-01-01T00:00:00Z', permittedActions: [], ...over };
 }
 
 describe('ProjectListComponent', () => {
@@ -53,7 +53,7 @@ describe('ProjectListComponent', () => {
     fixture.detectChanges();
 
     const req = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects');
-    req.flush([project(), project({ id: 2 })]);
+    req.flush([project(), project({ id: '00000000-0000-7000-8000-000000000002' })]);
 
     expect(fixture.componentInstance.total()).toBe(2);
   });

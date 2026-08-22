@@ -187,7 +187,7 @@ import { Interaction } from '../models';
 export class InteractionsPanelComponent implements OnChanges {
   private readonly api = inject(ApiService);
 
-  readonly loadBalancerId = input.required<number>();
+  readonly loadBalancerId = input.required<string>();
 
   readonly interactions = signal<Interaction[]>([]);
   readonly total = signal(0);

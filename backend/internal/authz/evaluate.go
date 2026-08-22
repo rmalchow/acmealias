@@ -166,3 +166,55 @@ func Permitted(s Subject, actions []string, o Object) []string {
 	}
 	return out
 }
+
+// actionsByType is the vocabulary that applies to each kind of object — what it
+// even makes sense to ask about one.
+//
+// It exists so the per-object report (task 7.3) offers a stable, complete
+// answer rather than whatever the caller happened to enumerate. A console that
+// asked about a different set per screen would render different buttons for the
+// same object depending on where you were looking at it from.
+var actionsByType = map[ObjectType][]Action{
+	TypeProject:      {ActionViewInventory, ActionInventoryWrite, ActionProjectAdmin},
+	TypeLoadBalancer: {ActionViewInventory, ActionInventoryWrite, ActionDNSPlan, ActionKeyWrite},
+	TypeNode:         {ActionViewInventory, ActionInventoryWrite},
+	TypeDomain:       {ActionViewInventory, ActionInventoryWrite},
+	TypeAlias:        {ActionViewInventory, ActionInventoryWrite},
+	TypeAPIKey:       {ActionViewInventory, ActionKeyWrite, ActionKeySecretView},
+}
+
+// ActionsFor reports the actions that can be asked about one kind of object.
+func ActionsFor(t ObjectType) []Action { return actionsByType[t] }
+
+// PermittedOn is the per-object report the console renders controls from
+// (task 7.3).
+//
+// Two things about it matter more than what it returns. It is NOT the
+// enforcement point — every request is checked again when it arrives, because a
+// client is not a place to keep a permission — and it accompanies the listing
+// rather than costing a request per row, which is what makes a table of fifty
+// projects one query instead of fifty-one.
+//
+// The subject's grants are already in memory and every object carries its own
+// ancestors (design P3), so this is arithmetic: no query, whatever the size of
+// the page.
+func PermittedOn(s Subject, o Object) []string {
+	candidates := ActionsFor(o.Type)
+	out := make([]string, 0, len(candidates))
+	for _, a := range candidates {
+		permitted := Can(s, string(a), o)
+		// Project administration is governed by MEMBERSHIP of the unrestricted
+		// role, not by a grant (design P14), so the report has to answer for it
+		// the way the handler does. Without this a role holding a wildcard grant
+		// would be told it may create projects, and then refused when it tried —
+		// which is the worst kind of wrong answer, because the user did nothing
+		// wrong and the interface promised.
+		if a == ActionProjectAdmin {
+			permitted = s.Unrestricted
+		}
+		if permitted {
+			out = append(out, string(a))
+		}
+	}
+	return out
+}

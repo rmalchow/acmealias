@@ -9,7 +9,7 @@ import { ChallengeEntry } from '../models';
 
 function entry(over: Partial<ChallengeEntry> = {}): ChallengeEntry {
   return {
-    id: 1,
+    id: '00000000-0000-7000-8000-000000000001',
     aliasLabel: 'alias-1',
     challengeName: '_acme-challenge.shop.example.com',
     value: 'abc',
@@ -57,7 +57,7 @@ describe('ChallengesComponent', () => {
   it('falls back to the row count when X-Total-Count is missing', () => {
     const fixture = TestBed.createComponent(ChallengesComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([entry(), entry({ id: 2 })]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([entry(), entry({ id: '00000000-0000-7000-8000-000000000002' })]);
     expect(fixture.componentInstance.total()).toBe(2);
   });
 

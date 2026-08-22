@@ -25,22 +25,33 @@ import (
 // response built from `model.X` leaks whatever is added to it next. The
 // convenience is naming: the console is TypeScript and reads camelCase.
 
+// PermittedActions accompanies every object the API reports (task 7.3), so a
+// console renders controls from a per-object answer rather than from the
+// caller's role name — which said nothing about WHICH objects, and is the thing
+// the whole change exists to replace.
+//
+// It rides along with the listing rather than costing a request per row: a table
+// of fifty projects stays one query. And it is not the enforcement point. Every
+// request is checked again when it arrives, because a client is not a place to
+// keep a permission.
 type projectView struct {
-	ID            model.ID           `json:"id"`
-	Slug          string             `json:"slug"`
-	Name          string             `json:"name"`
-	CreatedAt     time.Time          `json:"createdAt"`
-	LoadBalancers []loadBalancerView `json:"loadBalancers,omitempty"`
+	ID               model.ID           `json:"id"`
+	Slug             string             `json:"slug"`
+	Name             string             `json:"name"`
+	CreatedAt        time.Time          `json:"createdAt"`
+	PermittedActions []string           `json:"permittedActions"`
+	LoadBalancers    []loadBalancerView `json:"loadBalancers,omitempty"`
 }
 
 type loadBalancerView struct {
-	ID        model.ID     `json:"id"`
-	ProjectID model.ID     `json:"projectId"`
-	Slug      string       `json:"slug"`
-	Name      string       `json:"name"`
-	CreatedAt time.Time    `json:"createdAt"`
-	Nodes     []nodeView   `json:"nodes"`
-	Domains   []domainView `json:"domains,omitempty"`
+	ID               model.ID     `json:"id"`
+	ProjectID        model.ID     `json:"projectId"`
+	Slug             string       `json:"slug"`
+	Name             string       `json:"name"`
+	CreatedAt        time.Time    `json:"createdAt"`
+	PermittedActions []string     `json:"permittedActions"`
+	Nodes            []nodeView   `json:"nodes"`
+	Domains          []domainView `json:"domains,omitempty"`
 }
 
 type nodeView struct {
@@ -75,18 +86,25 @@ func toAlias(a model.Alias) aliasView {
 	return aliasView{ID: a.ID, LoadBalancerID: a.LoadBalancerID, Label: a.Label, ChallengeFQDN: a.ChallengeFQDN}
 }
 
-func toProject(p model.Project) projectView {
-	v := projectView{ID: p.ID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt}
+func toProject(p model.Project, subj authz.Subject) projectView {
+	v := projectView{
+		ID: p.ID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt,
+		PermittedActions: authz.PermittedOn(subj, authz.ObjectOf(&p)),
+	}
 	for _, lb := range p.LoadBalancers {
-		v.LoadBalancers = append(v.LoadBalancers, toLoadBalancer(lb, nil))
+		v.LoadBalancers = append(v.LoadBalancers, toLoadBalancer(lb, nil, subj))
 	}
 	return v
 }
 
 // toLoadBalancer renders a load balancer. aliases may be nil, in which case domains carry no
 // alias label — the listing views that do not need it skip the extra query.
-func toLoadBalancer(p model.LoadBalancer, aliases map[model.ID]model.Alias) loadBalancerView {
-	v := loadBalancerView{ID: p.ID, ProjectID: p.ProjectID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt, Nodes: []nodeView{}}
+func toLoadBalancer(p model.LoadBalancer, aliases map[model.ID]model.Alias, subj authz.Subject) loadBalancerView {
+	v := loadBalancerView{
+		ID: p.ID, ProjectID: p.ProjectID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt,
+		PermittedActions: authz.PermittedOn(subj, authz.ObjectOf(&p)),
+		Nodes:            []nodeView{},
+	}
 	for _, n := range p.Nodes {
 		v.Nodes = append(v.Nodes, toNode(n))
 	}
@@ -138,7 +156,7 @@ func (a *admin) listProjects(c echo.Context) error {
 	setTotal(c, total)
 	out := make([]projectView, 0, len(ps))
 	for _, p := range ps {
-		out = append(out, toProject(p))
+		out = append(out, toProject(p, subj))
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -163,7 +181,7 @@ func (a *admin) createProject(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		out = toProject(*p)
+		out = toProject(*p, subj)
 		return []authz.Event{{
 			Action: authz.ActionProjectCreate, ObjectType: authz.ObjectProject,
 			ObjectID: &p.ID, ObjectLabel: p.Slug, ProjectID: &p.ID, After: out,
@@ -181,6 +199,10 @@ func (a *admin) createProject(c echo.Context) error {
 // first page of the list" the moment a limit existed. A screen addressed by id
 // has to be able to fetch by id.
 func (a *admin) getProject(c echo.Context) error {
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	sc, err := a.scope(c)
 	if err != nil {
 		return err
@@ -193,12 +215,16 @@ func (a *admin) getProject(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, toProject(*p))
+	return c.JSON(http.StatusOK, toProject(*p, subj))
 }
 
 // updateProject renames a project. The slug is not editable: it appears in
 // URLs, CLI arguments and log lines, so it is identity rather than a label.
 func (a *admin) updateProject(c echo.Context) error {
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	sc, err := a.scope(c)
 	if err != nil {
 		return err
@@ -224,12 +250,12 @@ func (a *admin) updateProject(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		before := toProject(*p)
+		before := toProject(*p, subj)
 		if err := tx.WithContext(ctx).Model(&model.Project{}).Where("id = ?", id).Update("name", body.Name).Error; err != nil {
 			return nil, err
 		}
 		p.Name = body.Name
-		out = toProject(*p)
+		out = toProject(*p, subj)
 		return []authz.Event{{
 			Action: authz.ActionProjectUpdate, ObjectType: authz.ObjectProject,
 			ObjectID: &p.ID, ObjectLabel: p.Slug, ProjectID: &p.ID, Before: before, After: out,
@@ -264,7 +290,7 @@ func (a *admin) deleteProject(c echo.Context) error {
 		}
 		return []authz.Event{{
 			Action: authz.ActionProjectDelete, ObjectType: authz.ObjectProject,
-			ObjectID: &id, ObjectLabel: p.Slug, ProjectID: &id, Before: toProject(*p),
+			ObjectID: &id, ObjectLabel: p.Slug, ProjectID: &id, Before: toProject(*p, subj),
 		}}, nil
 	}); err != nil {
 		return err
@@ -275,6 +301,10 @@ func (a *admin) deleteProject(c echo.Context) error {
 // --- load balancers --------------------------------------------------------------
 
 func (a *admin) listLoadBalancers(c echo.Context) error {
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	sc, err := a.scope(c)
 	if err != nil {
 		return err
@@ -293,12 +323,16 @@ func (a *admin) listLoadBalancers(c echo.Context) error {
 	}
 	out := make([]loadBalancerView, 0, len(lbs))
 	for _, p := range lbs {
-		out = append(out, toLoadBalancer(p, nil))
+		out = append(out, toLoadBalancer(p, nil, subj))
 	}
 	return c.JSON(http.StatusOK, out)
 }
 
 func (a *admin) getLoadBalancer(c echo.Context) error {
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	sc, err := a.scope(c)
 	if err != nil {
 		return err
@@ -317,7 +351,7 @@ func (a *admin) getLoadBalancer(c echo.Context) error {
 		return err
 	}
 	lb.Domains = domains
-	return c.JSON(http.StatusOK, toLoadBalancer(*lb, aliases))
+	return c.JSON(http.StatusOK, toLoadBalancer(*lb, aliases, subj))
 }
 
 func (a *admin) createLoadBalancer(c echo.Context) error {
@@ -344,7 +378,7 @@ func (a *admin) createLoadBalancer(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		out = toLoadBalancer(*lb, nil)
+		out = toLoadBalancer(*lb, nil, subj)
 		return []authz.Event{{
 			Action: authz.ActionLoadBalancerCreate, ObjectType: authz.ObjectLoadBalancer,
 			ObjectID: &lb.ID, ObjectLabel: lb.Slug, ProjectID: &projectID, After: out,
@@ -356,6 +390,10 @@ func (a *admin) createLoadBalancer(c echo.Context) error {
 }
 
 func (a *admin) updateLoadBalancer(c echo.Context) error {
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	sc, err := a.scope(c)
 	if err != nil {
 		return err
@@ -381,12 +419,12 @@ func (a *admin) updateLoadBalancer(c echo.Context) error {
 		if err := a.authorize(c, authz.ActionInventoryWrite, authz.ObjectOf(lb)); err != nil {
 			return nil, err
 		}
-		before := toLoadBalancer(*lb, nil)
+		before := toLoadBalancer(*lb, nil, subj)
 		if err := tx.WithContext(ctx).Model(&model.LoadBalancer{}).Where("id = ?", id).Update("name", body.Name).Error; err != nil {
 			return nil, err
 		}
 		lb.Name = body.Name
-		out = toLoadBalancer(*lb, nil)
+		out = toLoadBalancer(*lb, nil, subj)
 		return []authz.Event{{
 			Action: authz.ActionLoadBalancerUpdate, ObjectType: authz.ObjectLoadBalancer,
 			ObjectID: &id, ObjectLabel: lb.Slug, ProjectID: &lb.ProjectID, Before: before, After: out,
@@ -425,7 +463,7 @@ func (a *admin) deleteLoadBalancer(c echo.Context) error {
 		}
 		return []authz.Event{{
 			Action: authz.ActionLoadBalancerDelete, ObjectType: authz.ObjectLoadBalancer,
-			ObjectID: &id, ObjectLabel: lb.Slug, ProjectID: &lb.ProjectID, Before: toLoadBalancer(*lb, nil),
+			ObjectID: &id, ObjectLabel: lb.Slug, ProjectID: &lb.ProjectID, Before: toLoadBalancer(*lb, nil, subj),
 		}}, nil
 	}); err != nil {
 		return err

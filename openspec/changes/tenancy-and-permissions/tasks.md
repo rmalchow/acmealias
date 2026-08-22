@@ -71,7 +71,7 @@
 - [x] 7.1a Split the route tree: versioned public API under `/api/v1/**`, unversioned administrative API under `/api/admin/**` (design P15)
 - [ ] 7.1b Publish an OpenAPI document for the public API only, and add a test asserting every console request is an operation it describes
 - [x] 7.2 Add role, membership and grant routes
-- [ ] 7.3 Report permitted actions per object on every listing and read (design P12)
+- [x] 7.3 Report permitted actions per object on every listing and read (design P12)
 - [x] 7.4 Make project creation require membership of the account's unrestricted role, not a grant; refuse any grant naming an account as its object (design P14)
 - [x] 7.4a Add account creation for any authenticated user, making the creator an unrestricted member in the same transaction
 - [x] 7.4b Add the member roster: readable by any member of the account without a grant, confined by `Scope`, including outstanding invitations
@@ -92,7 +92,7 @@
 
 - [ ] 9.0 Build the no-account-selected shell: profile, the list of accounts the user belongs to, create-account, accept-invitation, and nothing else
 - [ ] 9.0a Build the account switcher, and render neither it nor the selection screen in a single-account edition
-- [ ] 9.1 Consume the per-object permitted-actions report and replace role-name gating throughout
+- [x] 9.1 Consume the per-object permitted-actions report and replace role-name gating throughout
 - [ ] 9.2 Build the role editor: create, edit, delete, and membership management
 - [ ] 9.3 Build the grant composer, offering only what the acting user holds
 - [ ] 9.4 Present the unrestricted role as uneditable and hide removal of its last member

@@ -13,6 +13,11 @@ export interface Me {
   groups: string[];
   roles: Role[];
   /**
+   * What this person may do where no object is in hand — creating the first project in an empty
+   * account, for instance. Per-object questions are answered per object, on the row.
+   */
+  permissions: string[];
+  /**
    * The account this session is acting in, or null when none is selected — which is a normal
    * state, not an error: someone who belongs to several accounts and has not yet said which.
    * A single-account deployment selects it at sign-in and never shows a picker.

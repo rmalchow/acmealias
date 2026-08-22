@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -11,7 +11,7 @@ import { ApiService, apiErrorMessage } from '../../core/api.service';
 import { SessionService } from '../../core/session.service';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { openNameSlugModal } from '../../shared/name-slug.modal';
-import { Project } from '../models';
+import { CAN_ADMIN_PROJECT, Project, may } from '../models';
 
 /** 19.1 — the project list: filter, page, and create through a modal (creation is ADMIN-only, D10). */
 @Component({
@@ -47,7 +47,7 @@ import { Project } from '../models';
         </button>
       </ng-template>
 
-      @if (session.hasAnyRole(['ADMIN'])) {
+      @if (canCreateProjects()) {
         <button class="ac-spacer" nz-button nzType="primary" (click)="create()">
           <span nz-icon nzType="plus"></span>
           New project
@@ -121,6 +121,18 @@ export class ProjectListComponent implements OnInit {
   readonly session = inject(SessionService);
 
   readonly projects = signal<Project[]>([]);
+
+  /**
+   * Creating a project is governed by MEMBERSHIP of the account's unrestricted role rather than
+   * by a grant (design P14) — an account is not an object a grant can name. There is no row to
+   * ask about before the first project exists, so this reads the answer the service reports for
+   * an existing one, and falls back to the profile's permissions for an empty account.
+   */
+  readonly canCreateProjects = computed(() => {
+    const rows = this.projects();
+    if (rows.length > 0) return may(rows[0], CAN_ADMIN_PROJECT);
+    return this.session.me()?.permissions?.includes(CAN_ADMIN_PROJECT) ?? false;
+  });
   readonly total = signal(0);
   readonly pageIndex = signal(1);
   readonly pageSize = signal(25);

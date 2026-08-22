@@ -9,7 +9,7 @@ import { AuditEntry } from '../models';
 
 function entry(over: Partial<AuditEntry> = {}): AuditEntry {
   return {
-    id: 1,
+    id: '00000000-0000-7000-8000-000000000001',
     occurredAt: '2026-01-01T00:00:00Z',
     actorSubject: 'user-1',
     actorName: 'Reader',
@@ -20,9 +20,9 @@ function entry(over: Partial<AuditEntry> = {}): AuditEntry {
     clientIp: null,
     action: 'project.create',
     objectType: 'project',
-    objectId: 1,
+    objectId: '00000000-0000-7000-8000-000000000001',
     objectLabel: 'shop',
-    projectId: 1,
+    projectId: '00000000-0000-7000-8000-000000000001',
     ...over,
   };
 }
@@ -76,7 +76,7 @@ describe('AuditComponent', () => {
   it('falls back to the row count when X-Total-Count is missing', () => {
     const fixture = TestBed.createComponent(AuditComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/audit').flush([entry(), entry({ id: 2 })]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/audit').flush([entry(), entry({ id: '00000000-0000-7000-8000-000000000002' })]);
     expect(fixture.componentInstance.total()).toBe(2);
   });
 

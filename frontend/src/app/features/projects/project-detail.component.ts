@@ -1,4 +1,4 @@
-import { Component, inject, input, OnChanges, signal } from '@angular/core';
+import { Component, OnChanges, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
@@ -12,7 +12,7 @@ import { confirmAction } from '../../shared/confirm';
 import { openNameSlugModal } from '../../shared/name-slug.modal';
 import { ProjectInventoryPanelComponent } from '../reporting/project-inventory-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
-import { LoadBalancer, Project } from '../models';
+import { CAN_WRITE, LoadBalancer, Project, may } from '../models';
 
 /** 19.1 — a project's load balancers; create and delete offered only to `ADMIN`. */
 @Component({
@@ -46,7 +46,7 @@ import { LoadBalancer, Project } from '../models';
     />
 
     <div class="ac-filters">
-      @if (session.hasAnyRole(['ADMIN'])) {
+      @if (canWrite()) {
         <button class="ac-spacer" nz-button nzType="primary" (click)="createLoadBalancer()">
           <span nz-icon nzType="plus"></span>
           New load balancer
@@ -83,7 +83,7 @@ import { LoadBalancer, Project } from '../models';
             <td>{{ lb.nodes.length }}</td>
             <td>{{ lb.domains?.length ?? 0 }}</td>
             <td class="row-actions">
-              @if (session.hasAnyRole(['ADMIN'])) {
+              @if (canWrite()) {
                 <button
                   nz-button
                   nzType="text"
@@ -122,6 +122,13 @@ export class ProjectDetailComponent implements OnChanges {
   readonly id = input.required<string>();
 
   readonly project = signal<Project | null>(null);
+
+  /**
+   * Whether load balancers may be added to THIS project, as the service reported it with the
+   * row — not "does this person hold a role that writes something somewhere", which is the
+   * question the permission model exists to stop asking.
+   */
+  readonly canWrite = computed(() => may(this.project(), CAN_WRITE));
   readonly loadBalancers = signal<LoadBalancer[]>([]);
   readonly error = signal<string | null>(null);
 

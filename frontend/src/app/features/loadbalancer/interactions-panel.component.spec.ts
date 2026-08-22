@@ -9,7 +9,7 @@ import { Interaction } from '../models';
 
 function interaction(over: Partial<Interaction> = {}): Interaction {
   return {
-    id: 1,
+    id: '00000000-0000-7000-8000-000000000001',
     aliasLabel: 'alias-1',
     challengeName: '_acme-challenge.shop.example.com',
     domainNames: ['shop.example.com'],
@@ -69,7 +69,7 @@ describe('InteractionsPanelComponent', () => {
     const fixture = create();
     http
       .expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/interactions')
-      .flush([interaction(), interaction({ id: 2 })]);
+      .flush([interaction(), interaction({ id: '00000000-0000-7000-8000-000000000002' })]);
     expect(fixture.componentInstance.total()).toBe(2);
   });
 

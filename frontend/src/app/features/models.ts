@@ -1,4 +1,9 @@
 /**
+ * Identifiers are UUID strings, not numbers (design P17). They used to be integers and the
+ * declarations here said so long after the API stopped returning them, which cost nothing at
+ * runtime — JSON hands over whatever it hands over — and would have cost the first person who
+ * did arithmetic on one.
+ *
  * JSON shapes returned by the management API (`backend/internal/httpapi/admin_*.go`).
  * Kept here, shared across the feature screens that all read pieces of the same inventory —
  * see admin.go's comment on `projectView`/`loadBalancerView`/etc for why these are hand-written
@@ -6,8 +11,8 @@
  */
 
 export interface LBNode {
-  id: number;
-  loadBalancerId: number;
+  id: string;
+  loadBalancerId: string;
   label: string;
   ipv4: string | null;
   ipv6: string | null;
@@ -20,7 +25,7 @@ export interface LBNode {
  * while being read: validated · unqueried · live · pending.
  */
 export interface Interaction {
-  id: number;
+  id: string;
   aliasLabel: string;
   challengeName: string;
   domainNames: string[];
@@ -36,11 +41,11 @@ export interface Interaction {
 }
 
 export interface Domain {
-  id: number;
-  loadBalancerId: number;
+  id: string;
+  loadBalancerId: string;
   name: string;
   challengeName: string;
-  aliasId: number;
+  aliasId: string;
   aliasLabel: string;
   createdAt: string;
 }
@@ -68,26 +73,36 @@ export interface DomainCreated extends Domain {
 }
 
 export interface LoadBalancer {
-  id: number;
-  projectId: number;
+  id: string;
+  projectId: string;
   slug: string;
   name: string;
   createdAt: string;
+  /**
+   * What this caller may do to THIS object, answered by the service per row.
+   *
+   * Controls are rendered from it instead of from the caller's role name, which said nothing
+   * about which objects. It is not the enforcement point — every request is checked again when
+   * it arrives — so a stale or tampered value costs a refusal, not access.
+   */
+  permittedActions: string[];
   nodes: LBNode[];
   domains?: Domain[];
 }
 
 export interface Project {
-  id: number;
+  id: string;
   slug: string;
   name: string;
   createdAt: string;
+  /** What this caller may do to this project; see LoadBalancer.permittedActions. */
+  permittedActions: string[];
   loadBalancers?: LoadBalancer[];
 }
 
 export interface ApiKey {
-  id: number;
-  loadBalancerId: number;
+  id: string;
+  loadBalancerId: string;
   identifier: string;
   displayPrefix: string;
   note: string;
@@ -144,7 +159,7 @@ export interface VerificationResult {
 }
 
 export interface ChallengeEntry {
-  id: number;
+  id: string;
   aliasLabel: string;
   challengeName: string;
   value: string;
@@ -155,7 +170,7 @@ export interface ChallengeEntry {
 }
 
 export interface AuditEntry {
-  id: number;
+  id: string;
   occurredAt: string;
   actorSubject: string | null;
   actorName: string | null;
@@ -166,9 +181,21 @@ export interface AuditEntry {
   clientIp: string | null;
   action: string;
   objectType: string;
-  objectId: number | null;
+  objectId: string | null;
   objectLabel: string;
-  projectId: number | null;
+  projectId: string | null;
   before?: unknown;
   after?: unknown;
+}
+
+/** The actions the service reports per object. Strings, because the vocabulary is the service's. */
+export const CAN_VIEW = 'inventory.view';
+export const CAN_WRITE = 'inventory.write';
+export const CAN_ADMIN_PROJECT = 'project.admin';
+export const CAN_WRITE_KEYS = 'key.write';
+export const CAN_READ_PLAN = 'dns.plan';
+
+/** Whether an object's reported actions include one. */
+export function may(o: { permittedActions?: string[] } | null | undefined, action: string): boolean {
+  return o?.permittedActions?.includes(action) ?? false;
 }

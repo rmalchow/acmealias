@@ -16,7 +16,7 @@ import {
 import { DomainCreateRequest, DomainCreated } from '../models';
 
 export interface DomainCreateData {
-  loadBalancerId: number;
+  loadBalancerId: string;
 }
 
 /**
@@ -211,7 +211,7 @@ export class DomainEditorComponent {
 }
 
 /** Opens the editor; `afterClose` emits true when a domain was created. */
-export function openDomainEditor(modal: NzModalService, loadBalancerId: number) {
+export function openDomainEditor(modal: NzModalService, loadBalancerId: string) {
   return modal.create<DomainEditorComponent, DomainCreateData>({
     nzTitle: 'Add domain',
     nzContent: DomainEditorComponent,

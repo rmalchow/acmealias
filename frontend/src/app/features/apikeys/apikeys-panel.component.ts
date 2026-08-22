@@ -9,7 +9,7 @@ import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
 import { ApiService, apiErrorMessage } from '../../core/api.service';
 import { SessionService } from '../../core/session.service';
 import { confirmAction } from '../../shared/confirm';
-import { ApiKey, ApiKeyCreated, LBNode } from '../models';
+import { ApiKey, ApiKeyCreated, CAN_WRITE_KEYS, LBNode, LoadBalancer, may } from '../models';
 import { openApiKeyCreateModal } from './apikey-create.modal';
 import { openApiKeyRevealModal } from './apikey-reveal.modal';
 
@@ -123,13 +123,19 @@ export class ApiKeysPanelComponent implements OnChanges {
   private readonly modal = inject(NzModalService);
   private readonly session = inject(SessionService);
 
-  readonly loadBalancerId = input.required<number>();
+  readonly loadBalancerId = input.required<string>();
+  /** The row this panel belongs to, for the per-object permission answer it carries. */
+  readonly loadBalancer = input<LoadBalancer | null>(null);
   readonly nodes = input<LBNode[]>([]);
 
   readonly keys = signal<ApiKey[]>([]);
   readonly error = signal<string | null>(null);
 
-  readonly canWrite = computed(() => this.session.hasAnyRole(['ADMIN', 'CONFIG_ADMIN', 'KEY_ROTATION']));
+  /**
+   * Whether keys may be minted here, answered for THIS load balancer rather than for the
+   * caller's role. The panel is handed the row it belongs to, so the answer travels with it.
+   */
+  readonly canWrite = computed(() => may(this.loadBalancer(), CAN_WRITE_KEYS));
 
   ngOnChanges(): void {
     this.load();

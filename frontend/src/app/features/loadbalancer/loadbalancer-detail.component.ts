@@ -11,7 +11,17 @@ import { ApiService, apiErrorMessage } from '../../core/api.service';
 import { SessionService } from '../../core/session.service';
 import { PageHeaderComponent } from '../../shared/page-header.component';
 import { confirmAction } from '../../shared/confirm';
-import { CheckResult, Domain, DNSPlan, LBNode, LoadBalancer, Project, VerificationResult } from '../models';
+import {
+  CAN_WRITE,
+  CheckResult,
+  Domain,
+  DNSPlan,
+  LBNode,
+  LoadBalancer,
+  may,
+  Project,
+  VerificationResult,
+} from '../models';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { InteractionsPanelComponent } from './interactions-panel.component';
@@ -262,7 +272,7 @@ import { domainStatus as computeDomainStatus } from './domain-status';
 
     @if (loadBalancer(); as p) {
       <section>
-        <app-apikeys-panel [loadBalancerId]="p.id" [nodes]="p.nodes" />
+        <app-apikeys-panel [loadBalancerId]="p.id" [loadBalancer]="p" [nodes]="p.nodes" />
       </section>
 
       <section>
@@ -320,7 +330,17 @@ export class LoadBalancerDetailComponent implements OnChanges {
   readonly verifyError = signal<string | null>(null);
   readonly error = signal<string | null>(null);
 
-  readonly canWrite = computed(() => this.session.hasAnyRole(['ADMIN', 'CONFIG_ADMIN']));
+  /**
+   * What this caller may do to THIS load balancer, as the service reported it with the row.
+   *
+   * It used to be a role-name test, which could only ever answer "may this person write
+   * anything, anywhere" — the question the permission model exists to stop asking. A caller
+   * granted one project and not another now sees the right controls on each.
+   *
+   * Until the row arrives the answer is no, which renders a read-only screen for an instant
+   * rather than a set of buttons that turn out to be refused.
+   */
+  readonly canWrite = computed(() => may(this.loadBalancer(), CAN_WRITE));
 
   readonly subtitle = () => {
     const p = this.loadBalancer();

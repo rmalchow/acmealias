@@ -11,7 +11,7 @@ import { ApiService, apiErrorMessage } from '../../core/api.service';
 import { ApiKeyCreated, LBNode } from '../models';
 
 export interface ApiKeyCreateData {
-  loadBalancerId: number;
+  loadBalancerId: string;
   /** The load balancer's nodes, offered as one-click source-address restrictions. */
   nodes: LBNode[];
 }
