@@ -1,4 +1,5 @@
 import { fakeAsync, TestBed, tick } from '@angular/core/testing';
+import { ApiService } from '../../core/api.service';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
@@ -34,6 +35,9 @@ describe('ChallengesComponent', () => {
       ],
     }).compileComponents();
     http = TestBed.inject(HttpTestingController);
+    // Every account-scoped call names its account in the path, so the client has to
+    // have one before a component can make any.
+    TestBed.inject(ApiService).setAccount('00000000-0000-7000-8000-0000000000a1');
   });
 
   afterEach(() => http.verify());
@@ -42,7 +46,7 @@ describe('ChallengesComponent', () => {
     const fixture = TestBed.createComponent(ChallengesComponent);
     fixture.detectChanges();
 
-    const req = http.expectOne((r) => r.url === '/api/v1/challenges');
+    const req = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges');
     expect(req.request.params.get('limit')).toBe('25');
     expect(req.request.params.get('offset')).toBe('0');
     req.flush([entry()], { headers: { 'X-Total-Count': '9' } });
@@ -53,17 +57,17 @@ describe('ChallengesComponent', () => {
   it('falls back to the row count when X-Total-Count is missing', () => {
     const fixture = TestBed.createComponent(ChallengesComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/challenges').flush([entry(), entry({ id: 2 })]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([entry(), entry({ id: 2 })]);
     expect(fixture.componentInstance.total()).toBe(2);
   });
 
   it('changing the filter resets to page one', fakeAsync(() => {
     const fixture = TestBed.createComponent(ChallengesComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/challenges').flush([entry()]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([entry()]);
 
     fixture.componentInstance.onQueryParams({ pageIndex: 2, pageSize: 25, sort: [], filter: [] });
-    const paged = http.expectOne((r) => r.url === '/api/v1/challenges');
+    const paged = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges');
     expect(paged.request.params.get('offset')).toBe('25');
     // A total large enough that page 2 stays valid — otherwise nz-table corrects itself back to
     // page 1 on the next change detection and emits its own (nzQueryParams), which would land a
@@ -73,7 +77,7 @@ describe('ChallengesComponent', () => {
     fixture.componentInstance.query = 'shop';
     fixture.componentInstance.onQueryChange();
     tick(250);
-    const filtered = http.expectOne((r) => r.url === '/api/v1/challenges');
+    const filtered = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges');
     expect(filtered.request.params.get('offset')).toBe('0');
     expect(fixture.componentInstance.pageIndex()).toBe(1);
     filtered.flush([]);
@@ -82,7 +86,7 @@ describe('ChallengesComponent', () => {
   it('debounces typing instead of firing a request per keystroke', fakeAsync(() => {
     const fixture = TestBed.createComponent(ChallengesComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/challenges').flush([entry()]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([entry()]);
 
     fixture.componentInstance.query = 's';
     fixture.componentInstance.onQueryChange();
@@ -90,10 +94,10 @@ describe('ChallengesComponent', () => {
     fixture.componentInstance.query = 'shop';
     fixture.componentInstance.onQueryChange();
     tick(200);
-    http.expectNone((r) => r.url === '/api/v1/challenges');
+    http.expectNone((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges');
 
     tick(50);
-    const req = http.expectOne((r) => r.url === '/api/v1/challenges');
+    const req = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges');
     expect(req.request.params.get('q')).toBe('shop');
     req.flush([]);
   }));
@@ -101,7 +105,7 @@ describe('ChallengesComponent', () => {
   it('shows the quiet empty state when nothing is answerable and no filter is set', () => {
     const fixture = TestBed.createComponent(ChallengesComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/challenges').flush([]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([]);
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('No challenge is currently answerable');
@@ -111,12 +115,12 @@ describe('ChallengesComponent', () => {
   it('shows the filtered empty state, distinct from the quiet one, when a filter matches nothing', () => {
     const fixture = TestBed.createComponent(ChallengesComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/challenges').flush([entry()]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([entry()]);
     fixture.detectChanges();
 
     fixture.componentInstance.query = 'nomatch';
     fixture.componentInstance.load();
-    http.expectOne((r) => r.url === '/api/v1/challenges').flush([]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/challenges').flush([]);
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('No live challenge matches this filter');

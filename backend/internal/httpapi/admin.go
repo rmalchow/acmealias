@@ -141,57 +141,107 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	// "may this role administer sessions", which is what the old model asked.
 	sessions := authz.Require(authz.ActionSessionAdmin)
 
+	// --- routes reachable with no account selected (design P19) -------------
+	//
+	// Exactly four things, and the list is short on purpose: a session with no
+	// selection is a person who has not yet said which account they are acting
+	// in, and everything below this block would otherwise act in whichever one
+	// happened to be selected.
+	//
 	// Every signed-in user may read their own identity; there is nothing here
 	// they did not already supply.
 	sec.GET("/me", a.me)
+	sec.GET("/accounts", a.listAccounts)
+	sec.POST("/accounts", a.createAccount)
+	sec.POST("/accounts/:accountId/select", a.selectAccount)
 
-	sec.GET("/projects", a.listProjects)
-	sec.POST("/projects", a.createProject)
-	sec.GET("/projects/:id", a.getProject)
-	sec.PATCH("/projects/:id", a.updateProject)
-	sec.DELETE("/projects/:id", a.deleteProject)
+	// --- account-scoped routes ---------------------------------------------
+	//
+	// The account is named in the path AND checked against the session's
+	// selection (design P19). That looks redundant and is not: if the target
+	// came only from the session, a forged or confused-deputy request would act
+	// in whatever account happened to be selected, and the caller would never
+	// have had to know which. Naming it makes the target something an attacker
+	// has to get right, and a mismatch a refusal rather than a silent write into
+	// the wrong tenant.
+	//
+	// It also makes the public API usable by programs, which should not have to
+	// establish selection state before addressing a resource.
+	acct := sec.Group("/accounts/:accountId")
 
-	// Reporting reads history and writes nothing, so it sits behind the same
-	// `view` permission as the rest of the read surface — every role that may
-	// read the inventory may read the numbers describing it.
-	sec.GET("/projects/:id/usage", a.getProjectUsage)
-	sec.GET("/projects/:id/inventory-history", a.getProjectInventoryHistory)
+	acct.GET("/projects", a.listProjects)
+	acct.POST("/projects", a.createProject)
+	acct.GET("/projects/:id", a.getProject)
+	acct.PATCH("/projects/:id", a.updateProject)
+	acct.DELETE("/projects/:id", a.deleteProject)
 
-	sec.GET("/projects/:id/loadbalancers", a.listLoadBalancers)
-	sec.POST("/projects/:id/loadbalancers", a.createLoadBalancer)
-	sec.GET("/loadbalancers/:id", a.getLoadBalancer)
-	sec.PATCH("/loadbalancers/:id", a.updateLoadBalancer)
-	sec.DELETE("/loadbalancers/:id", a.deleteLoadBalancer)
+	// Reporting reads history and writes nothing.
+	acct.GET("/projects/:id/usage", a.getProjectUsage)
+	acct.GET("/projects/:id/inventory-history", a.getProjectInventoryHistory)
 
-	sec.POST("/loadbalancers/:id/nodes", a.createNode)
-	sec.PATCH("/nodes/:id", a.updateNode)
-	sec.DELETE("/nodes/:id", a.deleteNode)
+	acct.GET("/projects/:id/loadbalancers", a.listLoadBalancers)
+	acct.POST("/projects/:id/loadbalancers", a.createLoadBalancer)
+	acct.GET("/loadbalancers/:id", a.getLoadBalancer)
+	acct.PATCH("/loadbalancers/:id", a.updateLoadBalancer)
+	acct.DELETE("/loadbalancers/:id", a.deleteLoadBalancer)
 
-	sec.GET("/loadbalancers/:id/domains", a.listDomains)
-	sec.POST("/loadbalancers/:id/domains", a.createDomain)
-	sec.DELETE("/domains/:id", a.deleteDomain)
+	acct.POST("/loadbalancers/:id/nodes", a.createNode)
+	acct.PATCH("/nodes/:id", a.updateNode)
+	acct.DELETE("/nodes/:id", a.deleteNode)
 
-	sec.GET("/loadbalancers/:id/interactions", a.listInteractions)
-	sec.GET("/loadbalancers/:id/keys", a.listKeys)
-	sec.POST("/loadbalancers/:id/keys", a.createKey)
-	sec.PUT("/keys/:id/networks", a.restrictKey)
-	sec.PUT("/keys/:id/expiry", a.setKeyExpiry)
-	sec.POST("/keys/:id/rotate", a.rotateKey)
-	sec.DELETE("/keys/:id", a.revokeKey)
+	acct.GET("/loadbalancers/:id/domains", a.listDomains)
+	acct.POST("/loadbalancers/:id/domains", a.createDomain)
+	acct.DELETE("/domains/:id", a.deleteDomain)
 
-	sec.GET("/loadbalancers/:id/plan", a.getPlan)
-	sec.GET("/loadbalancers/:id/plan/zone", a.getPlanZone)
+	acct.GET("/loadbalancers/:id/interactions", a.listInteractions)
+	acct.GET("/loadbalancers/:id/keys", a.listKeys)
+	acct.POST("/loadbalancers/:id/keys", a.createKey)
+	acct.PUT("/keys/:id/networks", a.restrictKey)
+	acct.PUT("/keys/:id/expiry", a.setKeyExpiry)
+	acct.POST("/keys/:id/rotate", a.rotateKey)
+	acct.DELETE("/keys/:id", a.revokeKey)
+
+	acct.GET("/loadbalancers/:id/plan", a.getPlan)
+	acct.GET("/loadbalancers/:id/plan/zone", a.getPlanZone)
 	// Verification is a read: it resolves names and stores nothing, so it is a
 	// GET and needs no CSRF token.
-	sec.GET("/loadbalancers/:id/verification", a.verifyPlan)
+	acct.GET("/loadbalancers/:id/verification", a.verifyPlan)
 
-	sec.GET("/challenges", a.listChallenges)
-	sec.GET("/audit", a.listAudit)
-	sec.GET("/config", a.getConfig)
+	acct.GET("/challenges", a.listChallenges)
+	acct.GET("/audit", a.listAudit)
+	acct.GET("/config", a.getConfig)
 
+	// Roles, membership and grants: an account administering itself.
+	acct.GET("/roles", a.listRoles)
+	acct.POST("/roles", a.createRole)
+	acct.PUT("/roles/:id", a.updateRole)
+	acct.DELETE("/roles/:id", a.deleteRole)
+	acct.GET("/members", a.listMembers)
+	acct.POST("/members", a.addMember)
+	acct.DELETE("/members/:id", a.removeMember)
+
+	// Sessions belong to a person rather than to an account, so they are not
+	// under /accounts — but administering OTHER people's sessions is still an
+	// account-level power, so the route keeps its role check until the staff
+	// plane gives it a better home.
 	sec.GET("/sessions", a.listSessions, sessions)
 	sec.DELETE("/sessions", a.revokeSubjectSessions, sessions)
 	sec.DELETE("/sessions/:handle", a.revokeSession, sessions)
+
+	// --- the internal surface (design P15) ----------------------------------
+	//
+	// /api/admin/** is the staff plane's tree: unversioned, undocumented, and
+	// deliberately a SEPARATE tree rather than a prefix inside the public one.
+	// That separation is the point — it keeps a staff-only operation from being
+	// one forgotten annotation away from appearing in a public schema.
+	//
+	// It is empty until `staff-plane` fills it, and answers 404 rather than
+	// nothing at all so that a caller learns the surface exists and their path
+	// does not.
+	e.Any("/api/admin/*", func(c echo.Context) error {
+		return echo.NewHTTPError(http.StatusNotFound,
+			"no such staff endpoint: "+c.Request().URL.Path)
+	})
 
 	e.Any("/api/*", func(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "no such management endpoint: "+c.Request().URL.Path)

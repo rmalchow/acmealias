@@ -161,3 +161,67 @@ func CountUnrestrictedMembers(ctx context.Context, db *gorm.DB, sc Scope, lock b
 	}
 	return n, nil
 }
+
+// GetAccount reads the account a scope confines to.
+func GetAccount(ctx context.Context, db *gorm.DB, sc Scope) (*model.Account, error) {
+	var a model.Account
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.First(&a, "id = ?", sc.AccountID()).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: get account %s: %w", sc.AccountID(), err)
+	}
+	return &a, nil
+}
+
+// CreateAccountWithOwner creates an account and makes one user its first
+// unrestricted member, indivisibly (task 7.4a).
+//
+// The two halves cannot be separated. An account whose creation succeeded and
+// whose membership did not is an account nobody can administer — and no route
+// could repair it, because every repairing route is one that needs a member.
+//
+// Cross-account by construction: it runs before the account it is creating
+// exists, so there is no scope to run it in.
+func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string, userID model.ID) (*model.Account, error) {
+	var acc model.Account
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		acc = model.Account{Slug: slug, Name: name}
+		if err := tx.Create(&acc).Error; err != nil {
+			return fmt.Errorf("create account: %w", err)
+		}
+		role := model.Role{
+			AccountID: acc.ID, Name: "ADMIN", Unrestricted: true,
+			Description: "Every action on every object in this account",
+		}
+		if err := tx.Create(&role).Error; err != nil {
+			return fmt.Errorf("create unrestricted role: %w", err)
+		}
+		member := model.AccountMember{AccountID: acc.ID, UserID: userID, RoleID: role.ID}
+		if err := tx.Create(&member).Error; err != nil {
+			return fmt.Errorf("create first membership: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: create account %q: %w", slug, err)
+	}
+	return &acc, nil
+}
+
+// IsMember reports whether a user holds any membership in an account.
+//
+// Cross-account: it answers "may this person act here", which is asked before
+// any scope exists and is exactly the question a scope would beg.
+func IsMember(ctx context.Context, db *gorm.DB, accountID, userID model.ID) (bool, error) {
+	var n int64
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.Model(&model.AccountMember{}).
+			Where("account_id = ? AND user_id = ?", accountID, userID).
+			Count(&n).Error
+	})
+	if err != nil {
+		return false, fmt.Errorf("store: membership of %s in %s: %w", userID, accountID, err)
+	}
+	return n > 0, nil
+}

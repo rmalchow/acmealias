@@ -199,7 +199,7 @@ import { domainStatus as computeDomainStatus } from './domain-status';
           <a
             nz-button
             nzSize="small"
-            [href]="'/api/v1/loadbalancers/' + id() + '/plan/zone'"
+            [href]="zoneHref()"
             target="_blank"
             rel="noopener"
           >
@@ -301,6 +301,15 @@ export class LoadBalancerDetailComponent implements OnChanges {
   private readonly session = inject(SessionService);
 
   readonly id = input.required<string>();
+
+  /**
+   * The zone snippet is fetched by the browser rather than by HttpClient — it is a download, not
+   * a request the app renders — so it needs the full path, account and all. Building it here
+   * keeps the one place that knows the URL shape next to the one that knows the account.
+   */
+  protected zoneHref(): string {
+    return `/api/v1/accounts/${this.api.currentAccount()}/loadbalancers/${this.id()}/plan/zone`;
+  }
 
   readonly loadBalancer = signal<LoadBalancer | null>(null);
   /** Only for the breadcrumb — the load balancer carries a projectId, not the slug a human reads. */

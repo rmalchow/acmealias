@@ -1,6 +1,7 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { ApiService } from './api.service';
 import { firstValueFrom } from 'rxjs';
 
 /** The four global roles (D10). There is no per-project scoping. */
@@ -11,6 +12,12 @@ export interface Me {
   displayName: string;
   groups: string[];
   roles: Role[];
+  /**
+   * The account this session is acting in, or null when none is selected — which is a normal
+   * state, not an error: someone who belongs to several accounts and has not yet said which.
+   * A single-account deployment selects it at sign-in and never shows a picker.
+   */
+  selectedAccountId: string | null;
 }
 
 /** Where the browser-side of the BFF sign-in starts; the backend 302s on to the IdP. */
@@ -27,6 +34,7 @@ function currentUrl(): string {
 export class SessionService {
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
+  private readonly api = inject(ApiService);
 
   /** Null until `/api/v1/me` has answered. */
   readonly me = signal<Me | null>(null);
@@ -45,7 +53,11 @@ export class SessionService {
   /** Loaded once at startup. A 401 is handled by the auth interceptor, which sends us to sign-in. */
   async load(): Promise<void> {
     try {
-      this.me.set(await firstValueFrom(this.http.get<Me>('/api/v1/me')));
+      const me = await firstValueFrom(this.http.get<Me>('/api/v1/me'));
+      this.me.set(me);
+      // Every account-scoped request names its account in the path, so the client has to know
+      // which one before it can make any of them.
+      this.api.setAccount(me.selectedAccountId);
     } catch {
       return;
     }

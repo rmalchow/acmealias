@@ -1,4 +1,5 @@
 import { fakeAsync, TestBed, tick } from '@angular/core/testing';
+import { ApiService } from '../../core/api.service';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -28,6 +29,9 @@ describe('ProjectListComponent', () => {
       ],
     }).compileComponents();
     http = TestBed.inject(HttpTestingController);
+    // Every account-scoped call names its account in the path, so the client has to
+    // have one before a component can make any.
+    TestBed.inject(ApiService).setAccount('00000000-0000-7000-8000-0000000000a1');
   });
 
   afterEach(() => http.verify());
@@ -36,7 +40,7 @@ describe('ProjectListComponent', () => {
     const fixture = TestBed.createComponent(ProjectListComponent);
     fixture.detectChanges();
 
-    const req = http.expectOne((r) => r.url === '/api/v1/projects');
+    const req = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects');
     expect(req.request.params.get('limit')).toBe('25');
     expect(req.request.params.get('offset')).toBe('0');
     req.flush([project()], { headers: { 'X-Total-Count': '137' } });
@@ -48,7 +52,7 @@ describe('ProjectListComponent', () => {
     const fixture = TestBed.createComponent(ProjectListComponent);
     fixture.detectChanges();
 
-    const req = http.expectOne((r) => r.url === '/api/v1/projects');
+    const req = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects');
     req.flush([project(), project({ id: 2 })]);
 
     expect(fixture.componentInstance.total()).toBe(2);
@@ -57,11 +61,11 @@ describe('ProjectListComponent', () => {
   it('changing the filter resets to page one', fakeAsync(() => {
     const fixture = TestBed.createComponent(ProjectListComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/projects').flush([project()]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects').flush([project()]);
 
     // Page forward, as if the operator had paged into the old result set.
     fixture.componentInstance.onQueryParams({ pageIndex: 3, pageSize: 25, sort: [], filter: [] });
-    const paged = http.expectOne((r) => r.url === '/api/v1/projects');
+    const paged = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects');
     expect(paged.request.params.get('offset')).toBe('50');
     // A total large enough that page 3 stays valid — otherwise nz-table corrects itself back to
     // page 1 on the next change detection and emits its own (nzQueryParams), landing a second,
@@ -72,7 +76,7 @@ describe('ProjectListComponent', () => {
     fixture.componentInstance.query = 'acme';
     fixture.componentInstance.onQueryChange();
     tick(250);
-    const filtered = http.expectOne((r) => r.url === '/api/v1/projects');
+    const filtered = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects');
     expect(filtered.request.params.get('offset')).toBe('0');
     expect(fixture.componentInstance.pageIndex()).toBe(1);
     filtered.flush([]);
@@ -81,7 +85,7 @@ describe('ProjectListComponent', () => {
   it('debounces typing instead of firing a request per keystroke', fakeAsync(() => {
     const fixture = TestBed.createComponent(ProjectListComponent);
     fixture.detectChanges();
-    http.expectOne((r) => r.url === '/api/v1/projects').flush([project()]);
+    http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects').flush([project()]);
 
     fixture.componentInstance.query = 'a';
     fixture.componentInstance.onQueryChange();
@@ -94,10 +98,10 @@ describe('ProjectListComponent', () => {
 
     // Less than the 250ms debounce has elapsed since the last keystroke: nothing sent yet.
     tick(200);
-    http.expectNone((r) => r.url === '/api/v1/projects');
+    http.expectNone((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects');
 
     tick(50);
-    const req = http.expectOne((r) => r.url === '/api/v1/projects');
+    const req = http.expectOne((r) => r.url === '/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/projects');
     expect(req.request.params.get('q')).toBe('acme');
     req.flush([]);
   }));

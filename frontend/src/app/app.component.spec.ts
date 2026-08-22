@@ -25,7 +25,7 @@ describe('AppComponent', () => {
     // Nothing in the navigation is role-gated any more: the two screens that were (sessions and
     // effective configuration) are gone from the console entirely. If a role-gated screen comes
     // back, this is the test that has to change with it.
-    TestBed.inject(SessionService).me.set({ displayName: 'Reader', groups: [], roles: ['READ_ONLY'] });
+    TestBed.inject(SessionService).me.set({ displayName: 'Reader', groups: [], roles: ['READ_ONLY'] , selectedAccountId: 'acct-1' });
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     const labels = fixture.componentInstance.nav().map((i) => i.label);
@@ -34,7 +34,7 @@ describe('AppComponent', () => {
 
   it('prompts when the session has expired', () => {
     const session = TestBed.inject(SessionService);
-    session.me.set({ displayName: 'Reader', groups: [], roles: ['READ_ONLY'] });
+    session.me.set({ displayName: 'Reader', groups: [], roles: ['READ_ONLY'] , selectedAccountId: 'acct-1' });
     session.expired.set(true);
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();

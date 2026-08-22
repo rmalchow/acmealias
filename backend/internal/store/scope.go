@@ -94,6 +94,23 @@ func ScopeForKey(k *model.APIKey) Scope {
 	return Scope{accountID: k.AccountID}
 }
 
+// ScopeForSelection confines queries to the account a session has selected.
+//
+// It reads the account rather than accepting the identifier as gospel, so a
+// selection pointing at an account that has since been deleted fails here
+// instead of producing a scope over nothing. The caller's right to act in it was
+// established when the selection was made (design P19).
+func ScopeForSelection(ctx context.Context, db *gorm.DB, accountID model.ID) (Scope, error) {
+	var acc model.Account
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.First(&acc, "id = ?", accountID).Error
+	})
+	if err != nil {
+		return Scope{}, fmt.Errorf("store: scope for selected account %s: %w", accountID, err)
+	}
+	return Scope{accountID: acc.ID}, nil
+}
+
 // AccountID reports the account this scope confines to.
 func (s Scope) AccountID() model.ID { return s.accountID }
 

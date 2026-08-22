@@ -19,6 +19,9 @@ const (
 	ObjectAlias        = "alias"
 	ObjectAPIKey       = "api_key"
 	ObjectSession      = "session"
+	ObjectRole         = "role"
+	ObjectMember       = "member"
+	ObjectAccount      = "account"
 )
 
 // Actions, named `<object>.<verb>`. The object prefix is part of the action so
@@ -57,6 +60,17 @@ const (
 	ActionKeyExpire       = "apikey.expire"
 
 	ActionSessionRevoke = "session.revoke"
+
+	// Roles and membership are credential-class actions: they change who can do
+	// what, which is the same class of question as who holds a key.
+	ActionRoleCreate   = "role.create"
+	ActionRoleUpdate   = "role.update"
+	ActionRoleDelete   = "role.delete"
+	ActionMemberAdd    = "member.add"
+	ActionMemberRemove = "member.remove"
+
+	ActionAccountCreate = "account.create"
+	ActionAccountSelect = "account.select"
 )
 
 // Action classes. The two questions asked of an audit trail are "who changed
@@ -79,6 +93,13 @@ var actionClasses = map[string][]string{
 		ActionKeyCreate, ActionKeyRotate, ActionKeyRestrict,
 		ActionKeyExpiryChange, ActionKeyRevoke, ActionKeyExpire,
 		ActionSessionRevoke,
+		// Roles and membership belong here rather than with configuration
+		// (task 8.1): editing a role changes what a credential confers, and
+		// adding a member hands someone one. An operator asking "who touched
+		// the credentials" means these too.
+		ActionRoleCreate, ActionRoleUpdate, ActionRoleDelete,
+		ActionMemberAdd, ActionMemberRemove,
+		ActionAccountCreate, ActionAccountSelect,
 	},
 }
 

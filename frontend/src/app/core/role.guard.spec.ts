@@ -22,7 +22,7 @@ describe('roleGuard', () => {
   });
 
   function signedInWith(...roles: Role[]) {
-    session.me.set({ displayName: 'Test', groups: [], roles });
+    session.me.set({ displayName: 'Test', groups: [], roles, selectedAccountId: 'acct-1' });
   }
 
   it('lets a holder of one of the allowed roles through', () => {

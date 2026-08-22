@@ -97,7 +97,7 @@ func TestListenersServeOnlyTheirOwnRoutes(t *testing.T) {
 		wantStatus int
 	}{
 		{"challenge", s.Challenge, http.MethodGet, "/api/v1/me", http.StatusNotFound},
-		{"challenge", s.Challenge, http.MethodGet, "/api/v1/projects", http.StatusNotFound},
+		{"challenge", s.Challenge, http.MethodGet, "/api/v1/accounts/00000000-0000-7000-8000-000000000001/projects", http.StatusNotFound},
 		{"challenge", s.Challenge, http.MethodGet, "/metrics", http.StatusNotFound},
 		{"challenge", s.Challenge, http.MethodGet, "/healthz", http.StatusNotFound},
 		{"challenge", s.Challenge, http.MethodGet, "/readyz", http.StatusNotFound},

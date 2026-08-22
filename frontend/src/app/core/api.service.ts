@@ -11,13 +11,52 @@ export interface Page<T> {
 }
 
 /**
- * Nothing but the `/api/v1` prefix and generics — the interceptor does auth, `HttpClient` does
- * XSRF. Wiring this to the real backend is a matter of naming paths at the call site.
+ * Nothing but the path prefix and generics — the interceptor does auth, `HttpClient` does XSRF.
+ *
+ * There are two prefixes now, and the difference matters. Account-scoped resources live under
+ * `/api/v1/accounts/{id}/…`, and the id is named in the path even though the session already
+ * knows it: if the target came only from the session, a forged request would act in whichever
+ * account happened to be selected and the caller would never have had to know which. The server
+ * refuses a mismatch. Everything reachable with NO account selected — the profile, the list of
+ * accounts, creating one, selecting one — uses `root()` instead.
  */
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly http = inject(HttpClient);
-  private readonly base = '/api/v1';
+  private readonly root = '/api/v1';
+
+  /**
+   * The account every scoped call addresses. Set from `/api/v1/me` at start-up and on every
+   * switch; null until then, and a scoped call made while it is null is a bug in the caller
+   * rather than something to paper over with a guess.
+   */
+  private accountId: string | null = null;
+
+  setAccount(id: string | null): void {
+    this.accountId = id;
+  }
+
+  currentAccount(): string | null {
+    return this.accountId;
+  }
+
+  private get base(): string {
+    if (this.accountId === null) {
+      throw new Error(
+        'ApiService: an account-scoped request was made with no account selected. ' +
+          'Use the root* methods for /me, /accounts and account selection.',
+      );
+    }
+    return `${this.root}/accounts/${this.accountId}`;
+  }
+
+  /** Requests that are not about anything inside an account. */
+  rootGet<T>(path: string, params?: Params) {
+    return this.http.get<T>(this.root + path, { params: new HttpParams({ fromObject: params ?? {} }) });
+  }
+  rootPost<T>(path: string, body?: unknown) {
+    return this.http.post<T>(this.root + path, body ?? {});
+  }
 
   get<T>(path: string, params?: Params) {
     return this.http.get<T>(this.base + path, { params: new HttpParams({ fromObject: params ?? {} }) });

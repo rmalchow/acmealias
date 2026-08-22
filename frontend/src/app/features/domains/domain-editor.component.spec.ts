@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { ApiService } from '../../core/api.service';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
@@ -27,6 +28,9 @@ describe('DomainEditorComponent', () => {
       ],
     }).compileComponents();
     http = TestBed.inject(HttpTestingController);
+    // Every account-scoped call names its account in the path, so the client has to
+    // have one before a component can make any.
+    TestBed.inject(ApiService).setAccount('00000000-0000-7000-8000-0000000000a1');
   });
 
   afterEach(() => http.verify());
@@ -47,7 +51,7 @@ describe('DomainEditorComponent', () => {
     fixture.componentInstance.name = ' shop.example.com ';
     fixture.componentInstance.submit();
 
-    const req = http.expectOne('/api/v1/loadbalancers/7/domains');
+    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains');
     expect(req.request.body).toEqual({ name: 'shop.example.com' });
     req.flush({
       id: 1,
@@ -69,7 +73,7 @@ describe('DomainEditorComponent', () => {
 
     fixture.componentInstance.name = 'shop.example.com';
     fixture.componentInstance.submit();
-    http.expectOne('/api/v1/loadbalancers/7/domains').flush({
+    http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains').flush({
       id: 1,
       name: 'shop.example.com',
       aliasLabel: 'k7m3q9x2r4tv8w1p',
@@ -120,7 +124,7 @@ describe('DomainEditorComponent', () => {
     const fixture = withName('example.com');
     fixture.componentInstance.submit();
 
-    const req = http.expectOne('/api/v1/loadbalancers/7/domains');
+    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains');
     expect(req.request.body).toEqual({ name: 'example.com' });
     req.flush({
       id: 1,
@@ -136,7 +140,7 @@ describe('DomainEditorComponent', () => {
     fixture.componentInstance.includeWildcard = true;
     fixture.componentInstance.submit();
 
-    const req = http.expectOne('/api/v1/loadbalancers/7/domains');
+    const req = http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains');
     expect(req.request.body).toEqual({
       name: 'example.com',
       includeWildcard: true,
@@ -160,7 +164,7 @@ describe('DomainEditorComponent', () => {
     fixture.componentInstance.includeWildcard = true;
     fixture.componentInstance.submit();
 
-    http.expectOne('/api/v1/loadbalancers/7/domains').flush(
+    http.expectOne('/api/v1/accounts/00000000-0000-7000-8000-0000000000a1/loadbalancers/7/domains').flush(
       {
         message:
           'cannot also add "*.co.uk": invalid dns name: "*.co.uk" would cover the whole public suffix "co.uk"',

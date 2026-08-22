@@ -80,3 +80,26 @@ func DeleteExpiredSessions(ctx context.Context, db *gorm.DB) (int64, error) {
 	}
 	return res.RowsAffected, nil
 }
+
+// SelectAccount records which account a session is acting in (design P19).
+//
+// Unscoped, necessarily: this is what ESTABLISHES the scope for every later
+// request on that session, so it runs before one exists. What makes it safe is
+// that the caller must have proved membership first — the account is checked
+// against account_members, not against anything the request asserted.
+//
+// Passing nil clears the selection, which is what signing out of an account
+// looks like without signing out of the service.
+func SelectAccount(ctx context.Context, db *gorm.DB, sessionID string, accountID *model.ID) error {
+	res := db.WithContext(ctx).
+		Model(&model.Session{}).
+		Where("id = ? AND revoked_at IS NULL", sessionID).
+		Update("selected_account_id", accountID)
+	if res.Error != nil {
+		return fmt.Errorf("store: select account for session: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("store: select account for session: %w", gorm.ErrRecordNotFound)
+	}
+	return nil
+}

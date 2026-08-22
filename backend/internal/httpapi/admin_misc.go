@@ -25,13 +25,14 @@ import (
 // and nothing more: every route checks the permission again server-side,
 // because the browser is not the enforcement point (design D11).
 type meView struct {
-	Subject     string    `json:"subject"`
-	DisplayName string    `json:"displayName"`
-	Groups      []string  `json:"groups"`
-	Roles       []string  `json:"roles"`
-	Permissions []string  `json:"permissions"`
-	SignedInAt  time.Time `json:"signedInAt"`
-	ExpiresAt   time.Time `json:"expiresAt"`
+	SelectedAccountID *model.ID `json:"selectedAccountId"`
+	Subject           string    `json:"subject"`
+	DisplayName       string    `json:"displayName"`
+	Groups            []string  `json:"groups"`
+	Roles             []string  `json:"roles"`
+	Permissions       []string  `json:"permissions"`
+	SignedInAt        time.Time `json:"signedInAt"`
+	ExpiresAt         time.Time `json:"expiresAt"`
 }
 
 func (a *admin) me(c echo.Context) error {
@@ -47,6 +48,10 @@ func (a *admin) me(c echo.Context) error {
 		Groups: []string(sess.Groups), Roles: roles.List(),
 		Permissions: []string{},
 		SignedInAt:  sess.CreatedAt, ExpiresAt: sess.ExpiresAt,
+		// Which account this session is acting in, so the console knows what to
+		// put in the path without a second request — and knows to render the
+		// picker when the answer is none (design P19).
+		SelectedAccountID: sess.SelectedAccountID,
 	}
 	if v.Groups == nil {
 		v.Groups = []string{}

@@ -51,7 +51,7 @@
 - [x] 5.1 Seed the four roles with grants reproducing today's permission matrix, in the migration
 - [x] 5.2 Change `authz.Mapping` to resolve a configured group to a role record rather than a constant; report at startup when a setting names no role
 - [x] 5.3 Derive memberships per request from the group claim, keeping the existing no-role refusal and observed-groups response
-- [~] 5.4 Role creation, edit and deletion are implemented in the store with their invariants; the routes and the permission gating them arrive with group 7, which is where every permission check moves
+- [x] 5.4 Role creation, edit and deletion are implemented in the store with their invariants; the routes and the permission gating them arrive with group 7, which is where every permission check moves
 - [x] 5.5 Implement the unrestricted role's invariants: uneditable, undeletable, and the last-member guard under `SELECT … FOR UPDATE`
 - [x] 5.6 Test concurrent removal of the two remaining unrestricted members: one succeeds, one is refused
 - [x] 5.7 Acceptance test that each seeded role permits exactly what its predecessor permitted, and nothing more
@@ -68,22 +68,22 @@
 ## 7. Management API
 
 - [x] 7.1 Remove `authz.Require(action)` route middleware; move permission checks into `internal/inventory`, the service layer the API and the CLI share (design P7)
-- [ ] 7.1a Split the route tree: versioned public API under `/api/v1/**`, unversioned administrative API under `/api/admin/**` (design P15)
+- [x] 7.1a Split the route tree: versioned public API under `/api/v1/**`, unversioned administrative API under `/api/admin/**` (design P15)
 - [ ] 7.1b Publish an OpenAPI document for the public API only, and add a test asserting every console request is an operation it describes
-- [ ] 7.2 Add role, membership and grant routes
+- [x] 7.2 Add role, membership and grant routes
 - [ ] 7.3 Report permitted actions per object on every listing and read (design P12)
 - [x] 7.4 Make project creation require membership of the account's unrestricted role, not a grant; refuse any grant naming an account as its object (design P14)
-- [ ] 7.4a Add account creation for any authenticated user, making the creator an unrestricted member in the same transaction
-- [ ] 7.4b Add the member roster: readable by any member of the account without a grant, confined by `Scope`, including outstanding invitations
-- [ ] 7.4c Add `sessions.selected_account_id` (nullable); gate account-scoped routes on it and refuse with a distinct "no account selected" response
-- [ ] 7.4d Add account selection and switching, re-evaluating membership on switch and auditing it; select automatically in a single-account edition
-- [ ] 7.4e Move account-scoped routes under `/api/v1/accounts/{accountId}/…` and refuse a mismatch with the session's selection (design P19)
-- [ ] 7.4f Resolve memberships per request from either source — derived from group claims, or read from `account_members` — without the evaluator distinguishing them (design P18)
+- [x] 7.4a Add account creation for any authenticated user, making the creator an unrestricted member in the same transaction
+- [x] 7.4b Add the member roster: readable by any member of the account without a grant, confined by `Scope`, including outstanding invitations
+- [x] 7.4c Add `sessions.selected_account_id` (nullable); gate account-scoped routes on it and refuse with a distinct "no account selected" response
+- [x] 7.4d Add account selection and switching, re-evaluating membership on switch and auditing it; select automatically in a single-account edition
+- [x] 7.4e Move account-scoped routes under `/api/v1/accounts/{accountId}/…` and refuse a mismatch with the session's selection (design P19)
+- [x] 7.4f Resolve memberships per request from either source — derived from group claims, or read from `account_members` — without the evaluator distinguishing them (design P18)
 - [x] 7.5 Confine audit reads to the acting account
 
 ## 8. Audit
 
-- [ ] 8.1 Add role, grant and membership actions to `internal/authz/vocab.go` and assign them to the credential class
+- [x] 8.1 Add role, grant and membership actions to `internal/authz/vocab.go` and assign them to the credential class
 - [ ] 8.2 Record grants in full — type, identifier or selector, action, inheritable — in before/after state
 - [ ] 8.3 Record the acting account on every entry; record role names as written rather than as references
 - [ ] 8.4 Test that a refused escalation writes no change entry and is logged

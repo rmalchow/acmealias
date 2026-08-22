@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/labstack/echo/v4"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
@@ -28,17 +31,58 @@ type scopeResolver struct {
 	err  error
 }
 
-// scope returns the scope this request is confined to.
+// scope returns the account this request is confined to (design P19).
 //
-// The single-account lookup is memoized because it cannot change while the
-// process runs: the account is seeded by the migration and the internal edition
-// never gains a second one. A deployment that did would fail the lookup rather
-// than pick one, which is the safe direction.
+// Two things have to agree, and the redundancy is the point:
+//
+//   - the SESSION must have an account selected. A request from a session with
+//     none is refused with a statement saying so, not with an empty result — an
+//     empty result reads as "you have nothing", which is a different and wrong
+//     answer.
+//   - the PATH must name that same account. If the target came only from the
+//     session, a forged or confused-deputy request would act in whatever account
+//     happened to be selected, and the caller would never have had to know
+//     which. Naming it makes the target something an attacker has to get right,
+//     and a mismatch a refusal rather than a silent write into the wrong tenant.
+//
+// The scope itself is still built from what the DATABASE said — the session row
+// — and never from the path. The path is a check, not a source.
 func (a *admin) scope(c echo.Context) (store.Scope, error) {
-	a.scopes.once.Do(func() {
-		a.scopes.sc, a.scopes.err = store.ScopeForBootstrap(c.Request().Context(), a.opts.DB)
-	})
-	return a.scopes.sc, a.scopes.err
+	sess := authz.SessionFromContext(c)
+	if sess == nil {
+		return store.Scope{}, echo.ErrUnauthorized
+	}
+	if sess.SelectedAccountID == nil {
+		return store.Scope{}, echo.NewHTTPError(http.StatusConflict, map[string]string{
+			"message": "no account selected",
+			"code":    "no_account_selected",
+		})
+	}
+	named := c.Param("accountId")
+	if named != "" {
+		id, err := model.ParseID(named)
+		if err != nil {
+			return store.Scope{}, fmt.Errorf("%w: accountId must be an identifier", inventory.ErrInvalid)
+		}
+		if id != *sess.SelectedAccountID {
+			// Not-found rather than forbidden: whether the named account exists
+			// is not something this caller should learn from the mismatch.
+			return store.Scope{}, echo.NewHTTPError(http.StatusNotFound, "no such account")
+		}
+	}
+	return a.scopeFor(c, *sess.SelectedAccountID)
+}
+
+// scopeFor builds the confinement value for one account, having established that
+// the caller may act in it.
+//
+// The membership check is what makes this safe, and it happens at SELECTION
+// (selectAccount) rather than here — so a membership revoked mid-session takes
+// effect at the next switch rather than at the next request. That is design
+// P19's stated trade: re-checking per request would be stricter and would put a
+// membership query on every read.
+func (a *admin) scopeFor(c echo.Context, accountID model.ID) (store.Scope, error) {
+	return store.ScopeForSelection(c.Request().Context(), a.opts.DB, accountID)
 }
 
 // subject returns the authority the caller is acting with, in the scope's

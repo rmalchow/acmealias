@@ -171,6 +171,18 @@ func (s *Service) createSession(ctx context.Context, id *Identity) (*model.Sessi
 		LastSeenAt:  now,
 		ExpiresAt:   now.Add(s.cfg.SessionMaxLifetime),
 	}
+	// A single-account deployment selects it at sign-in (design P19), so the
+	// internal edition never enters the "no account selected" state and renders
+	// neither a switcher nor a selection screen. Constraint 1: no observable
+	// change.
+	//
+	// A deployment with several accounts leaves the selection empty, and the
+	// console shows the picker. Failing to resolve one is not fatal — the person
+	// is signed in either way, and lands on the picker rather than on an error.
+	if sc, err := store.ScopeForBootstrap(ctx, s.db); err == nil {
+		id := sc.AccountID()
+		sess.SelectedAccountID = &id
+	}
 	if err := store.CreateSession(ctx, s.db, sess); err != nil {
 		return nil, err
 	}

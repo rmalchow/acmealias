@@ -281,10 +281,13 @@ table sessions
   column id text not null
   column last_seen_at timestamp with time zone not null default now()
   column revoked_at timestamp with time zone null
+  column selected_account_id uuid null
   column subject text not null
   constraint sessions_pkey primary key (id)
+  constraint sessions_selected_account_id_fkey foreign key (selected_account_id)
   index sessions_expires_at_idx CREATE INDEX sessions_expires_at_idx ON sessions USING btree (expires_at)
   index sessions_pkey CREATE UNIQUE INDEX sessions_pkey ON sessions USING btree (id)
+  index sessions_selected_account_idx CREATE INDEX sessions_selected_account_idx ON sessions USING btree (selected_account_id)
   index sessions_subject_idx CREATE INDEX sessions_subject_idx ON sessions USING btree (subject)
 
 table users

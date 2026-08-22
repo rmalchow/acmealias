@@ -404,10 +404,15 @@ type Session struct {
 	Subject     string
 	DisplayName string
 	Groups      StringArray `gorm:"type:text[]"`
-	CreatedAt   time.Time
-	LastSeenAt  time.Time
-	ExpiresAt   time.Time
-	RevokedAt   *time.Time
+	// SelectedAccountID is the account this session is acting in (design P19).
+	// Nil means none is selected, which is a normal state and not an error: a
+	// person who belongs to nothing, or one who belongs to several and has not
+	// yet chosen. A session may switch mid-life without re-authenticating.
+	SelectedAccountID *ID `gorm:"column:selected_account_id"`
+	CreatedAt         time.Time
+	LastSeenAt        time.Time
+	ExpiresAt         time.Time
+	RevokedAt         *time.Time
 }
 
 func (Session) TableName() string { return "sessions" }

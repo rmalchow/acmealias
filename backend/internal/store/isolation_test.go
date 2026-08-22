@@ -45,19 +45,23 @@ var crossAccountReaders = map[string]string{
 	"MembershipsFor":              "resolves which account a person may act in, before any scope exists",
 	"AccountsForUser":             "which accounts a person can reach cannot be answered from inside one",
 	"FindOrCreateUser":            "a user is global (design P18) and exists before belonging to any account",
+	"GetAccount":                  "reads the account a scope names, which a scope cannot confine",
+	"CreateAccountWithOwner":      "runs before the account it creates exists",
+	"IsMember":                    "answers may-this-person-act-here, which is the question a scope would beg",
 }
 
 // nonQueries are exported functions that touch no table at all.
 var nonQueries = map[string]bool{
 	"Open": true, "MigrateUp": true, "MigrateDown": true, "CheckSchemaVersion": true,
 	"EmbeddedVersion": true, "ValueDigest": true, "ScopeFor": true, "ScopeForKey": true,
-	"ScopeForBootstrap": true,
+	"ScopeForBootstrap": true, "ScopeForSelection": true,
 	// Catalog reads about the connection itself, not about any tenant's rows.
 	"CheckTenantIsolation": true, "PoliciesInstalled": true,
 	// Sessions are global: a session belongs to a person, not to an account, and
 	// exists before any account is selected.
 	"CreateSession": true, "FindSession": true, "TouchSession": true,
 	"RevokeSession": true, "DeleteSession": true, "DeleteExpiredSessions": true,
+	"SelectAccount":          true,
 	"ListSessionsForSubject": true,
 }
 

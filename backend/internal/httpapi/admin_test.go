@@ -95,6 +95,7 @@ type adminEnv struct {
 	e      *echo.Echo
 	lb     *model.LoadBalancer
 	projID model.ID
+	roleID model.ID
 	sc     store.Scope
 }
 
@@ -149,7 +150,15 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	// real arrangement rather than of an empty router.
 	e.GET("/*", func(c echo.Context) error { return c.HTML(http.StatusOK, "<html>console</html>") })
 
-	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID}
+	// A spare role for the membership rows of the route table: adding a member
+	// needs one to add them to, and the unrestricted role is the wrong choice
+	// because its last-member guard would make the row's outcome depend on how
+	// many other rows ran first.
+	spare := &model.Role{Name: "route-table-spare"}
+	if err := store.CreateRole(t.Context(), db, sc, spare); err != nil {
+		t.Fatalf("create spare role: %v", err)
+	}
+	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID, roleID: spare.ID}
 }
 
 // Seeders for the destructive rows of TestEveryRouteEnforcesItsRole. Each
@@ -168,7 +177,7 @@ func seedProject(t *testing.T, v *adminEnv, suffix string) string {
 	if err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	return "/api/v1/projects/" + p.ID.String()
+	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + p.ID.String()
 }
 
 func seedLoadBalancer(t *testing.T, v *adminEnv, suffix string) string {
@@ -179,7 +188,7 @@ func seedLoadBalancer(t *testing.T, v *adminEnv, suffix string) string {
 	if err != nil {
 		t.Fatalf("seed load balancer: %v", err)
 	}
-	return "/api/v1/loadbalancers/" + lb.ID.String()
+	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + lb.ID.String()
 }
 
 // seedCounter keeps seeded labels and slugs distinct. A node label is unique
@@ -195,7 +204,7 @@ func seedNode(t *testing.T, v *adminEnv, suffix string) string {
 	if err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
-	return "/api/v1/nodes/" + n.ID.String()
+	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/nodes/" + n.ID.String()
 }
 
 func seedDomain(t *testing.T, v *adminEnv, suffix string) string {
@@ -206,7 +215,7 @@ func seedDomain(t *testing.T, v *adminEnv, suffix string) string {
 	if err != nil {
 		t.Fatalf("seed domain: %v", err)
 	}
-	return "/api/v1/domains/" + res.Domains[0].ID.String()
+	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/domains/" + res.Domains[0].ID.String()
 }
 
 // seedKeyPath returns a seeder for a key route, since the key rows differ only
@@ -224,8 +233,43 @@ func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
 		if err := store.CreateAPIKey(t.Context(), v.db, v.sc, k); err != nil {
 			t.Fatalf("seed key: %v", err)
 		}
-		return "/api/v1/keys/" + k.ID.String() + tail
+		return "/api/v1/accounts/" + v.sc.AccountID().String() + "/keys/" + k.ID.String() + tail
 	}
+}
+
+func seedRole(t *testing.T, v *adminEnv, suffix string) string {
+	t.Helper()
+	r := &model.Role{Name: fmt.Sprintf("seed-role%d", seedCounter.Add(1))}
+	if err := store.CreateRole(t.Context(), v.db, v.sc, r); err != nil {
+		t.Fatalf("seed role: %v", err)
+	}
+	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/roles/" + r.ID.String()
+}
+
+func seedMember(t *testing.T, v *adminEnv, suffix string) string {
+	t.Helper()
+	r := &model.Role{Name: fmt.Sprintf("seed-mrole%d", seedCounter.Add(1))}
+	if err := store.CreateRole(t.Context(), v.db, v.sc, r); err != nil {
+		t.Fatalf("seed role for member: %v", err)
+	}
+	u, err := store.FindOrCreateUser(t.Context(), v.db, fmt.Sprintf("seed-user%d", seedCounter.Add(1)), "Seed", "")
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := store.AddMember(t.Context(), v.db, v.sc, u.ID, r.ID); err != nil {
+		t.Fatalf("seed member: %v", err)
+	}
+	ms, err := store.ListMembers(t.Context(), v.db, v.sc)
+	if err != nil {
+		t.Fatalf("read members: %v", err)
+	}
+	for _, m := range ms {
+		if m.UserID == u.ID {
+			return "/api/v1/accounts/" + v.sc.AccountID().String() + "/members/" + m.ID.String()
+		}
+	}
+	t.Fatal("seeded member not found")
+	return ""
 }
 
 // session inserts a session row in the given groups and returns a client
@@ -233,14 +277,31 @@ func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
 func (v *adminEnv) session(subject string, groups ...string) *client {
 	v.t.Helper()
 	now := time.Now().UTC()
+	// The session selects the account it will act in, as sign-in does in the
+	// single-account edition (design P19). Without it every account-scoped route
+	// answers "no account selected", which is correct and is not what these
+	// tests are about.
+	account := v.sc.AccountID()
 	s := &model.Session{
 		ID: subject + "-session-" + hexish(), Subject: subject, DisplayName: strings.ToUpper(subject),
 		Groups: model.StringArray(groups), CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
+		SelectedAccountID: &account,
 	}
 	if err := store.CreateSession(v.t.Context(), v.db, s); err != nil {
 		v.t.Fatalf("create session: %v", err)
 	}
 	return &client{t: v.t, e: v.e, sessionID: s.ID}
+}
+
+// isHTTPMethod tells a real route from echo's internal placeholders, which it
+// registers under names that are not HTTP methods.
+func isHTTPMethod(m string) bool {
+	switch m {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
+		http.MethodDelete, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	return false
 }
 
 var hexCounter int
@@ -308,13 +369,18 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder, dst any) {
 //
 // covered holds "METHOD /route/:pattern" keys, resolved from each row's
 // concrete path by the same router that serves it — so the rows stay readable
-// ("/api/v1/projects/7/usage", not "/api/v1/projects/:id/usage").
+// ("/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/7/usage", not "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/:id/usage").
 func assertEveryRouteHasARow(t *testing.T, e *echo.Echo, covered map[string]bool) {
 	t.Helper()
 	for _, r := range e.Routes() {
-		// Sign-in is deliberately outside the guard, and the catch-alls match
-		// no endpoint of their own.
-		if !strings.HasPrefix(r.Path, "/api/v1/") || strings.HasPrefix(r.Path, "/api/v1/auth/") || strings.HasSuffix(r.Path, "*") {
+		// Sign-in is deliberately outside the guard, the catch-alls match no
+		// endpoint of their own, and echo registers a placeholder under a
+		// pseudo-method for a group prefix no handler serves.
+		// Sign-in is deliberately outside the guard, the catch-alls match no
+		// endpoint of their own, and echo registers a placeholder for a group
+		// prefix that no handler serves.
+		if !strings.HasPrefix(r.Path, "/api/v1/") || strings.HasPrefix(r.Path, "/api/v1/auth/") ||
+			strings.HasSuffix(r.Path, "*") || !isHTTPMethod(r.Method) {
 			continue
 		}
 		if !covered[r.Method+" "+r.Path] {
@@ -351,8 +417,9 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		"READ_ONLY":    v.session("reader", groupRead),
 	}
 
-	lb := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
-	proj := "/api/v1/projects/" + itoa(v.projID)
+	acct := "/api/v1/accounts/" + v.sc.AccountID().String()
+	lb := acct + "/loadbalancers/" + itoa(v.lb.ID)
+	proj := acct + "/projects/" + itoa(v.projID)
 
 	cases := []struct {
 		method, path, body string
@@ -364,16 +431,16 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 	}{
 		// Reads: every role.
 		{"GET", "/api/v1/me", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", "/api/v1/projects", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj + "/loadbalancers", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", lb, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", lb + "/domains", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", lb + "/keys", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", lb + "/plan", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", lb + "/plan/zone", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", "/api/v1/challenges", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", "/api/v1/audit", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", "/api/v1/config", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/challenges", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/config", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj + "/usage", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj + "/inventory-history", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
@@ -381,7 +448,7 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"GET", lb + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 
 		// Projects: ADMIN only.
-		{"POST", "/api/v1/projects", `{"slug":"other","name":"Other"}`, []string{"ADMIN"}, nil},
+		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects", `{"slug":"other","name":"Other"}`, []string{"ADMIN"}, nil},
 		{"PATCH", proj, `{"name":"Renamed"}`, []string{"ADMIN"}, nil},
 		{"DELETE", "", "", []string{"ADMIN"}, seedProject},
 
@@ -401,6 +468,27 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"PUT", "", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/expiry")},
 		{"POST", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/rotate")},
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("")},
+
+		// Accounts and their administration.
+		//
+		// Listing accounts and creating one are reachable with NO account
+		// selected (design P19), so every role reaches them — they are about
+		// which account you are in, not about anything inside one.
+		{"GET", "/api/v1/accounts", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", "/api/v1/accounts", `{"slug":"fresh","name":"Fresh"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/select", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+
+		// Roles and membership change what people can do, so they are governed
+		// by membership of the unrestricted role (design P14) — reading the
+		// roster is not, because knowing who else is in the room is not a
+		// privilege.
+		{"GET", acct + "/roles", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", acct + "/roles", `{"name":"ops","grants":[]}`, []string{"ADMIN"}, nil},
+		{"PUT", "", `{"name":"ops2","grants":[]}`, []string{"ADMIN"}, seedRole},
+		{"DELETE", "", "", []string{"ADMIN"}, seedRole},
+		{"GET", acct + "/members", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", acct + "/members", `{"subject":"someone","roleId":"` + v.roleID.String() + `"}`, []string{"ADMIN"}, nil},
+		{"DELETE", "", "", []string{"ADMIN"}, seedMember},
 
 		// Sessions: ADMIN only.
 		{"GET", "/api/v1/sessions", "", []string{"ADMIN"}, nil},
@@ -428,6 +516,15 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 				if tc.seed != nil {
 					path = tc.seed(t, v, role)
 				}
+				// Re-select the account under test before each attempt. One of
+				// the rows CREATES an account and selects it, which is the right
+				// product behaviour — someone who just made an account meant to
+				// act in it — and would otherwise leave every later row in this
+				// loop addressing an account the session is no longer in.
+				account := v.sc.AccountID()
+				if err := store.SelectAccount(t.Context(), v.db, cl.sessionID, &account); err != nil {
+					t.Fatalf("re-select account: %v", err)
+				}
 				rec := cl.do(tc.method, path, tc.body)
 				if contains(tc.allowed, role) {
 					if rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
@@ -451,7 +548,7 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 func TestKeyRotationMayMintAKeyButNotADomain(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("keys", groupKey)
-	lb := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	rec := cl.do(http.MethodPost, lb+"/keys", `{"note":"traefik"}`)
 	if rec.Code != http.StatusCreated {
@@ -525,7 +622,7 @@ func TestMeCarriesDisplayNameGroupsAndRoles(t *testing.T) {
 func TestDomainErrorsMapToStatusesAndOneJSONShape(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	lb := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	if rec := cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("seed domain: %d %s", rec.Code, rec.Body.String())
@@ -537,9 +634,9 @@ func TestDomainErrorsMapToStatusesAndOneJSONShape(t *testing.T) {
 	}{
 		{"invalid wildcard", "POST", lb + "/domains", `{"name":"*.*.example.com"}`, http.StatusBadRequest},
 		{"duplicate domain", "POST", lb + "/domains", `{"name":"shop.example.com"}`, http.StatusConflict},
-		{"unknown lb", "GET", "/api/v1/loadbalancers/00000000-0000-7000-8000-000000000999", "", http.StatusNotFound},
-		{"non-empty project", "DELETE", "/api/v1/projects/" + itoa(v.projID), "", http.StatusConflict},
-		{"non-numeric id", "GET", "/api/v1/loadbalancers/banana", "", http.StatusBadRequest},
+		{"unknown lb", "GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/00000000-0000-7000-8000-000000000999", "", http.StatusNotFound},
+		{"non-empty project", "DELETE", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID), "", http.StatusConflict},
+		{"non-numeric id", "GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/banana", "", http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -592,7 +689,7 @@ func TestUnknownAPIPathIsJSONNotTheConsole(t *testing.T) {
 func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	lb := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	rec := cl.do(http.MethodPost, lb+"/keys", `{"note":"traefik","networks":["203.0.113.5/24"]}`)
 	if rec.Code != http.StatusCreated {
@@ -628,7 +725,7 @@ func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 
 	// Rotation mints a successor and leaves the old key working, which is what
 	// makes a zero-downtime swap possible.
-	rec = cl.do(http.MethodPost, "/api/v1/keys/"+itoa(created.Key.ID)+"/rotate", "")
+	rec = cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/keys/"+itoa(created.Key.ID)+"/rotate", "")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("rotate: %d %s", rec.Code, rec.Body.String())
 	}
@@ -641,7 +738,7 @@ func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 		t.Errorf("rotation dropped the address restrictions: %v", rotated.Key.Networks)
 	}
 
-	rec = cl.do(http.MethodDelete, "/api/v1/keys/"+itoa(created.Key.ID), "")
+	rec = cl.do(http.MethodDelete, "/api/v1/accounts/"+v.sc.AccountID().String()+"/keys/"+itoa(created.Key.ID), "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("revoke: %d %s", rec.Code, rec.Body.String())
 	}
@@ -655,7 +752,7 @@ func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 func TestKeyRestrictionRejectsGarbageCIDR(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	rec := cl.do(http.MethodPost, "/api/v1/loadbalancers/"+itoa(v.lb.ID)+"/keys", `{"networks":["not-a-cidr"]}`)
+	rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/loadbalancers/"+itoa(v.lb.ID)+"/keys", `{"networks":["not-a-cidr"]}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body.String())
 	}
@@ -710,7 +807,7 @@ func TestSessionRevocationIsImmediateAndConfined(t *testing.T) {
 
 	// The revocation is attributable: the administrator and the subject whose
 	// access was ended are both on the record.
-	rec = admin.do(http.MethodGet, "/api/v1/audit?objectType=session", "")
+	rec = admin.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?objectType=session", "")
 	var entries []auditView
 	decode(t, rec, &entries)
 	if len(entries) == 0 {
@@ -752,7 +849,7 @@ func TestStateChangingRequestWithoutTheTokenIsRejected(t *testing.T) {
 	cl := v.session("admin", groupAdmin)
 	// A client that never fetches a token: a valid session cookie alone must
 	// not be enough.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"slug":"x","name":"X"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", strings.NewReader(`{"slug":"x","name":"X"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.Header.Set("X-Test-Session", cl.sessionID)
 	rec := httptest.NewRecorder()
@@ -792,7 +889,8 @@ var anyProject = &[]model.ID{model.NewID()}[0]
 // operator actually has — rather than the table, so a mutation that writes a
 // row nobody can find still fails here.
 type auditRecorder struct {
-	cl *client
+	cl      *client
+	auditAt string
 	// seen is every entry this recorder has already accounted for. Identifiers
 	// are UUIDs now, so "newer than the last one" is no longer a comparison —
 	// v7 values do sort by time, but as a [16]byte they are not ordered in Go,
@@ -809,7 +907,7 @@ func (r *auditRecorder) step(t *testing.T, method, path, body string, wantStatus
 		t.Fatalf("%s %s: %d %s, want %d", method, path, rec.Code, rec.Body.String(), wantStatus)
 	}
 
-	listing := r.cl.do(http.MethodGet, "/api/v1/audit?limit=1000", "")
+	listing := r.cl.do(http.MethodGet, r.auditAt+"?limit=1000", "")
 	var all []auditView
 	decode(t, listing, &all)
 
@@ -867,10 +965,10 @@ func (r *auditRecorder) step(t *testing.T, method, path, body string, wantStatus
 func TestMutationsAreAudited(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	r := &auditRecorder{cl: cl}
+	r := &auditRecorder{cl: cl, auditAt: "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit"}
 
 	// --- projects ---
-	rec := r.step(t, http.MethodPost, "/api/v1/projects", `{"slug":"beta","name":"Beta"}`,
+	rec := r.step(t, http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"beta","name":"Beta"}`,
 		http.StatusCreated, wantEntry{authz.ActionProjectCreate, "beta", anyProject})
 	var proj projectView
 	decode(t, rec, &proj)
@@ -878,9 +976,9 @@ func TestMutationsAreAudited(t *testing.T) {
 	pid := &proj.ID
 	// The create entry could not know its own project id before the insert, so
 	// it is checked here instead of in the step above.
-	assertProjectID(t, cl, authz.ActionProjectCreate, proj.ID)
+	assertProjectID(t, cl, r.auditAt, authz.ActionProjectCreate, proj.ID)
 
-	projPath := "/api/v1/projects/" + itoa(proj.ID)
+	projPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(proj.ID)
 	r.step(t, http.MethodPatch, projPath, `{"name":"Beta Renamed"}`,
 		http.StatusOK, wantEntry{authz.ActionProjectUpdate, "beta", pid})
 
@@ -889,7 +987,7 @@ func TestMutationsAreAudited(t *testing.T) {
 		http.StatusCreated, wantEntry{authz.ActionLoadBalancerCreate, "eu", pid})
 	var lb loadBalancerView
 	decode(t, rec, &lb)
-	lbPath := "/api/v1/loadbalancers/" + itoa(lb.ID)
+	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(lb.ID)
 
 	r.step(t, http.MethodPatch, lbPath, `{"name":"EU Renamed"}`,
 		http.StatusOK, wantEntry{authz.ActionLoadBalancerUpdate, "eu", pid})
@@ -899,7 +997,7 @@ func TestMutationsAreAudited(t *testing.T) {
 		http.StatusCreated, wantEntry{authz.ActionNodeCreate, "n1", pid})
 	var n nodeView
 	decode(t, rec, &n)
-	nodePath := "/api/v1/nodes/" + itoa(n.ID)
+	nodePath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/nodes/" + itoa(n.ID)
 
 	r.step(t, http.MethodPatch, nodePath, `{"ipv4":"203.0.113.21"}`,
 		http.StatusOK, wantEntry{authz.ActionNodeUpdate, "n1", pid})
@@ -921,12 +1019,12 @@ func TestMutationsAreAudited(t *testing.T) {
 	var wildcard domainCreated
 	decode(t, rec, &wildcard)
 
-	r.step(t, http.MethodDelete, "/api/v1/domains/"+itoa(wildcard.ID), "",
+	r.step(t, http.MethodDelete, "/api/v1/accounts/"+v.sc.AccountID().String()+"/domains/"+itoa(wildcard.ID), "",
 		http.StatusOK, wantEntry{authz.ActionDomainDelete, "*.shop.example.com", pid})
 	// Now the last domain goes, and the alias goes with it: the cascade is its
 	// own entry, because losing the alias is what stops the customer's
 	// published CNAME from validating.
-	r.step(t, http.MethodDelete, "/api/v1/domains/"+itoa(dom.ID), "",
+	r.step(t, http.MethodDelete, "/api/v1/accounts/"+v.sc.AccountID().String()+"/domains/"+itoa(dom.ID), "",
 		http.StatusOK,
 		wantEntry{authz.ActionDomainDelete, "shop.example.com", pid},
 		wantEntry{authz.ActionAliasDelete, anything, pid})
@@ -941,8 +1039,8 @@ func TestMutationsAreAudited(t *testing.T) {
 		http.StatusCreated, wantEntry{authz.ActionKeyCreate, anything, nil})
 	var created keyCreated
 	decode(t, rec, &created)
-	keyPath := "/api/v1/keys/" + itoa(created.Key.ID)
-	assertLabel(t, cl, authz.ActionKeyCreate, created.Key.Identifier)
+	keyPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/keys/" + itoa(created.Key.ID)
+	assertLabel(t, cl, r.auditAt, authz.ActionKeyCreate, created.Key.Identifier)
 
 	r.step(t, http.MethodPut, keyPath+"/networks", `{"networks":["198.51.100.0/24"]}`,
 		http.StatusOK, wantEntry{authz.ActionKeyRestrict, created.Key.Identifier, nil})
@@ -953,14 +1051,14 @@ func TestMutationsAreAudited(t *testing.T) {
 		http.StatusCreated, wantEntry{authz.ActionKeyRotate, anything, nil})
 	var rotated keyCreated
 	decode(t, rec, &rotated)
-	assertLabel(t, cl, authz.ActionKeyRotate, rotated.Key.Identifier)
+	assertLabel(t, cl, r.auditAt, authz.ActionKeyRotate, rotated.Key.Identifier)
 
 	r.step(t, http.MethodDelete, keyPath, "",
 		http.StatusOK, wantEntry{authz.ActionKeyRevoke, created.Key.Identifier, nil})
 
 	// The entries outlive what they describe: the project is gone, and its
 	// trail is still there and still filterable by it.
-	listing := cl.do(http.MethodGet, "/api/v1/audit?projectId="+itoa(proj.ID), "")
+	listing := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?projectId="+itoa(proj.ID), "")
 	var survivors []auditView
 	decode(t, listing, &survivors)
 	if len(survivors) < 10 {
@@ -971,19 +1069,19 @@ func TestMutationsAreAudited(t *testing.T) {
 // assertLabel checks the most recent entry for an action carries label. Used
 // where the label is only known from the response — a key identifier is minted
 // during the request.
-func assertLabel(t *testing.T, cl *client, action, label string) {
+func assertLabel(t *testing.T, cl *client, auditAt, action, label string) {
 	t.Helper()
 	var es []auditView
-	decode(t, cl.do(http.MethodGet, "/api/v1/audit?action="+action, ""), &es)
+	decode(t, cl.do(http.MethodGet, auditAt+"?action="+action, ""), &es)
 	if len(es) == 0 || es[0].ObjectLabel != label {
 		t.Fatalf("%s: objectLabel %+v, want %q", action, es, label)
 	}
 }
 
-func assertProjectID(t *testing.T, cl *client, action string, projectID model.ID) {
+func assertProjectID(t *testing.T, cl *client, auditAt, action string, projectID model.ID) {
 	t.Helper()
 	var es []auditView
-	decode(t, cl.do(http.MethodGet, "/api/v1/audit?action="+action, ""), &es)
+	decode(t, cl.do(http.MethodGet, auditAt+"?action="+action, ""), &es)
 	if len(es) == 0 || es[0].ProjectID == nil || *es[0].ProjectID != projectID {
 		t.Fatalf("%s: projectId %+v, want %d", action, es, projectID)
 	}
@@ -994,9 +1092,9 @@ func assertProjectID(t *testing.T, cl *client, action string, projectID model.ID
 func TestActionClassFilterNarrowsTheTrail(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	lbPath := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
-	if rec := cl.do(http.MethodPost, "/api/v1/projects", `{"slug":"gamma","name":"Gamma"}`); rec.Code != http.StatusCreated {
+	if rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"gamma","name":"Gamma"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := cl.do(http.MethodPost, lbPath+"/keys", `{"note":"k"}`); rec.Code != http.StatusCreated {
@@ -1008,7 +1106,7 @@ func TestActionClassFilterNarrowsTheTrail(t *testing.T) {
 		{authz.ClassCredential, authz.ActionKeyCreate},
 	} {
 		var es []auditView
-		decode(t, cl.do(http.MethodGet, "/api/v1/audit?actionClass="+tc.class, ""), &es)
+		decode(t, cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?actionClass="+tc.class, ""), &es)
 		if len(es) == 0 {
 			t.Fatalf("actionClass=%s returned nothing", tc.class)
 		}
@@ -1023,7 +1121,7 @@ func TestActionClassFilterNarrowsTheTrail(t *testing.T) {
 	}
 
 	// A class nobody defined is a mistake, not an empty trail.
-	if rec := cl.do(http.MethodGet, "/api/v1/audit?actionClass=nonsense", ""); rec.Code != http.StatusBadRequest {
+	if rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?actionClass=nonsense", ""); rec.Code != http.StatusBadRequest {
 		t.Errorf("actionClass=nonsense: %d %s, want 400", rec.Code, rec.Body.String())
 	}
 }
@@ -1086,7 +1184,7 @@ func TestFailedAuditWriteRollsBackTheChange(t *testing.T) {
 		}
 	}
 
-	rec := cl.do(http.MethodPost, "/api/v1/projects", `{"slug":"unrecorded","name":"Unrecorded"}`)
+	rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"unrecorded","name":"Unrecorded"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("create project with a broken audit store: %d %s, want 500", rec.Code, rec.Body.String())
 	}
@@ -1104,7 +1202,7 @@ func TestFailedAuditWriteRollsBackTheChange(t *testing.T) {
 func TestPlanIsServedStructuredAndAsAZoneSnippet(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("reader", groupRead)
-	lb := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	admin := v.session("admin", groupAdmin)
 	for _, name := range []string{"example.com", "*.example.com"} {
@@ -1208,7 +1306,7 @@ func TestParseCIDRsMasksHostBits(t *testing.T) {
 func TestEffectiveConfigurationIsRedactedAndCarriesTheRoleMapping(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("reader", groupRead)
-	rec := cl.do(http.MethodGet, "/api/v1/config", "")
+	rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/config", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -1242,7 +1340,7 @@ func (v *adminEnv) seedProjects(cl *client, slugs ...string) []model.ID {
 	v.t.Helper()
 	ids := make([]model.ID, 0, len(slugs))
 	for _, slug := range slugs {
-		rec := cl.do(http.MethodPost, "/api/v1/projects", `{"slug":"`+slug+`","name":"`+slug+`"}`)
+		rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"`+slug+`","name":"`+slug+`"}`)
 		if rec.Code != http.StatusCreated {
 			v.t.Fatalf("seed project %s: %d %s", slug, rec.Code, rec.Body.String())
 		}
@@ -1278,7 +1376,7 @@ func TestListPagingFilteringAndTotals(t *testing.T) {
 	v.seedProjects(cl, "aa-first", "bb-second", "cc-third", "dd-fourth", "zz-last")
 
 	// A limit above the maximum is refused, and the refusal names the bound.
-	rec := cl.do(http.MethodGet, "/api/v1/projects?limit=501", "")
+	rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?limit=501", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("limit=501: %d %s, want 400", rec.Code, rec.Body.String())
 	}
@@ -1288,13 +1386,13 @@ func TestListPagingFilteringAndTotals(t *testing.T) {
 		t.Errorf("the refusal %q does not name the maximum", body.Message)
 	}
 	for _, bad := range []string{"limit=0", "limit=-1", "limit=banana", "offset=-1", "offset=x"} {
-		if rec := cl.do(http.MethodGet, "/api/v1/projects?"+bad, ""); rec.Code != http.StatusBadRequest {
+		if rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?"+bad, ""); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s, want 400", bad, rec.Code, rec.Body.String())
 		}
 	}
 
 	// The total is the count of everything matching the filter, not the page.
-	rec = cl.do(http.MethodGet, "/api/v1/projects?limit=2", "")
+	rec = cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?limit=2", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
@@ -1309,7 +1407,7 @@ func TestListPagingFilteringAndTotals(t *testing.T) {
 
 	// zz-last is ordered by slug and so falls outside the first page, but the
 	// filter runs in SQL: it comes back on page one of the FILTERED result.
-	rec = cl.do(http.MethodGet, "/api/v1/projects?q=zz-last&limit=2", "")
+	rec = cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?q=zz-last&limit=2", "")
 	decode(t, rec, &page)
 	if len(page) != 1 || page[0].Slug != "zz-last" {
 		t.Fatalf("q=zz-last on a two-row page returned %+v, want the one matching row", page)
@@ -1320,20 +1418,20 @@ func TestListPagingFilteringAndTotals(t *testing.T) {
 
 	// `_` is a LIKE wildcard, and a filter containing one must match it
 	// literally — otherwise a search for "shop_eu" quietly returns everything.
-	if rec := cl.do(http.MethodPatch, "/api/v1/projects/"+itoa(v.projID), `{"name":"Shop_EU"}`); rec.Code != http.StatusOK {
+	if rec := cl.do(http.MethodPatch, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects/"+itoa(v.projID), `{"name":"Shop_EU"}`); rec.Code != http.StatusOK {
 		t.Fatalf("rename: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = cl.do(http.MethodGet, "/api/v1/projects?q=Shop_EU", "")
+	rec = cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?q=Shop_EU", "")
 	decode(t, rec, &page)
 	if len(page) != 1 || page[0].Name != "Shop_EU" {
 		t.Fatalf("q=Shop_EU returned %+v, want the one project actually named that", page)
 	}
-	rec = cl.do(http.MethodGet, "/api/v1/projects?q=Shop_E", "")
+	rec = cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?q=Shop_E", "")
 	decode(t, rec, &page)
 	if len(page) != 1 {
 		t.Errorf("q=Shop_E returned %d projects; _ was treated as a wildcard", len(page))
 	}
-	rec = cl.do(http.MethodGet, "/api/v1/projects?q=ShopXEU", "")
+	rec = cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?q=ShopXEU", "")
 	decode(t, rec, &page)
 	if len(page) != 0 {
 		t.Errorf("q=ShopXEU returned %+v; _ matched an arbitrary character", page)
@@ -1348,14 +1446,14 @@ func TestAuditTimeRangeCoversTheWholeDayNamed(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
 
-	if rec := cl.do(http.MethodPost, "/api/v1/projects", `{"slug":"today","name":"Today"}`); rec.Code != http.StatusCreated {
+	if rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"today","name":"Today"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("seed: %d %s", rec.Code, rec.Body.String())
 	}
 	// The bounds are parsed as UTC, so the day is named in UTC too.
 	day := time.Now().UTC().Format("2006-01-02")
 
 	var entries []auditView
-	rec := cl.do(http.MethodGet, "/api/v1/audit?from="+day+"&to="+day, "")
+	rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?from="+day+"&to="+day, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("range: %d %s", rec.Code, rec.Body.String())
 	}
@@ -1370,18 +1468,18 @@ func TestAuditTimeRangeCoversTheWholeDayNamed(t *testing.T) {
 	// A day before the entry excludes it, which is what makes the assertion
 	// above a test of the bound rather than of an unfiltered listing.
 	before := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
-	decode(t, cl.do(http.MethodGet, "/api/v1/audit?to="+before, ""), &entries)
+	decode(t, cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?to="+before, ""), &entries)
 	if len(entries) != 0 {
 		t.Errorf("to=%s returned %d entries recorded after it", before, len(entries))
 	}
 
 	// An inverted range is a mistake, not an empty trail: an audit screen must
 	// never answer "nothing happened" by accident.
-	rec = cl.do(http.MethodGet, "/api/v1/audit?from="+day+"&to="+before, "")
+	rec = cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?from="+day+"&to="+before, "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("from=%s&to=%s: %d %s, want 400", day, before, rec.Code, rec.Body.String())
 	}
-	if rec := cl.do(http.MethodGet, "/api/v1/audit?from=yesterday", ""); rec.Code != http.StatusBadRequest {
+	if rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?from=yesterday", ""); rec.Code != http.StatusBadRequest {
 		t.Errorf("from=yesterday: %d %s, want 400", rec.Code, rec.Body.String())
 	}
 }
@@ -1397,13 +1495,13 @@ func TestProjectOutsideTheFirstPageIsStillReadableByID(t *testing.T) {
 	last := ids[0]
 
 	var page []projectView
-	rec := cl.do(http.MethodGet, "/api/v1/projects?limit=1", "")
+	rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects?limit=1", "")
 	decode(t, rec, &page)
 	if len(page) != 1 || page[0].ID == last {
 		t.Fatalf("first page %+v already contains project %d; the test proves nothing", page, last)
 	}
 
-	rec = cl.do(http.MethodGet, "/api/v1/projects/"+itoa(last), "")
+	rec = cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects/"+itoa(last), "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get project %d by id: %d %s, want 200", last, rec.Code, rec.Body.String())
 	}
@@ -1412,7 +1510,7 @@ func TestProjectOutsideTheFirstPageIsStillReadableByID(t *testing.T) {
 	if got.ID != last || got.Slug != "zz-last" {
 		t.Fatalf("got %+v, want project %d", got, last)
 	}
-	if rec := cl.do(http.MethodGet, "/api/v1/projects/00000000-0000-7000-8000-000000000999", ""); rec.Code != http.StatusNotFound {
+	if rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects/00000000-0000-7000-8000-000000000999", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown project by id: %d, want 404", rec.Code)
 	}
 }
@@ -1460,7 +1558,7 @@ func (v *adminEnv) seedInteraction(label string, withdrawn bool, abandoned bool,
 func TestInteractionOutcomesFilterAndTotal(t *testing.T) {
 	v := newAdminEnv(t)
 	reader := v.session("reader", groupRead)
-	path := "/api/v1/loadbalancers/" + itoa(v.lb.ID) + "/interactions"
+	path := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID) + "/interactions"
 
 	v.seedInteraction("validated-one", true, false, 4)
 	v.seedInteraction("unqueried-one", true, false, 0)
@@ -1540,7 +1638,7 @@ func TestInteractionOutcomesFilterAndTotal(t *testing.T) {
 func TestDomainCreateRefusesASuppliedAliasLabel(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	lb := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	rec := cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com","aliasLabel":"shop-alias"}`)
 	if rec.Code != http.StatusBadRequest {
@@ -1600,7 +1698,7 @@ func TestDomainCreateIncludeWildcard(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			v := newAdminEnv(t)
 			cl := v.session("admin", groupAdmin)
-			lbPath := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+			lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 			rec := cl.do(http.MethodPost, lbPath+"/domains", tc.body)
 			if rec.Code != http.StatusCreated {
@@ -1637,7 +1735,7 @@ func TestDomainCreateIncludeWildcard(t *testing.T) {
 func TestDomainCreateIncludeWildcardRefusesTheWholeRequest(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	lbPath := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	// The premise: without the flag, `co.uk` is accepted.
 	rec := cl.do(http.MethodPost, lbPath+"/domains", `{"name":"co.uk","includeWildcard":true}`)
@@ -1657,8 +1755,8 @@ func TestDomainCreateIncludeWildcardRefusesTheWholeRequest(t *testing.T) {
 func TestDomainPairIsAuditedTwice(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", groupAdmin)
-	r := &auditRecorder{cl: cl}
-	lbPath := "/api/v1/loadbalancers/" + itoa(v.lb.ID)
+	r := &auditRecorder{cl: cl, auditAt: "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit"}
+	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 	pid := &v.lb.ProjectID
 
 	r.step(t, http.MethodPost, lbPath+"/domains", `{"name":"shop.example.com","includeWildcard":true}`,
