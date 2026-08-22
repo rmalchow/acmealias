@@ -82,6 +82,17 @@ func (a *admin) createAccount(c echo.Context) error {
 	if sess == nil {
 		return echo.ErrUnauthorized
 	}
+	// Closed by default. Creating an account means creating a tenant, and a
+	// deployment that authenticates an entire organization does not want every
+	// person in it able to do that. The route exists in every deployment and
+	// answers a refusal, rather than being absent — a route that is only hidden
+	// is still reachable by anyone who reads the bundle.
+	if !a.opts.Config.AllowAccountCreation {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{
+			"message": "creating accounts is not enabled on this deployment",
+			"code":    "account_creation_closed",
+		})
+	}
 	var body struct{ Slug, Name string }
 	if err := bind(c, &body); err != nil {
 		return err

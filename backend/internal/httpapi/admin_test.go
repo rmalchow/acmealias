@@ -97,6 +97,7 @@ type adminEnv struct {
 	projID model.ID
 	roleID model.ID
 	sc     store.Scope
+	opts   AdminOptions
 }
 
 func newAdminEnv(t *testing.T) *adminEnv {
@@ -133,16 +134,16 @@ func newAdminEnv(t *testing.T) *adminEnv {
 		DatabaseURL:        "postgres://user:hunter2@db:5432/acme",
 	}
 
-	e := echo.New()
-	e.Logger.SetOutput(io.Discard)
-	err = RegisterAdmin(e, AdminOptions{
+	opts := AdminOptions{
 		DB:     db,
 		Guard:  &authz.Guard{Auth: &testAuth{db: db}, Mapping: authz.MappingFromConfig(cfg), Log: discard()},
 		Auth:   testConsoleAuth{},
 		Config: cfg,
 		Log:    discard(),
-	})
-	if err != nil {
+	}
+	e := echo.New()
+	e.Logger.SetOutput(io.Discard)
+	if err := RegisterAdmin(e, opts); err != nil {
 		t.Fatalf("RegisterAdmin: %v", err)
 	}
 	// The console's history fallback, as group 16 mounts it. Registering it
@@ -158,7 +159,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	if err := store.CreateRole(t.Context(), db, sc, spare); err != nil {
 		t.Fatalf("create spare role: %v", err)
 	}
-	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID, roleID: spare.ID}
+	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID, roleID: spare.ID, opts: opts}
 }
 
 // Seeders for the destructive rows of TestEveryRouteEnforcesItsRole. Each
@@ -270,6 +271,30 @@ func seedMember(t *testing.T, v *adminEnv, suffix string) string {
 	}
 	t.Fatal("seeded member not found")
 	return ""
+}
+
+// openAccountCreation re-registers the API with the switch on, for the tests
+// that exercise the open half of U9.
+func (v *adminEnv) openAccountCreation(t *testing.T) {
+	t.Helper()
+	v.opts.Config.AllowAccountCreation = true
+	e := echo.New()
+	e.Logger.SetOutput(io.Discard)
+	if err := RegisterAdmin(e, v.opts); err != nil {
+		t.Fatalf("re-register admin API: %v", err)
+	}
+	v.e = e
+}
+
+// listAccountsFor reads the accounts the deployment holds, for the tests that
+// assert one was or was not created.
+func listAccountsFor(t *testing.T, v *adminEnv) ([]model.Account, error) {
+	t.Helper()
+	var accs []model.Account
+	err := store.CrossAccount(t.Context(), v.db, func(tx *gorm.DB) error {
+		return tx.Find(&accs).Error
+	})
+	return accs, err
 }
 
 // session inserts a session row in the given groups and returns a client
@@ -475,7 +500,10 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		// selected (design P19), so every role reaches them — they are about
 		// which account you are in, not about anything inside one.
 		{"GET", "/api/v1/accounts", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"POST", "/api/v1/accounts", `{"slug":"fresh","name":"Fresh"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		// Nobody: account creation is closed unless a deployment opens it, and
+		// the refusal is the same for every role because it is not about what
+		// they may do — it is about what this deployment does at all.
+		{"POST", "/api/v1/accounts", `{"slug":"fresh","name":"Fresh"}`, nil, nil},
 		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/select", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 
 		// Roles and membership change what people can do, so they are governed

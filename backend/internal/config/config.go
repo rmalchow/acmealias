@@ -45,6 +45,22 @@ type Config struct {
 	// DatabaseURL is a postgres:// connection string (ACME_DATABASE_URL).
 	DatabaseURL string
 
+	// AllowAccountCreation opens POST /api/v1/accounts to any authenticated
+	// person.
+	//
+	// Default FALSE, which is the important half. Creating an account means
+	// creating a tenant, and a deployment that authenticates a whole
+	// organization through its identity provider does not want every one of them
+	// able to do that — the internal edition has exactly one account and expects
+	// to keep it.
+	//
+	// This is U9's switch from `public-edition`, borrowed early because the route
+	// it governs landed here with task 7.4a and an ungated one is a hole. The
+	// enforcement is in the handler rather than in the console's navigation,
+	// which is U9's actual point: a route hidden from a menu is still on the
+	// internet.
+	AllowAccountCreation bool
+
 	// MigrateOnStart runs migrations at startup unless set to false
 	// (ACME_MIGRATE_ON_START), see design D8.
 	MigrateOnStart bool
@@ -236,8 +252,9 @@ func Load() (Config, error) {
 		AdminListenAddr:     str("ACME_ADMIN_LISTEN", ":8081"),
 		InternalListenAddr:  str("ACME_INTERNAL_LISTEN", ":9090"),
 
-		DatabaseURL:    str("ACME_DATABASE_URL", ""),
-		MigrateOnStart: boolean("ACME_MIGRATE_ON_START", true),
+		DatabaseURL:          str("ACME_DATABASE_URL", ""),
+		AllowAccountCreation: boolean("ACME_ALLOW_ACCOUNT_CREATION", false),
+		MigrateOnStart:       boolean("ACME_MIGRATE_ON_START", true),
 
 		AliasUseDomain: boolean("ACME_ALIAS_USE_DOMAIN", false),
 
