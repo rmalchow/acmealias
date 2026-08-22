@@ -141,11 +141,13 @@ Each obligation, and where it now lives:
   has not proved control of the address gets no session. This is a stage in the provider's flow that
   can be omitted, so it is verified rather than assumed.
 - **Reset.** A recovery flow with email verification. The provider ends its own sessions; **our**
-  session store does not know a reset happened, so the service subscribes to the provider's logout
-  or revocation signal, or falls back to a short idle expiry. This is the one obligation that
-  delegation genuinely complicates rather than simplifies, and it is called out because the failure —
-  a compromised credential reset while the attacker's session in *our* console stays alive — is
-  silent.
+  session store does not know a reset happened, so an attacker's session in our console can outlive
+  the reset that was meant to kill it. The answer for now is a **short idle expiry** on service
+  sessions, which bounds that window to the idle timeout without any coupling to the provider. It is
+  a bound rather than a fix, and it is chosen because it needs nothing from the provider, cannot
+  break when the provider is upgraded, and fails in the safe direction. A back-channel logout or a
+  token-revocation check would close the window properly and remains the eventual answer; both are
+  deferred. What matters is that the window is now stated rather than unbounded.
 - **Non-disclosure.** The provider's enrollment and recovery responses must not differ between an
   address that has a user and one that does not. Default flows generally get this right; it is on the
   verification list because it is a membership oracle when wrong.
@@ -177,6 +179,56 @@ marginal cost of one more tenant is close to zero and this trade is not worth ma
 provider at sign-in. It trades a dependency for an obligation — argon2id, tokens, reset semantics,
 attempt limiting, and the breach consequences of holding password hashes for strangers — and the
 dependency is the cheaper of the two, especially when it already exists for staff.
+
+### U12. One identity provider instance, and separation inside it is policy rather than isolation
+
+Staff and customers authenticate against the same authentik instance at `auth.edgedns.eu`. The
+alternative — a second instance, or authentik's own multi-tenancy feature — is rejected: the feature
+is experimental, and a second instance doubles the thing this design just decided was cheap precisely
+because it already exists.
+
+The consequence has to be stated before the mitigations, because it is the reason the mitigations
+matter: **one instance is one user directory and one administrative plane.** Whatever is configured
+below, an attacker who obtains authentik administrator access holds both planes. Separation inside a
+single instance is a set of policies that can be misbound, not a boundary that cannot be crossed.
+
+Given that, the strictest arrangement available:
+
+- **Customers are `external` users; staff are `internal`.** authentik's user type distinction exists
+  for exactly this shape — external users have no access to the administration interface or the
+  application dashboard, which removes a whole surface without a policy having to be written.
+- **Two applications, each bound to a group.** The console application admits the customer group; the
+  staff application admits the staff group. A token for one is not a token for the other, and our
+  service verifies which application issued the token rather than trusting a valid signature alone.
+- **The staff application has no enrolment flow.** Not a disabled one — none. Staff accounts are
+  created by an administrator. A customer's enrolment cannot reach a flow that does not exist.
+- **Brands separate the hostnames**, so the customer enrolment and recovery flows are reachable at the
+  customer-facing name and not from the staff one.
+- **Administrator access is a small group with mandatory multi-factor authentication**, since that
+  group is the ceiling on everything above.
+
+**One property of the existing design helps and should not be overstated.** `staff-plane` S2 maps
+group claims to staff permissions through configuration that is not editable at runtime, so inventing
+a new group in authentik grants nothing until our service is reconfigured and restarted. That raises
+the cost of one attack — group creation — and does nothing against an attacker who simply adds
+themselves to a group already named in the mapping. It is a speed bump, not a boundary, and is
+recorded that way.
+
+**What our service must not do is trust the directory for tenancy.** `tenancy-and-permissions` P18 is
+the load-bearing rule here: public account membership is rows written through `account-invitations`,
+never derived from group claims. So even a compromised authentik cannot place someone inside a
+customer's account — it can create a user, and that user belongs to nothing. Tenant composition is
+ours, which is exactly why the two mechanisms were separated in the first place.
+
+**Rejected: authentik's multi-tenancy feature.** Genuine isolation, and explicitly experimental.
+Building the identity layer of a commercial service on an alpha feature trades a stated risk for an
+unstated one.
+
+**Rejected: a second authentik instance for customers.** Real isolation of directory and
+administration, at the cost of a second deployment, second backups, second restore rehearsal and
+second patching commitment — for one operator. Worth revisiting if customer identity ever becomes
+attractive enough to attack independently, and the arrangement above is the reason it need not be
+revisited now.
 
 ### U5. Payment funds credit purchases, and a balance is never typed in
 
@@ -447,10 +499,13 @@ an internal deployment.
   obligation delegation complicates. A back-channel logout, a token-revocation check, or simply a
   short idle expiry are all viable and they differ in how long a stolen session outlives the reset
   that was supposed to kill it.
-- **One tenant or two in the identity provider?** Staff and customers must not share a directory —
-  a customer must never be able to enrol into the staff tenant — but whether that is two tenants, two
-  brands, or two flows within one is a configuration question with security consequences worth
-  settling explicitly.
+- **When does the short idle expiry stop being enough?** U4 bounds the post-reset window with an
+  idle timeout and defers the proper fix. The trigger for building back-channel logout is probably
+  the first credential-compromise report, and the number itself — how short is short — is a usability
+  trade nobody has made yet.
+- **Does the staff plane require multi-factor authentication for everyone, or only administrators?**
+  U12 requires it for authentik administrators. Extending it to every staff sign-in is a policy
+  decision with no structural consequence.
 - **When does self-registration open?** The switch of U9 exists; the trigger for turning it on — a
   number of invited customers, a working payment integration, or a date — is a commercial decision
   and is not made here.

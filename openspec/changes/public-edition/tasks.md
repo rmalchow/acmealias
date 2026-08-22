@@ -8,15 +8,20 @@
 ## 2. Delegated authentication
 
 - [ ] 2.1 Point both editions at the identity provider at `auth.edgedns.eu`, differing only in the tenant they authenticate against (design U3)
-- [ ] 2.2 Configure separate tenants for staff and for customers; assert a customer-tenant identity is not authenticated on the staff surface
+- [ ] 2.2 Configure one instance with two applications — console and staff — each bound to its own group; register customers as external users; give the staff application no enrolment flow (design U12)
+- [ ] 2.2a Verify the issuing application when validating a token, rather than accepting any validly signed one; assert a console token is refused on the staff surface
+- [ ] 2.2b Separate the hostnames by brand so customer enrolment and recovery are unreachable from the staff name
+- [ ] 2.2c Restrict provider administrator access to a small group with mandatory multi-factor authentication
 - [ ] 2.3 Configure the customer enrolment flow with an email-verification stage, and assert no usable session is issued without it
 - [ ] 2.4 Configure the recovery flow with email verification, and assert enrolment and recovery responses do not reveal whether an address has a user
 - [ ] 2.5 Configure a reputation policy limiting repeated failed attempts by username and by client address, and exercise it in acceptance rather than assuming it (design U4)
-- [ ] 2.6 Make a credential reset or revocation at the provider end the service's own sessions for that person — back-channel logout, revocation check, or a documented short idle expiry
+- [ ] 2.6 Bound the post-reset window with a short idle expiry on service sessions, and document the residual window rather than implying a reset ends them immediately (design U4)
+- [ ] 2.6a Record back-channel logout or a revocation check as the eventual fix, not built here
 - [ ] 2.7 Assert no route or screen accepts a password and no credential material is stored
 - [ ] 2.8 Create a user belonging to no account on first sign-in, and confirm `tenancy-and-permissions` treats that state as normal
 - [ ] 2.9 Confirm enrolment reached through an invitation needs no separate address confirmation, per `account-invitations`, without duplicating that rule here
 - [ ] 2.10 Document operating the provider: backup, tested restore, patching commitment, and `internal/adminctl` as the path when the provider is unavailable
+- [ ] 2.11 Assert no group or attribute in the provider grants membership of a customer account (design U12, `tenancy-and-permissions` P18)
 
 ## 3. Editions
 

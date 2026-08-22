@@ -11,8 +11,9 @@ revocation and cross-site request forgery protection SHALL be properties of the 
 than of the provider. No component downstream of the session SHALL depend on the provider's tokens,
 claims or flows.
 
-Editions SHALL differ only in which of the provider's tenants they authenticate against, and a person
-enrolled in one tenant SHALL NOT thereby be authenticated in another.
+Editions and planes SHALL differ in which application of the provider they authenticate against, and
+the service SHALL verify which application issued a token rather than accepting any validly signed
+token. A person admitted to one application SHALL NOT thereby be admitted to another.
 
 #### Scenario: No credential is stored
 
@@ -29,10 +30,15 @@ enrolled in one tenant SHALL NOT thereby be authenticated in another.
 - **WHEN** a state-changing management request is made with a valid session and no matching token header
 - **THEN** it is refused
 
-#### Scenario: Tenants do not authenticate each other's people
+#### Scenario: A customer identity does not reach the staff surface
 
-- **WHEN** a person enrolled in the customer tenant reaches the staff surface
-- **THEN** they are not authenticated there
+- **WHEN** a person admitted to the customer application reaches the staff surface
+- **THEN** they are not authenticated there, and a token issued for the customer application is refused
+
+#### Scenario: A session's idle life is bounded
+
+- **WHEN** a session is not used for the configured idle period
+- **THEN** it is no longer usable, whatever the provider's own session state
 
 ### Requirement: A person becomes a user by enrolling with an address they control
 
@@ -121,3 +127,28 @@ SHALL remain possible while account creation is closed.
 
 - **WHEN** the configuration enabling self-service account creation is set
 - **THEN** the same endpoint accepts account creation
+
+### Requirement: The staff and customer surfaces are separated within the identity provider
+
+Staff and customers MAY share one identity provider instance. Where they do, customers SHALL be
+registered as external users with no access to the provider's administration interface, staff and
+customers SHALL be admitted through separate applications each bound to its own group, and the staff
+application SHALL have no enrolment flow.
+
+Membership of a customer's account SHALL NOT be derived from any group or attribute held by the
+identity provider.
+
+#### Scenario: A customer cannot enrol into the staff surface
+
+- **WHEN** enrolment is attempted against the staff application
+- **THEN** no enrolment flow is reachable and no account is created
+
+#### Scenario: A customer identity reaches no administrative interface
+
+- **WHEN** a customer signs in
+- **THEN** they reach neither the provider's administration interface nor its application dashboard
+
+#### Scenario: A provider group does not place anyone in an account
+
+- **WHEN** a person is added to any group in the identity provider
+- **THEN** they gain no membership of any customer account
