@@ -57,6 +57,12 @@
 - [ ] 7.1 Create the static site as a separate deployment with its own pipeline and domain
 - [ ] 7.2 Link "try now" into the public edition's registration route
 - [ ] 7.3 State plainly that the service answers challenges and serves DNS, and does not issue certificates
+- [ ] 7.4 State that DNSSEC is not supported and that a signed domain must have its delegation signer removed first (design U10, U11)
+- [ ] 7.5 Publish terms stating best-effort availability with no service level agreement
+- [ ] 7.6 Publish an abuse contact address and the twelve-hour response commitment `staff-plane` S10 makes
+- [ ] 7.7 Publish a privacy statement covering registration addresses, zone contents, staff access records and blocked identities, each with its retention period
+- [ ] 7.8 Publish the operator's identity and contact address as the jurisdiction requires
+- [ ] 7.9 Gate the site's release on 7.4-7.8 being present, so it cannot go live as a signup button alone
 
 ## 8. Acceptance and closing out
 

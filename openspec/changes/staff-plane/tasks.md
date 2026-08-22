@@ -67,4 +67,4 @@
 - [ ] 6.8 Make entry addition non-retroactive: flag matching existing accounts and zones for review, with enforcement as a separate action
 - [ ] 6.9 Restrict blocklist reads to the staff plane and give entries a stated retention
 - [ ] 6.10 Tests: suspend/restore round-trips a customer-disabled zone as disabled; a suspension opens no access grant; a suffix entry catches a subdomain; adding an entry serves an existing matching zone unchanged
-- [ ] 6.11 Document the published abuse response commitment of twelve hours alongside the operation
+- [ ] 6.11 Document the abuse response commitment of twelve hours alongside the operation; it is published on the public site by `public-edition` tasks 7.6 and U11

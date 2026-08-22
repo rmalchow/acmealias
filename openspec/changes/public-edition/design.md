@@ -277,6 +277,42 @@ session, and a copy change must never require redeploying a DNS service.
 Static site, its own pipeline, its own domain. The only coupling is a link into the public edition's
 registration route and a shared visual language.
 
+### U11. The site carries the obligations, because several decisions elsewhere say "published"
+
+U7 settles how the marketing site is *delivered* and says almost nothing about what it must contain.
+That gap matters more than it looks, because three changes now describe commitments as published
+without anything owning the publishing.
+
+The site therefore carries, as requirements rather than as copy suggestions:
+
+- **What the service does and does not do.** It answers ACME challenges and serves authoritative DNS;
+  it does not issue or hold certificates. "ACME" leads people to expect a certificate authority, and
+  the correction belongs before signup rather than in a support reply.
+- **That DNSSEC is not supported**, and that a domain signed today must have its delegation signer
+  removed at the registrar before it can be hosted (U10).
+- **That availability is best-effort with no service level agreement.** Q6's position, and the terms
+  are the only place it becomes a statement rather than an omission. A customer delegating their apex
+  to us is handing over the availability of their whole domain, mail included; letting them infer a
+  promise we have not made is the kind of silence that ends in a dispute.
+- **An abuse contact and the response commitment.** A published address, and the twelve hours
+  `staff-plane` S10 commits to, measured from delivery to that address. Without a published contact,
+  reports reach our upstream provider instead of us, which is both slower and worse for us.
+- **A privacy statement covering what is held and for how long.** Registration addresses, zone
+  contents, staff access records, and the identity blocklist — which is a list of people retained
+  after they have stopped being customers, and is the entry most obviously requiring disclosure.
+- **The operator's identity.** Who is contracting, at what address. This is a legal requirement in
+  the jurisdiction the service is operated from, and it is also the thing a stranger looks for before
+  delegating a domain to an unfamiliar provider.
+
+**These are requirements on the site, not on the service**, which is why they live beside U7 rather
+than in the binary. They are stated here so that "published" elsewhere in these changes resolves to
+something concrete, and so that the site cannot ship as three sentences and a signup button while
+four other changes assume it says more.
+
+**The wording is not drafted here.** Terms, privacy statement and imprint need the operating entity's
+details and a template worth trusting, neither of which is a design decision. What is decided is that
+the site does not go live without them.
+
 ### U8. Onboarding is the product's first-run story, and it is nearly all existing endpoints
 
 A person who has just confirmed their address is led to a first verified domain without contacting

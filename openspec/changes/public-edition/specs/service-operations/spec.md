@@ -68,3 +68,34 @@ domain reaching verification, a credit purchase, and a protective limit refusing
 
 - **WHEN** the acceptance suite runs against the locally authenticated edition
 - **THEN** registration, confirmation, verification, purchase and a limit refusal are all exercised
+
+### Requirement: The public site states the service's limits, contacts and obligations
+
+The public site SHALL state what the service does and does not do, including that it does not issue
+or hold certificates and that DNSSEC is not supported. It SHALL state that availability is
+best-effort and carries no service level agreement.
+
+It SHALL publish an abuse contact address together with the response time the service commits to,
+a statement of what personal data is held and for how long, and the identity of the operator.
+
+The site SHALL NOT be released without them.
+
+#### Scenario: The limits are stated before registration
+
+- **WHEN** the public site is read by someone with no account
+- **THEN** it states that certificates are not issued and that DNSSEC is not supported
+
+#### Scenario: No availability promise is implied
+
+- **WHEN** the terms are read
+- **THEN** they state that availability is best-effort and that no service level is guaranteed
+
+#### Scenario: Abuse reports have somewhere to go
+
+- **WHEN** the public site is read
+- **THEN** an abuse contact address and the committed response time are published
+
+#### Scenario: Retention of personal data is disclosed
+
+- **WHEN** the privacy statement is read
+- **THEN** it covers registration addresses, zone contents, staff access records and blocked identities, each with a retention period
