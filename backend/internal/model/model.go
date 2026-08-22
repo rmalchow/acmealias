@@ -323,21 +323,21 @@ func (Domain) TableName() string { return "domains" }
 // APIKey stores only the SHA-256 digest of the secret; the secret itself is shown
 // once at creation and never persisted (design D3).
 type APIKey struct {
-	ID             ID     `gorm:"primaryKey"`
-	AccountID      ID     `gorm:"column:account_id"`
-	ProjectID      ID     `gorm:"column:project_id"`
-	LoadBalancerID ID     `gorm:"column:load_balancer_id"`
-	Identifier     string // 'k_7f3a91c4', non-secret
-	SecretHash     []byte `gorm:"column:secret_hash"`
-	DisplayPrefix  string
-	Note           string
-	CreatedAt      time.Time
-	ExpiresAt      *time.Time
-	LastUsedAt     *time.Time
-	DisabledAt     *time.Time
+	ID        ID `gorm:"primaryKey"`
+	AccountID ID `gorm:"column:account_id"`
+	// There is no LoadBalancerID. A key is a subject anchored to an account,
+	// and what it may reach is its grants — see migration 000009 for why the
+	// column could not stay alongside them.
+	Identifier    string // 'k_7f3a91c4', non-secret
+	SecretHash    []byte `gorm:"column:secret_hash"`
+	DisplayPrefix string
+	Note          string
+	CreatedAt     time.Time
+	ExpiresAt     *time.Time
+	LastUsedAt    *time.Time
+	DisabledAt    *time.Time
 
-	LoadBalancer *LoadBalancer   `gorm:"foreignKey:LoadBalancerID"`
-	Networks     []APIKeyNetwork `gorm:"foreignKey:APIKeyID"`
+	Networks []APIKeyNetwork `gorm:"foreignKey:APIKeyID"`
 	// Grants are preloaded with the key on the authentication path, so the
 	// challenge handler adds no query to check a permission (constraint 2).
 	Grants []APIKeyGrant `gorm:"foreignKey:APIKeyID"`

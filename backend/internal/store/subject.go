@@ -130,23 +130,33 @@ func UnrestrictedRole(ctx context.Context, db *gorm.DB, sc Scope) (*model.Role, 
 // The lock is the whole point: two concurrent removals must not each see two
 // members and both proceed. FOR UPDATE serializes them, so the second sees the
 // count the first left behind.
-func CountUnrestrictedMembers(ctx context.Context, tx *gorm.DB, sc Scope, lock bool) (int64, error) {
-	q := tx.
-		Table("account_members m").
-		Joins("join roles r on r.id = m.role_id").
-		Where("m.account_id = ? AND r.unrestricted", sc.AccountID())
-	if lock {
-		// A plain COUNT cannot be locked, so the rows are selected and counted
-		// in Go — the set is a handful of members, and correctness here is
-		// worth more than the round trip.
-		var ids []model.ID
-		if err := q.Clauses(lockingClause()).Pluck("m.id", &ids).Error; err != nil {
-			return 0, fmt.Errorf("store: count unrestricted members: %w", err)
-		}
-		return int64(len(ids)), nil
-	}
+// It runs inside Scope.Run, which reuses an already-open transaction rather than
+// nesting. That matters more than it looks: called with a bare handle and no
+// scope, the row-level security policy filters every row out and the count comes
+// back as zero — a caller checking "is anyone left" would then conclude nobody
+// is. Wrapping it here means the question cannot be asked in a way that answers
+// wrongly.
+func CountUnrestrictedMembers(ctx context.Context, db *gorm.DB, sc Scope, lock bool) (int64, error) {
 	var n int64
-	if err := q.Count(&n).Error; err != nil {
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		q := tx.
+			Table("account_members m").
+			Joins("join roles r on r.id = m.role_id").
+			Where("m.account_id = ? AND r.unrestricted", sc.AccountID())
+		if lock {
+			// A plain COUNT cannot be locked, so the rows are selected and
+			// counted in Go — the set is a handful of members, and correctness
+			// here is worth more than the round trip.
+			var ids []model.ID
+			if err := q.Clauses(lockingClause()).Pluck("m.id", &ids).Error; err != nil {
+				return err
+			}
+			n = int64(len(ids))
+			return nil
+		}
+		return q.Count(&n).Error
+	})
+	if err != nil {
 		return 0, fmt.Errorf("store: count unrestricted members: %w", err)
 	}
 	return n, nil

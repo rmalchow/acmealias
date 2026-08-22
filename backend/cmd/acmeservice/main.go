@@ -114,6 +114,18 @@ func runService(cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
+	// The group mapping now names role ROWS rather than constants, so a
+	// configured group can point at a role nobody created. That is reported
+	// here rather than refused: configuring the group before creating the role
+	// is a reasonable order to do things in, and refusing to start would turn it
+	// into a lockout. Silence would be worse than either — the symptom is one
+	// person unable to do anything, with nothing saying why.
+	if bootstrap, err := store.ScopeForBootstrap(ctx, db); err == nil {
+		authz.ReportUnresolvedRoles(ctx, db, bootstrap, authz.MappingFromConfig(cfg), log)
+	} else {
+		log.Warn("single-account scope not resolved; the group mapping was not checked", "error", err)
+	}
+
 	metrics := obs.New()
 
 	view := zoneview.New(zoneview.FromDB(db))

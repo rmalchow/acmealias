@@ -26,7 +26,14 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 	if err != nil {
 		return err
 	}
-	k.LoadBalancerID = lb.ID
+	// The CLI still takes --loadbalancer, because that is what an operator has
+	// in front of them. What it creates is a grant naming that load balancer,
+	// which is the same authority the dropped column carried and is now sayable
+	// alongside wider ones.
+	k.Grants = []model.APIKeyGrant{
+		{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true},
+		{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &lb.ID, Action: "challenge.withdraw", Inheritable: true},
+	}
 	k.Note = note
 	if expiresIn > 0 {
 		t := time.Now().UTC().Add(expiresIn)
@@ -97,15 +104,14 @@ func KeyRevoke(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 		if err := store.RevokeAPIKey(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
-		projectID := k.ProjectID
 		return []authz.Event{{
 			Action: authz.ActionKeyRevoke, ObjectType: authz.ObjectAPIKey,
-			ObjectID: &id, ObjectLabel: k.Identifier, ProjectID: &projectID, Before: k,
+			ObjectID: &id, ObjectLabel: k.Identifier, Before: k,
 		}}, nil
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "revoked api key id %d\n", id)
+	fmt.Fprintf(out, "revoked api key %s\n", id)
 	return nil
 }

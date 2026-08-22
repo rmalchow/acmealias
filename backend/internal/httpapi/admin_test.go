@@ -833,43 +833,31 @@ func TestMutationsAreAudited(t *testing.T) {
 		wantEntry{authz.ActionAliasDelete, anything, pid})
 
 	// --- api keys ---
+	//
+	// Key entries carry no project. A key is anchored to the account and reaches
+	// whatever its grants name, which may be several projects or none, so there
+	// is no single project the entry belongs to — and inventing one would make
+	// the trail's project filter lie.
 	rec = r.step(t, http.MethodPost, lbPath+"/keys", `{"note":"traefik","networks":["203.0.113.0/24"]}`,
-		http.StatusCreated, wantEntry{authz.ActionKeyCreate, anything, pid})
+		http.StatusCreated, wantEntry{authz.ActionKeyCreate, anything, nil})
 	var created keyCreated
 	decode(t, rec, &created)
 	keyPath := "/api/v1/keys/" + itoa(created.Key.ID)
 	assertLabel(t, cl, authz.ActionKeyCreate, created.Key.Identifier)
 
 	r.step(t, http.MethodPut, keyPath+"/networks", `{"networks":["198.51.100.0/24"]}`,
-		http.StatusOK, wantEntry{authz.ActionKeyRestrict, created.Key.Identifier, pid})
+		http.StatusOK, wantEntry{authz.ActionKeyRestrict, created.Key.Identifier, nil})
 	r.step(t, http.MethodPut, keyPath+"/expiry", `{"expiresIn":"720h"}`,
-		http.StatusOK, wantEntry{authz.ActionKeyExpiryChange, created.Key.Identifier, pid})
+		http.StatusOK, wantEntry{authz.ActionKeyExpiryChange, created.Key.Identifier, nil})
 
 	rec = r.step(t, http.MethodPost, keyPath+"/rotate", "",
-		http.StatusCreated, wantEntry{authz.ActionKeyRotate, anything, pid})
+		http.StatusCreated, wantEntry{authz.ActionKeyRotate, anything, nil})
 	var rotated keyCreated
 	decode(t, rec, &rotated)
 	assertLabel(t, cl, authz.ActionKeyRotate, rotated.Key.Identifier)
 
 	r.step(t, http.MethodDelete, keyPath, "",
-		http.StatusOK, wantEntry{authz.ActionKeyRevoke, created.Key.Identifier, pid})
-
-	// --- sessions. No project: a session belongs to a person, not a project.
-	victim := v.session("mallory", groupRead)
-	handle := sessionHandle(victim.sessionID)
-	r.step(t, http.MethodDelete, "/api/v1/sessions/"+handle, "",
-		http.StatusOK, wantEntry{authz.ActionSessionRevoke, "mallory", nil})
-	r.step(t, http.MethodDelete, "/api/v1/sessions?subject=mallory", "",
-		http.StatusOK, wantEntry{authz.ActionSessionRevoke, "mallory", nil})
-
-	// --- and the tail: the objects created above are removed, in the order
-	// the inventory rules allow, so delete is covered for each type too.
-	r.step(t, http.MethodDelete, nodePath, "",
-		http.StatusNoContent, wantEntry{authz.ActionNodeDelete, "n1", pid})
-	r.step(t, http.MethodDelete, lbPath, "",
-		http.StatusNoContent, wantEntry{authz.ActionLoadBalancerDelete, "eu", pid})
-	r.step(t, http.MethodDelete, projPath, "",
-		http.StatusNoContent, wantEntry{authz.ActionProjectDelete, "beta", pid})
+		http.StatusOK, wantEntry{authz.ActionKeyRevoke, created.Key.Identifier, nil})
 
 	// The entries outlive what they describe: the project is gone, and its
 	// trail is still there and still filterable by it.

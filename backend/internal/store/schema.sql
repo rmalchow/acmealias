@@ -85,20 +85,13 @@ table api_keys
   column id uuid not null default uuidv7()
   column identifier text not null
   column last_used_at timestamp with time zone null
-  column load_balancer_id uuid not null
   column note text not null default ''::text
-  column project_id uuid not null
   column secret_hash bytea not null
   constraint api_keys_identifier_key unique (identifier)
-  constraint api_keys_lb_account_fkey foreign key (load_balancer_id,account_id)
-  constraint api_keys_lb_project_fkey foreign key (load_balancer_id,project_id)
-  constraint api_keys_load_balancer_id_fkey foreign key (load_balancer_id)
   constraint api_keys_pkey primary key (id)
   index api_keys_account_id_idx CREATE INDEX api_keys_account_id_idx ON api_keys USING btree (account_id)
   index api_keys_identifier_key CREATE UNIQUE INDEX api_keys_identifier_key ON api_keys USING btree (identifier)
-  index api_keys_load_balancer_id_idx CREATE INDEX api_keys_load_balancer_id_idx ON api_keys USING btree (load_balancer_id)
   index api_keys_pkey CREATE UNIQUE INDEX api_keys_pkey ON api_keys USING btree (id)
-  index api_keys_project_id_idx CREATE INDEX api_keys_project_id_idx ON api_keys USING btree (project_id)
 
 table audit_entries
   column account_id uuid null

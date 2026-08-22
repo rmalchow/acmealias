@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/apikey"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/dnsname"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
@@ -200,6 +201,15 @@ var errBadBody = echo.NewHTTPError(http.StatusBadRequest,
 // caller cannot map the inventory by the difference.
 var errRefused = echo.NewHTTPError(http.StatusForbidden, "not authorized for that name")
 
+// The two actions a challenge key performs. They are separate so a key can be
+// given the ability to publish without the ability to withdraw — which is what
+// an operator wants for a load balancer that renews automatically but should
+// never take a live value away.
+const (
+	challengePublish  = "challenge.publish"
+	challengeWithdraw = "challenge.withdraw"
+)
+
 // errStorage is the single 500. It names no datastore identifier, driver message
 // or query text; the real error goes to the log.
 var errStorage = echo.NewHTTPError(http.StatusInternalServerError, "challenge record could not be stored")
@@ -251,7 +261,7 @@ const (
 // resolve validates the body, normalizes the name, resolves it to an alias and
 // checks that the alias belongs to the load balancer the presented key is scoped to.
 // Authorization is positive: the alias must exist AND be ours to write to.
-func (h *challenge) resolve(c echo.Context) (*resolved, error) {
+func (h *challenge) resolve(c echo.Context, action string) (*resolved, error) {
 	ctx := c.Request().Context()
 
 	key := apikey.FromContext(c)
@@ -297,13 +307,17 @@ func (h *challenge) resolve(c echo.Context) (*resolved, error) {
 		h.refuse(ctx, key, name, form, "alias belongs to another account")
 		return nil, errRefused
 	}
-	// The load-balancer check is authority within the account. It stays a direct
-	// comparison for now and becomes a grant check when API keys become subjects
-	// carrying grants; the ordering above is what makes that later change safe,
-	// because a bug in the permission evaluator can then over-permit inside one
-	// tenant and cannot cross between them.
-	if alias.LoadBalancerID != key.LoadBalancerID {
-		h.refuse(ctx, key, name, form, "alias belongs to another load balancer")
+	// The second check is authority within the account, and it is now a grant
+	// evaluation rather than a comparison of foreign keys. The key holds grants
+	// naming what it may reach; the alias carries its own ancestors, so the
+	// evaluation is arithmetic over values already in memory and adds no query.
+	//
+	// The ordering is what makes this safe. Isolation was settled above, without
+	// consulting the evaluator at all, so a bug in the grant model over-permits
+	// inside one account and cannot cross between them.
+	subject := authz.SubjectFromKey(key)
+	if !authz.Can(subject, action, authz.ObjectOf(alias)) {
+		h.refuse(ctx, key, name, form, "the key holds no grant permitting that action on that name")
 		return nil, errRefused
 	}
 	return &resolved{
@@ -367,7 +381,7 @@ func (h *challenge) formLog(form string) *slog.Logger {
 }
 
 func (h *challenge) present(c echo.Context) error {
-	r, err := h.resolve(c)
+	r, err := h.resolve(c, challengePublish)
 	if err != nil {
 		return err
 	}
@@ -438,7 +452,7 @@ func (h *challenge) openInteraction(c echo.Context, r *resolved) {
 }
 
 func (h *challenge) cleanup(c echo.Context) error {
-	r, err := h.resolve(c)
+	r, err := h.resolve(c, challengeWithdraw)
 	if err != nil {
 		return err
 	}

@@ -38,7 +38,10 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 		t.Fatalf("mint: %v", err)
 	}
 	past := time.Now().UTC().Add(-time.Hour)
-	lapsed.LoadBalancerID, lapsed.ExpiresAt = lb.ID, &past
+	lapsed.ExpiresAt = &past
+	lapsed.Grants = []model.APIKeyGrant{
+		{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true},
+	}
 	lapsed.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
 	if err := store.CreateAPIKey(ctx, db, sc, lapsed); err != nil {
 		t.Fatalf("create lapsed key: %v", err)
@@ -50,7 +53,8 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 		t.Fatalf("mint: %v", err)
 	}
 	future := time.Now().UTC().Add(time.Hour)
-	live.LoadBalancerID, live.ExpiresAt = lb.ID, &future
+	live.ExpiresAt = &future
+	live.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true}}
 	if err := store.CreateAPIKey(ctx, db, sc, live); err != nil {
 		t.Fatalf("create live key: %v", err)
 	}
@@ -88,8 +92,10 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	if e.ObjectLabel != lapsed.Identifier {
 		t.Errorf("objectLabel %q, want %q", e.ObjectLabel, lapsed.Identifier)
 	}
-	if e.ProjectID == nil || *e.ProjectID != p.ID {
-		t.Errorf("projectId %v, want %s", e.ProjectID, p.ID)
+	// No project: a key is anchored to the account and reaches whatever its
+	// grants name, so there is no single project this expiry belongs to.
+	if e.ProjectID != nil {
+		t.Errorf("projectId %v, want none — a key has no project", e.ProjectID)
 	}
 	// The spec asks every key action to carry the restrictions in effect.
 	if !strings.Contains(string(e.After), "203.0.113.0/24") {

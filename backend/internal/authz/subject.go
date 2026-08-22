@@ -1,9 +1,14 @@
 package authz
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
+
+	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
 // Turning rows into a Subject.
@@ -55,6 +60,13 @@ func SubjectFromKey(k *model.APIKey) Subject {
 	return s
 }
 
+// GrantFromRow converts one stored api_key_grants row into the evaluator's Grant.
+// Exported because the audit trail records a key's authority in full, and doing
+// that from the row shape would mean a second renderer that could drift.
+func GrantFromRow(g model.APIKeyGrant) Grant {
+	return grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Selector, g.Action, g.Inheritable, g.ID)
+}
+
 func grantFrom(account model.ID, objectType string, objectID *model.ID, selector json.RawMessage, action string, inheritable bool, id model.ID) Grant {
 	g := Grant{
 		ID:          id,
@@ -93,7 +105,11 @@ func ObjectOf(v any) Object {
 	case *model.Alias:
 		return Object{Type: TypeAlias, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID, LoadBalancerID: o.LoadBalancerID}
 	case *model.APIKey:
-		return Object{Type: TypeAPIKey, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID, LoadBalancerID: o.LoadBalancerID}
+		// A key has no project or load balancer ancestor since 000009: it is a
+		// subject anchored to the account, and what it may reach is its grants
+		// rather than its position in the tree. So a grant OVER a key — the
+		// key.write permission — can only be anchored at the account.
+		return Object{Type: TypeAPIKey, ID: o.ID, AccountID: o.AccountID}
 	}
 	// An unknown type matches no grant, because Object.Type is empty and no
 	// grant names the empty type. Failing closed rather than panicking: an
@@ -114,4 +130,51 @@ func Ancestors(o Object) map[ObjectType]model.ID {
 		out[TypeLoadBalancer] = o.LoadBalancerID
 	}
 	return out
+}
+
+// SubjectForGroups resolves an identity provider's group claim into the subject
+// a person acts as in one account.
+//
+// This is the internal edition's membership derivation (design P18): memberships
+// are computed per request from the claim and stored nowhere. The public edition
+// reads them from account_members instead, and the evaluator cannot tell which
+// it was handed — that is the point of returning a Subject rather than a set of
+// rows.
+//
+// A claim naming no configured group yields a subject holding nothing, which is
+// refused upstream with the observed groups reported, because "you are in none
+// of the groups that grant anything" is only actionable if you can see which
+// groups you were in.
+func SubjectForGroups(ctx context.Context, db *gorm.DB, sc store.Scope, m Mapping, groups []string) (Subject, error) {
+	names := m.RoleNamesFor(groups)
+	if len(names) == 0 {
+		return Subject{AccountID: sc.AccountID()}, nil
+	}
+	roles, err := store.RolesByName(ctx, db, sc, names...)
+	if err != nil {
+		return Subject{}, err
+	}
+	return SubjectFromRoles(sc.AccountID(), roles), nil
+}
+
+// ReportUnresolvedRoles logs the configured role names that match no role row.
+//
+// Not an error: an operator may configure a group before creating the role, and
+// refusing to start would turn that ordering into a lockout. It is logged at
+// warn because the symptom otherwise is one person unable to do anything, with
+// nothing anywhere saying why.
+func ReportUnresolvedRoles(ctx context.Context, db *gorm.DB, sc store.Scope, m Mapping, log *slog.Logger) {
+	if log == nil {
+		log = slog.Default()
+	}
+	existing, err := store.RoleNames(ctx, db, sc)
+	if err != nil {
+		log.WarnContext(ctx, "role names not read; the group mapping was not checked", slog.Any("error", err))
+		return
+	}
+	for _, r := range m.Unresolved(existing) {
+		log.WarnContext(ctx, "configured group maps to a role that does not exist",
+			slog.String("role", string(r)), slog.String("group", m[r]),
+			slog.String("consequence", "nobody in that group holds any permission"))
+	}
 }

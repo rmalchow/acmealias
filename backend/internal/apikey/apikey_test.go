@@ -30,7 +30,6 @@ func fixture(t *testing.T, opts ...func(*model.APIKey)) (*model.APIKey, string) 
 		t.Fatalf("New: %v", err)
 	}
 	k.ID = model.NewID()
-	k.LoadBalancerID = model.NewID()
 	for _, o := range opts {
 		o(k)
 	}

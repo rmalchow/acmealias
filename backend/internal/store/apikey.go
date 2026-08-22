@@ -15,12 +15,7 @@ import (
 // on k.Networks are inserted along with it.
 func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey) error {
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
-		var parent model.LoadBalancer
-		if err := sc.Where(tx).First(&parent, "id = ?", k.LoadBalancerID).Error; err != nil {
-			return fmt.Errorf("parent load balancer %s: %w", k.LoadBalancerID, err)
-		}
-		k.AccountID = parent.AccountID
-		k.ProjectID = parent.ProjectID
+		k.AccountID = sc.AccountID()
 		if k.ID == model.NilID {
 			k.ID = model.NewID()
 		}
@@ -29,6 +24,10 @@ func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey) e
 				k.Networks[i].ID = model.NewID()
 			}
 		}
+		for i := range k.Grants {
+			k.Grants[i].ID = model.NilID
+			k.Grants[i].AccountID = sc.AccountID()
+		}
 		if err := tx.Create(k).Error; err != nil {
 			return fmt.Errorf("store: create api key: %w", err)
 		}
@@ -36,19 +35,50 @@ func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey) e
 	})
 }
 
-// ListAPIKeysForLoadBalancer returns every key on a load balancer, with their CIDR
-// networks preloaded, ordered by creation time.
+// ListAPIKeysForLoadBalancer returns the keys whose authority reaches one load
+// balancer, with their networks and grants preloaded, ordered by creation time.
+//
+// "Reaches" is now a question about grants rather than a foreign key: a key
+// qualifies if it holds a grant naming this load balancer, or an inheritable
+// grant naming the project or account containing it, or a wildcard. That is a
+// wider set than the old column described — which is the feature, since a
+// project-anchored key is exactly what this change exists to allow, and it must
+// appear on the screens of every load balancer it can act on.
 func ListAPIKeysForLoadBalancer(ctx context.Context, db *gorm.DB, sc Scope, loadBalancerID model.ID) ([]model.APIKey, error) {
 	var ks []model.APIKey
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		var lb model.LoadBalancer
+		if err := sc.Where(tx).First(&lb, "id = ?", loadBalancerID).Error; err != nil {
+			return err
+		}
 		return sc.Where(tx).
 			Preload("Networks").
-			Where("load_balancer_id = ?", loadBalancerID).
+			Preload("Grants").
+			Where(`exists (
+				select 1 from api_key_grants g
+				 where g.api_key_id = api_keys.id
+				   and (
+				     g.object_id is null
+				     or (g.object_type = 'load_balancer' and g.object_id = ?)
+				     or (g.inheritable and g.object_type = 'project' and g.object_id = ?)
+				   ))`, lb.ID, lb.ProjectID).
 			Order("created_at").
 			Find(&ks).Error
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: list api keys for load balancer %s: %w", loadBalancerID, err)
+	}
+	return ks, nil
+}
+
+// ListAPIKeys returns every key in the account, with networks and grants.
+func ListAPIKeys(ctx context.Context, db *gorm.DB, sc Scope) ([]model.APIKey, error) {
+	var ks []model.APIKey
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return sc.Where(tx).Preload("Networks").Preload("Grants").Order("created_at").Find(&ks).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: list api keys: %w", err)
 	}
 	return ks, nil
 }
@@ -66,6 +96,10 @@ func FindAPIKeyByIdentifier(ctx context.Context, db *gorm.DB, identifier string)
 	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
 		return tx.
 			Preload("Networks").
+			// Grants ride along with the key, so the challenge handler adds no
+			// query to check a permission (constraint 2). This is the one read
+			// on that path and it was already happening.
+			Preload("Grants").
 			Where("identifier = ?", identifier).
 			First(&k).Error
 	})

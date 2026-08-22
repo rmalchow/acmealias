@@ -131,10 +131,11 @@ func ExpireKeys(ctx context.Context, db *gorm.DB, m *obs.Metrics) (int, error) {
 			if res.RowsAffected == 0 {
 				return nil
 			}
-			// The project is on the key's own row since design P3 materialized
-			// every ancestor a grant may name, so the extra lookup this used to
-			// need is gone.
-			projectID := k.ProjectID
+			// A key has no project since 000009 — it is anchored to the
+			// account and reaches whatever its grants name, which may be
+			// several projects or none. The audit entry therefore carries no
+			// project filter, which is honest: there is no single project this
+			// expiry belongs to.
 			networks := make([]string, 0, len(k.Networks))
 			for _, n := range k.Networks {
 				networks = append(networks, n.CIDR)
@@ -142,13 +143,13 @@ func ExpireKeys(ctx context.Context, db *gorm.DB, m *obs.Metrics) (int, error) {
 			recorded++
 			return authz.Record(ctx, tx, m, authz.SystemActor().InAccount(k.AccountID), authz.Event{
 				Action: authz.ActionKeyExpire, ObjectType: authz.ObjectAPIKey,
-				ObjectID: &k.ID, ObjectLabel: k.Identifier, ProjectID: &projectID,
+				ObjectID: &k.ID, ObjectLabel: k.Identifier,
 				Before: map[string]any{
-					"identifier": k.Identifier, "loadBalancerId": k.LoadBalancerID,
+					"identifier": k.Identifier, "grants": grantSummary(k),
 					"networks": networks, "expiresAt": k.ExpiresAt, "active": true,
 				},
 				After: map[string]any{
-					"identifier": k.Identifier, "loadBalancerId": k.LoadBalancerID,
+					"identifier": k.Identifier, "grants": grantSummary(k),
 					"networks": networks, "expiresAt": k.ExpiresAt, "active": false,
 				},
 			})
@@ -158,4 +159,15 @@ func ExpireKeys(ctx context.Context, db *gorm.DB, m *obs.Metrics) (int, error) {
 		}
 	}
 	return recorded, nil
+}
+
+// grantSummary renders what a key could do, for the audit entry recording that
+// it stopped being able to. The entry has to stay readable after the key row is
+// gone, so the grants are copied in as text rather than referenced.
+func grantSummary(k model.APIKey) []string {
+	out := make([]string, 0, len(k.Grants))
+	for _, g := range k.Grants {
+		out = append(out, authz.GrantFromRow(g).String())
+	}
+	return out
 }

@@ -20,13 +20,18 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 		t.Fatalf("create load balancer: %v", err)
 	}
 
+	// The key's authority is its grants now, and the per-load-balancer listing
+	// asks a question about them rather than about a foreign key — so a key with
+	// no grants appears on no load balancer's screen, correctly.
 	key := &model.APIKey{
-		LoadBalancerID: lb.ID,
-		Identifier:     "k_7f3a91c4",
-		SecretHash:     []byte("digest"),
-		DisplayPrefix:  "7f3a91",
+		Identifier:    "k_7f3a91c4",
+		SecretHash:    []byte("digest"),
+		DisplayPrefix: "7f3a91",
 		Networks: []model.APIKeyNetwork{
 			{CIDR: "203.0.113.0/24"},
+		},
+		Grants: []model.APIKeyGrant{
+			{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true},
 		},
 	}
 	if err := CreateAPIKey(ctx, db, sc, key); err != nil {

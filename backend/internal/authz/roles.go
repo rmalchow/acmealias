@@ -14,8 +14,14 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
 )
 
-// Role is one of exactly four global roles. No role is scoped to a subset of
-// projects; there is deliberately no fifth.
+// Role is a role NAME. It used to be one of exactly four values, fixed in this
+// file, and it no longer is: roles are rows in an account now, customers create
+// their own, and the four below survive only as the names the seeded roles are
+// given so an internal-edition deployment sees no change.
+//
+// The type is kept because the group mapping still speaks in names, and because
+// a bare string at every call site would make it harder to see what is a role
+// and what is an action.
 type Role string
 
 const (
@@ -28,6 +34,9 @@ const (
 // AllRoles is the canonical order used for logging, for the effective-config
 // view and for the strings written into audit rows, so those stay stable
 // regardless of map iteration order.
+//
+// It is the four SEEDED names, not the set of roles that exist: an account may
+// hold any number of others, and this list says nothing about them.
 var AllRoles = []Role{RoleAdmin, RoleConfigAdmin, RoleKeyRotation, RoleReadOnly}
 
 // RoleSet is the set of roles a request's actor holds. Holding several at once
@@ -67,7 +76,15 @@ func (s RoleSet) List() []string {
 // never by everybody.
 //
 // It is configuration, not data: nothing in the management API can change it,
-// and a change takes effect when the process restarts.
+// and a change takes effect when the process restarts. That is deliberate and
+// survives roles becoming editable rows — a customer may create and edit roles,
+// and still cannot decide which identity-provider group grants one, because
+// that would let an account grant itself membership.
+//
+// What changed with the permission model is what the name resolves TO. It used
+// to select a constant in permissions.go; it now selects a role ROW, whose
+// grants are data. A configured name matching no row grants nothing, and is
+// reported at startup rather than discovered when somebody cannot sign in.
 type Mapping map[Role]string
 
 // MappingFromConfig reads the four ACME_*_GROUP variables. Empty values are
@@ -102,6 +119,45 @@ func (m Mapping) RolesFor(groups []string) RoleSet {
 		}
 	}
 	return s
+}
+
+// RoleNamesFor is RolesFor as plain names, for looking the roles up as rows.
+func (m Mapping) RoleNamesFor(groups []string) []string {
+	set := m.RolesFor(groups)
+	out := make([]string, 0, len(set))
+	for r := range set {
+		out = append(out, string(r))
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Unresolved reports the configured role names that match no existing role.
+//
+// A mapping naming a role nobody created is not an error — an operator may
+// configure a group before creating the role, and refusing to start would make
+// that ordering a lockout. It is a warning, reported at startup, because the
+// symptom otherwise is one person unable to do anything with no indication why.
+func (m Mapping) Unresolved(existing []string) []Role {
+	var out []Role
+	for _, r := range AllRoles {
+		name, ok := m[r]
+		if !ok || name == "" {
+			continue
+		}
+		if !slices.Contains(existing, string(r)) {
+			out = append(out, r)
+		}
+	}
+	for r := range m {
+		if slices.Contains(AllRoles, r) {
+			continue
+		}
+		if !slices.Contains(existing, string(r)) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // RoleGroup is one row of the mapping, for logging and for the effective

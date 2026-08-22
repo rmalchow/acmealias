@@ -156,7 +156,7 @@ func TestUnauthenticatedRequestsRevealNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.ID, k.LoadBalancerID = model.NewID(), model.NewID()
+	k.ID = model.NewID()
 	e := serverWithoutDB(t, k)
 
 	answer := func(name, body string, auth func(*http.Request)) string {
@@ -332,7 +332,7 @@ func newEnv(t *testing.T) *env {
 		if err != nil {
 			t.Fatalf("new api key: %v", err)
 		}
-		k.LoadBalancerID = loadBalancerID
+		k.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &loadBalancerID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "load_balancer", ObjectID: &loadBalancerID, Action: "challenge.withdraw", Inheritable: true}}
 		if err := store.CreateAPIKey(ctx, db, sc, k); err != nil {
 			t.Fatalf("create api key: %v", err)
 		}
@@ -581,7 +581,7 @@ func TestRegisterChallengeRefusesUnprotectedCIDRRestriction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.LoadBalancerID = lb.ID
+	k.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.withdraw", Inheritable: true}}
 	k.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
 	if err := store.CreateAPIKey(ctx, db, sc, k); err != nil {
 		t.Fatalf("create api key: %v", err)

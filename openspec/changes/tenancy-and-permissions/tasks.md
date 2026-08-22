@@ -49,21 +49,21 @@
 ## 5. Roles replace the fixed four
 
 - [x] 5.1 Seed the four roles with grants reproducing today's permission matrix, in the migration
-- [ ] 5.2 Change `authz.Mapping` to resolve a configured group to a role record rather than a constant; report at startup when a setting names no role
-- [ ] 5.3 Derive memberships per request from the group claim, keeping the existing no-role refusal and observed-groups response
-- [ ] 5.4 Implement role creation, edit and deletion behind the role-administration permission
-- [ ] 5.5 Implement the unrestricted role's invariants: uneditable, undeletable, and the last-member guard under `SELECT … FOR UPDATE`
-- [ ] 5.6 Test concurrent removal of the two remaining unrestricted members: one succeeds, one is refused
-- [ ] 5.7 Acceptance test that each seeded role permits exactly what its predecessor permitted, and nothing more
+- [x] 5.2 Change `authz.Mapping` to resolve a configured group to a role record rather than a constant; report at startup when a setting names no role
+- [x] 5.3 Derive memberships per request from the group claim, keeping the existing no-role refusal and observed-groups response
+- [~] 5.4 Role creation, edit and deletion are implemented in the store with their invariants; the routes and the permission gating them arrive with group 7, which is where every permission check moves
+- [x] 5.5 Implement the unrestricted role's invariants: uneditable, undeletable, and the last-member guard under `SELECT … FOR UPDATE`
+- [x] 5.6 Test concurrent removal of the two remaining unrestricted members: one succeeds, one is refused
+- [x] 5.7 Acceptance test that each seeded role permits exactly what its predecessor permitted, and nothing more
 
 ## 6. API keys become subjects
 
-- [ ] 6.1 Add the key anchor and grants to the model; preload grants in `store.FindAPIKeyByIdentifier`
-- [ ] 6.2 Migrate every existing key to one `[load_balancer, <id>, challenge.publish]` grant, then drop `api_keys.load_balancer_id`, in one transaction
-- [ ] 6.3 Replace the load-balancer comparison in `internal/httpapi/challenge.go` with a permission check against the resolved alias
-- [ ] 6.4 Scope `findAlias` to the key's account (design P8); keep the label spelling resolving globally and compare the account afterwards
-- [ ] 6.5 Enforce the subset rule on key creation and amendment
-- [ ] 6.6 Benchmark `POST /present` and assert the datastore read count is unchanged
+- [x] 6.1 Add the key anchor and grants to the model; preload grants in `store.FindAPIKeyByIdentifier`
+- [x] 6.2 Migrate every existing key to one `[load_balancer, <id>, challenge.publish]` grant, then drop `api_keys.load_balancer_id`, in one transaction
+- [x] 6.3 Replace the load-balancer comparison in `internal/httpapi/challenge.go` with a permission check against the resolved alias
+- [x] 6.4 Scope `findAlias` to the key's account (design P8); keep the label spelling resolving globally and compare the account afterwards
+- [x] 6.5 Enforce the subset rule on key creation and amendment
+- [x] 6.6 Benchmark `POST /present` and assert the datastore read count is unchanged
 
 ## 7. Management API
 

@@ -25,18 +25,34 @@ import (
 // rather than of each handler remembering. Only createKey and rotateKey
 // return keyCreated, and only because apikey.New just produced the value.
 
+// grantView renders one grant a key holds. A key's authority used to be a
+// single load balancer id, which the console could show as a name; it is now a
+// set of grants, and every screen that lists keys has to show what they can
+// actually do (task 9.5).
+type grantView struct {
+	Type        string             `json:"type"`
+	ObjectID    *model.ID          `json:"objectId,omitempty"`
+	Selector    *authz.DNSSelector `json:"selector,omitempty"`
+	Action      string             `json:"action"`
+	Inheritable bool               `json:"inheritable"`
+	// Summary is the grant written the way the design writes them, so an
+	// operator reading a listing does not have to assemble four fields in their
+	// head.
+	Summary string `json:"summary"`
+}
+
 type keyView struct {
-	ID             model.ID   `json:"id"`
-	LoadBalancerID model.ID   `json:"loadBalancerId"`
-	Identifier     string     `json:"identifier"`
-	DisplayPrefix  string     `json:"displayPrefix"`
-	Note           string     `json:"note"`
-	Networks       []string   `json:"networks"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	ExpiresAt      *time.Time `json:"expiresAt"`
-	LastUsedAt     *time.Time `json:"lastUsedAt"`
-	DisabledAt     *time.Time `json:"disabledAt"`
-	Active         bool       `json:"active"`
+	ID            model.ID    `json:"id"`
+	Grants        []grantView `json:"grants"`
+	Identifier    string      `json:"identifier"`
+	DisplayPrefix string      `json:"displayPrefix"`
+	Note          string      `json:"note"`
+	Networks      []string    `json:"networks"`
+	CreatedAt     time.Time   `json:"createdAt"`
+	ExpiresAt     *time.Time  `json:"expiresAt"`
+	LastUsedAt    *time.Time  `json:"lastUsedAt"`
+	DisabledAt    *time.Time  `json:"disabledAt"`
+	Active        bool        `json:"active"`
 }
 
 // keyCreated is the only response in the service that carries a secret. The
@@ -52,9 +68,16 @@ const secretNotice = "this secret is shown exactly once and is not recoverable; 
 
 func toKey(k model.APIKey) keyView {
 	v := keyView{
-		ID: k.ID, LoadBalancerID: k.LoadBalancerID, Identifier: k.Identifier, DisplayPrefix: k.DisplayPrefix,
-		Note: k.Note, Networks: []string{}, CreatedAt: k.CreatedAt,
+		ID: k.ID, Identifier: k.Identifier, DisplayPrefix: k.DisplayPrefix,
+		Note: k.Note, Networks: []string{}, Grants: []grantView{}, CreatedAt: k.CreatedAt,
 		ExpiresAt: k.ExpiresAt, LastUsedAt: k.LastUsedAt, DisabledAt: k.DisabledAt,
+	}
+	for _, g := range k.Grants {
+		parsed := authz.GrantFromRow(g)
+		v.Grants = append(v.Grants, grantView{
+			Type: g.ObjectType, ObjectID: g.ObjectID, Selector: parsed.Selector,
+			Action: g.Action, Inheritable: g.Inheritable, Summary: parsed.String(),
+		})
 	}
 	for _, n := range k.Networks {
 		v.Networks = append(v.Networks, n.CIDR)
@@ -117,7 +140,16 @@ func (a *admin) createKey(c echo.Context) error {
 	if _, err := store.GetLoadBalancer(ctx, a.db(), sc, loadBalancerID); err != nil {
 		return err
 	}
-	return a.mint(c, loadBalancerID, body.Note, nets, expires, authz.ActionKeyCreate)
+	// The route is still POST /loadbalancers/{id}/keys, because that is the
+	// screen an operator is on. What it creates is a key anchored to the account
+	// holding grants over this load balancer — the same authority the dropped
+	// column carried, now expressed in a grammar that can also say "this whole
+	// project" when someone asks for it.
+	grants := []model.APIKeyGrant{
+		{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &loadBalancerID, Action: challengePublish, Inheritable: true},
+		{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &loadBalancerID, Action: challengeWithdraw, Inheritable: true},
+	}
+	return a.mint(c, grants, body.Note, nets, expires, authz.ActionKeyCreate)
 }
 
 // rotateKey mints a successor for the same load balancer, copying the note and the
@@ -128,12 +160,16 @@ func (a *admin) createKey(c echo.Context) error {
 // window between the two never has a gap. Revoking the predecessor here
 // automatically would reintroduce the downtime the design removed.
 func (a *admin) rotateKey(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
-	old, err := key(ctx, a.db(), id)
+	old, err := key(ctx, a.db(), sc, id)
 	if err != nil {
 		return err
 	}
@@ -147,23 +183,57 @@ func (a *admin) rotateKey(c echo.Context) error {
 	} else {
 		note = fmt.Sprintf("%s (rotated from %s)", note, old.Identifier)
 	}
-	return a.mint(c, old.LoadBalancerID, note, nets, nil, authz.ActionKeyRotate)
+	return a.mint(c, grantsOf(old), note, nets, nil, authz.ActionKeyRotate)
 }
 
 // mint is the shared body of create and rotate: generate, persist, audit,
 // answer once with the secret.
-func (a *admin) mint(c echo.Context, loadBalancerID model.ID, note string, networks []string, expires *time.Time, action string) error {
+// grantsOf copies a key's grants for a rotation: the new key holds exactly what
+// the old one did. Rotation replaces a secret, never an authority — a rotation
+// that silently widened or narrowed what a key can do would be the worst kind of
+// change, because nobody would look.
+func grantsOf(k *model.APIKey) []model.APIKeyGrant {
+	out := make([]model.APIKeyGrant, 0, len(k.Grants))
+	for _, g := range k.Grants {
+		out = append(out, model.APIKeyGrant{
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID, Selector: g.Selector,
+			Action: g.Action, Inheritable: g.Inheritable,
+		})
+	}
+	return out
+}
+
+func (a *admin) mint(c echo.Context, grants []model.APIKeyGrant, note string, networks []string, expires *time.Time, action string) error {
 	ctx := c.Request().Context()
 	sc, err := a.scope(c)
 	if err != nil {
 		return err
 	}
 
+	// The subset rule (task 6.5): a key may be given only what its creator
+	// holds, checked one grant at a time against one held grant. Refusing here
+	// rather than at the store means the message can name the grant that was
+	// not covered, which is the difference between "forbidden" and something an
+	// operator can act on.
+	writer, err := a.subject(c)
+	if err != nil {
+		return err
+	}
+	for i := range grants {
+		g := authz.GrantFromRow(model.APIKeyGrant{
+			AccountID: sc.AccountID(), ObjectType: grants[i].ObjectType, ObjectID: grants[i].ObjectID,
+			Selector: grants[i].Selector, Action: grants[i].Action, Inheritable: grants[i].Inheritable,
+		})
+		if err := authz.CheckSubset(writer, g); err != nil {
+			return err
+		}
+	}
+
 	k, secret, err := apikey.New()
 	if err != nil {
 		return err
 	}
-	k.LoadBalancerID = loadBalancerID
+	k.Grants = grants
 	k.Note = note
 	k.ExpiresAt = expires
 	for _, n := range networks {
@@ -182,7 +252,7 @@ func (a *admin) mint(c echo.Context, loadBalancerID model.ID, note string, netwo
 		// asks for. keyView carries Networks, so the CIDR list rides along.
 		return []authz.Event{{
 			Action: action, ObjectType: authz.ObjectAPIKey, ObjectID: &k.ID, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, sc, loadBalancerID), After: v,
+			After: v,
 		}}, nil
 	}); err != nil {
 		return err
@@ -195,6 +265,10 @@ func (a *admin) mint(c echo.Context, loadBalancerID model.ID, note string, netwo
 // this is a PUT of the whole set rather than an add/remove pair that would
 // make "clear them all" ambiguous.
 func (a *admin) restrictKey(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -210,13 +284,9 @@ func (a *admin) restrictKey(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	sc, err := a.scope(c)
-	if err != nil {
-		return err
-	}
 	var out keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		k, err := key(ctx, tx, id)
+		k, err := key(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
@@ -235,14 +305,14 @@ func (a *admin) restrictKey(c echo.Context) error {
 			}
 		}
 
-		k, err = key(ctx, tx, id)
+		k, err = key(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
 		out = toKey(*k)
 		return []authz.Event{{
 			Action: authz.ActionKeyRestrict, ObjectType: authz.ObjectAPIKey, ObjectID: &id, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, sc, k.LoadBalancerID), Before: before, After: out,
+			Before: before, After: out,
 		}}, nil
 	}); err != nil {
 		return err
@@ -264,7 +334,7 @@ func (a *admin) revokeKey(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		k, err := key(ctx, tx, id)
+		k, err := key(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
@@ -272,14 +342,14 @@ func (a *admin) revokeKey(c echo.Context) error {
 		if err := store.RevokeAPIKey(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
-		k, err = key(ctx, tx, id)
+		k, err = key(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
 		out = toKey(*k)
 		return []authz.Event{{
 			Action: authz.ActionKeyRevoke, ObjectType: authz.ObjectAPIKey, ObjectID: &id, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, sc, k.LoadBalancerID), Before: before, After: out,
+			Before: before, After: out,
 		}}, nil
 	}); err != nil {
 		return err
@@ -295,6 +365,10 @@ func (a *admin) revokeKey(c echo.Context) error {
 // of access, and is exactly why it is audited as its own action rather than
 // folded into a generic key update.
 func (a *admin) setKeyExpiry(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -310,13 +384,9 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	sc, err := a.scope(c)
-	if err != nil {
-		return err
-	}
 	var out keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		k, err := key(ctx, tx, id)
+		k, err := key(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
@@ -330,7 +400,7 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 		return []authz.Event{{
 			Action: authz.ActionKeyExpiryChange, ObjectType: authz.ObjectAPIKey,
 			ObjectID: &id, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, sc, k.LoadBalancerID), Before: before, After: out,
+			Before: before, After: out,
 		}}, nil
 	}); err != nil {
 		return err
@@ -338,10 +408,20 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
-func key(ctx context.Context, db *gorm.DB, id model.ID) (*model.APIKey, error) {
+// key reads one key within the acting account, with the networks and grants
+// every caller here goes on to render or copy.
+//
+// Scoped, unlike the version this replaces: `First(&k, id)` reached any key in
+// the deployment, which was harmless while a key belonged to a load balancer the
+// caller had already been authorized for, and is not harmless now that a key is
+// addressed by its own identifier.
+func key(ctx context.Context, db *gorm.DB, sc store.Scope, id model.ID) (*model.APIKey, error) {
 	var k model.APIKey
-	if err := db.WithContext(ctx).Preload("Networks").First(&k, id).Error; err != nil {
-		return nil, fmt.Errorf("get api key %d: %w", id, err)
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return sc.Where(tx).Preload("Networks").Preload("Grants").First(&k, "id = ?", id).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get api key %s: %w", id, err)
 	}
 	return &k, nil
 }

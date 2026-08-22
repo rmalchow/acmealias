@@ -8,7 +8,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
 // ErrorBody is the JSON every management-API failure produces:
@@ -66,6 +68,15 @@ func (a *admin) mapError(err error, c echo.Context) (int, any) {
 	switch {
 	case errors.Is(err, inventory.ErrInvalid):
 		return http.StatusBadRequest, ErrorBody{Message: err.Error()}
+	case errors.Is(err, authz.ErrInvalidGrant):
+		return http.StatusBadRequest, ErrorBody{Message: err.Error()}
+	case errors.Is(err, authz.ErrNotPermitted):
+		// 403 and not 404: the caller may see the object, they simply may not
+		// confer authority they do not hold. Hiding that as "not found" would
+		// leave them retrying a request that will never work.
+		return http.StatusForbidden, ErrorBody{Message: err.Error()}
+	case errors.Is(err, store.ErrUnrestrictedRole), errors.Is(err, store.ErrLastUnrestrictedMember):
+		return http.StatusConflict, ErrorBody{Message: err.Error()}
 	case errors.Is(err, inventory.ErrConflict), errors.Is(err, inventory.ErrNotEmpty):
 		return http.StatusConflict, ErrorBody{Message: err.Error()}
 	case errors.Is(err, gorm.ErrRecordNotFound):
