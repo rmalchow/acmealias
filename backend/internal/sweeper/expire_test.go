@@ -74,7 +74,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 		t.Errorf("config-class audit entries = %v, want 0", got)
 	}
 
-	es, err := store.ListAuditEntries(ctx, db, store.AuditFilter{Action: authz.ActionKeyExpire})
+	es, err := store.ListAuditEntries(ctx, db, sc, store.AuditFilter{Action: authz.ActionKeyExpire})
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	if n, err := ExpireKeys(ctx, db, m); err != nil || n != 0 {
 		t.Fatalf("second sweep expired %d keys (err %v), want 0", n, err)
 	}
-	es, _ = store.ListAuditEntries(ctx, db, store.AuditFilter{Action: authz.ActionKeyExpire})
+	es, _ = store.ListAuditEntries(ctx, db, sc, store.AuditFilter{Action: authz.ActionKeyExpire})
 	if len(es) != 1 {
 		t.Fatalf("%d entries after a second sweep, want 1", len(es))
 	}

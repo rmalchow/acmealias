@@ -8,16 +8,20 @@ import (
 )
 
 func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
-	db, _ := scopedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
 
 	projectID := model.NewID()
 	otherProjectID := model.NewID()
+	account := sc.AccountID()
 
+	// Every entry names the account it happened inside: a trail is read back
+	// through the same confinement as everything else, so an entry with no
+	// account is an entry nobody can find.
 	entries := []model.AuditEntry{
-		{Action: "create", ObjectType: "domain", ObjectLabel: "example.com", ProjectID: &projectID, ActorSource: "console"},
-		{Action: "delete", ObjectType: "domain", ObjectLabel: "shop.example.com", ProjectID: &projectID, ActorSource: "console"},
-		{Action: "create", ObjectType: "load_balancer", ObjectLabel: "eu-prod", ProjectID: &otherProjectID, ActorSource: "cli"},
+		{AccountID: &account, Action: "create", ObjectType: "domain", ObjectLabel: "example.com", ProjectID: &projectID, ActorSource: "console"},
+		{AccountID: &account, Action: "delete", ObjectType: "domain", ObjectLabel: "shop.example.com", ProjectID: &projectID, ActorSource: "console"},
+		{AccountID: &account, Action: "create", ObjectType: "load_balancer", ObjectLabel: "eu-prod", ProjectID: &otherProjectID, ActorSource: "cli"},
 	}
 	for i := range entries {
 		if err := AppendAuditEntry(ctx, db, &entries[i]); err != nil {
@@ -25,7 +29,7 @@ func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
 		}
 	}
 
-	all, err := ListAuditEntries(ctx, db, AuditFilter{})
+	all, err := ListAuditEntries(ctx, db, sc, AuditFilter{})
 	if err != nil {
 		t.Fatalf("list all: %v", err)
 	}
@@ -33,7 +37,7 @@ func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
 		t.Fatalf("len(all) = %d, want 3", len(all))
 	}
 
-	byProject, err := ListAuditEntries(ctx, db, AuditFilter{ProjectID: &projectID})
+	byProject, err := ListAuditEntries(ctx, db, sc, AuditFilter{ProjectID: &projectID})
 	if err != nil {
 		t.Fatalf("list by project: %v", err)
 	}
@@ -41,7 +45,7 @@ func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
 		t.Fatalf("len(byProject) = %d, want 2", len(byProject))
 	}
 
-	byAction, err := ListAuditEntries(ctx, db, AuditFilter{Action: "delete"})
+	byAction, err := ListAuditEntries(ctx, db, sc, AuditFilter{Action: "delete"})
 	if err != nil {
 		t.Fatalf("list by action: %v", err)
 	}
@@ -49,7 +53,7 @@ func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
 		t.Fatalf("byAction = %+v, want one delete of shop.example.com", byAction)
 	}
 
-	limited, err := ListAuditEntries(ctx, db, AuditFilter{Limit: 1})
+	limited, err := ListAuditEntries(ctx, db, sc, AuditFilter{Limit: 1})
 	if err != nil {
 		t.Fatalf("list limited: %v", err)
 	}

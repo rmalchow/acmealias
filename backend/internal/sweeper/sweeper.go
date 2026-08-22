@@ -140,7 +140,7 @@ func ExpireKeys(ctx context.Context, db *gorm.DB, m *obs.Metrics) (int, error) {
 				networks = append(networks, n.CIDR)
 			}
 			recorded++
-			return authz.Record(ctx, tx, m, authz.SystemActor(), authz.Event{
+			return authz.Record(ctx, tx, m, authz.SystemActor().InAccount(k.AccountID), authz.Event{
 				Action: authz.ActionKeyExpire, ObjectType: authz.ObjectAPIKey,
 				ObjectID: &k.ID, ObjectLabel: k.Identifier, ProjectID: &projectID,
 				Before: map[string]any{

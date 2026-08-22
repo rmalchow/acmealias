@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -136,12 +135,21 @@ type auditView struct {
 // store.ListAuditEntries instead — this function then collapses to a filter
 // literal.
 func (a *admin) listAudit(c echo.Context) error {
-	q := a.db().WithContext(c.Request().Context()).Model(&model.AuditEntry{})
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	// Confined first, before any caller-supplied filter can narrow or widen it:
+	// the trail names people, addresses and object labels, so reading another
+	// account's is more disclosive than reading their inventory.
+	q := a.db().WithContext(c.Request().Context()).
+		Model(&model.AuditEntry{}).
+		Where("account_id = ?", sc.AccountID())
 
 	if v := c.QueryParam("projectId"); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
+		id, err := model.ParseID(v)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "projectId must be an integer")
+			return echo.NewHTTPError(http.StatusBadRequest, "projectId must be an identifier")
 		}
 		q = q.Where("project_id = ?", id)
 	}
@@ -155,9 +163,9 @@ func (a *admin) listAudit(c echo.Context) error {
 		q = q.Where("object_type = ?", v)
 	}
 	if v := c.QueryParam("objectId"); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
+		id, err := model.ParseID(v)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "objectId must be an integer")
+			return echo.NewHTTPError(http.StatusBadRequest, "objectId must be an identifier")
 		}
 		q = q.Where("object_id = ?", id)
 	}

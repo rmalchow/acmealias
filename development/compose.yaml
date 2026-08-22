@@ -50,6 +50,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # The role the service connects as: not a superuser, so row-level
+      # security actually applies to it. See postgres-init/02-create-app-role.sh.
+      ACME_DB_ROLE: ${ACME_DB_ROLE}
+      ACME_DB_PASSWORD: ${ACME_DB_PASSWORD}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro

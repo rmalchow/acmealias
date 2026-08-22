@@ -243,7 +243,15 @@ func bind(c echo.Context, dst any) error {
 // above all — belongs after mutate returns, not inside fn.
 func (a *admin) mutate(c echo.Context, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
 	ctx := c.Request().Context()
-	actor := authz.ConsoleActor(c)
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	// Every entry carries the account the change happened inside, so a tenant
+	// reading their own trail sees their own entries and nothing else. It comes
+	// off the scope rather than off the request, for the same reason the scope
+	// itself does.
+	actor := authz.ConsoleActor(c).InAccount(sc.AccountID())
 	return a.db().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		events, err := fn(tx)
 		if err != nil {

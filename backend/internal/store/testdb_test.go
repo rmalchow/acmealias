@@ -69,6 +69,97 @@ func freshSchemaURL(t *testing.T) string {
 	return u.String()
 }
 
+// appRoleURL is freshSchemaURL plus the thing that makes the row-level security
+// tests mean anything: a connection that is NOT a superuser and NOT the owner of
+// the tables.
+//
+// This is not test scaffolding, it is the deployment contract. A superuser
+// bypasses every policy unconditionally, and a table's owner bypasses its
+// policies unless the table is forced. Connect as either and the isolation this
+// package claims is decoration — so the tests connect the way production must,
+// and store.CheckTenantIsolation refuses to start any process that does not.
+func appRoleURL(t *testing.T, adminDSN, schema string) string {
+	t.Helper()
+	admin, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		t.Fatalf("open admin connection: %v", err)
+	}
+	defer admin.Close()
+
+	var buf [4]byte
+	rand.Read(buf[:])
+	role := "app_" + hex.EncodeToString(buf[:])
+	pw := "app_" + hex.EncodeToString(buf[:])
+
+	stmts := []string{
+		"create role " + role + " login password '" + pw + "'",
+		"grant usage on schema " + schema + " to " + role,
+		"grant select, insert, update, delete on all tables in schema " + schema + " to " + role,
+		"grant usage, select on all sequences in schema " + schema + " to " + role,
+		"grant execute on all functions in schema " + schema + " to " + role,
+	}
+	for _, stmt := range stmts {
+		if _, err := admin.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	t.Cleanup(func() {
+		c, err := sql.Open("pgx", adminDSN)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		for _, stmt := range []string{
+			"revoke all on all tables in schema " + schema + " from " + role,
+			"revoke all on all sequences in schema " + schema + " from " + role,
+			"revoke all on all functions in schema " + schema + " from " + role,
+			"revoke usage on schema " + schema + " from " + role,
+			"drop role " + role,
+		} {
+			_, _ = c.Exec(stmt)
+		}
+	})
+
+	u, err := url.Parse(adminDSN)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	u.User = url.UserPassword(role, pw)
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// isolatedDB migrates as the owner, then hands back a handle connected as an
+// ordinary application role — the only arrangement in which the policies apply.
+func isolatedDB(t *testing.T) (*gorm.DB, Scope) {
+	t.Helper()
+	dsn := freshSchemaURL(t)
+	if err := MigrateUp(dsn); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	schema := u.Query().Get("search_path")
+	db, err := Open(Options{DatabaseURL: appRoleURL(t, dsn, schema), Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatalf("open as application role: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			sqlDB.Close()
+		}
+	})
+	sc, err := ScopeForBootstrap(context.Background(), db)
+	if err != nil {
+		t.Fatalf("bootstrap scope: %v", err)
+	}
+	return db, sc
+}
+
 // migratedDB returns a schema with every migration applied and a GORM handle on it.
 func migratedDB(t *testing.T) (*gorm.DB, string) {
 	t.Helper()

@@ -38,7 +38,7 @@ func cliActor() authz.Actor {
 // policy, and the reason it applies here too is that the CLI is the surface
 // with the *most* authority, not the least.
 func mutate(ctx context.Context, db *gorm.DB, sc store.Scope, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
-	actor := cliActor()
+	actor := cliActor().InAccount(sc.AccountID())
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		events, err := fn(tx)
 		if err != nil {

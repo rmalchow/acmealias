@@ -103,6 +103,17 @@ func runService(cfg config.Config, log *slog.Logger) error {
 	}
 	defer sqlDB.Close()
 
+	// Tenant isolation is only real if the policies apply to THIS connection.
+	// A superuser bypasses every one of them silently, and the default role in
+	// most PostgreSQL images is a superuser — so this is checked before the
+	// process serves anything, and refuses rather than warns.
+	if err := store.CheckTenantIsolation(ctx, db); err != nil {
+		return err
+	}
+	if err := store.PoliciesInstalled(ctx, db); err != nil {
+		return err
+	}
+
 	metrics := obs.New()
 
 	view := zoneview.New(zoneview.FromDB(db))

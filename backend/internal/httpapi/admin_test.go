@@ -146,7 +146,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	// real arrangement rather than of an empty router.
 	e.GET("/*", func(c echo.Context) error { return c.HTML(http.StatusOK, "<html>console</html>") })
 
-	return &adminEnv{t: t, db: db, e: e, lb: lb, projID: p.ID}
+	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID}
 }
 
 // session inserts a session row in the given groups and returns a client
@@ -292,24 +292,24 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		// Projects: ADMIN only.
 		{"POST", "/api/v1/projects", `{"slug":"other","name":"Other"}`, []string{"ADMIN"}},
 		{"PATCH", proj, `{"name":"Renamed"}`, []string{"ADMIN"}},
-		{"DELETE", "/api/v1/projects/999999", "", []string{"ADMIN"}},
+		{"DELETE", "/api/v1/projects/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN"}},
 
 		// Inventory: ADMIN and CONFIG_ADMIN. KEY_ROTATION must not pass here.
 		{"POST", proj + "/loadbalancers", `{"slug":"x","name":"X"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
 		{"PATCH", lb, `{"name":"Renamed"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"DELETE", "/api/v1/loadbalancers/999999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
+		{"DELETE", "/api/v1/loadbalancers/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
 		{"POST", lb + "/nodes", `{"label":"z","ipv4":"203.0.113.99"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"PATCH", "/api/v1/nodes/999999", `{"ipv4":"203.0.113.1"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"DELETE", "/api/v1/nodes/999999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
+		{"PATCH", "/api/v1/nodes/00000000-0000-7000-8000-000000000999", `{"ipv4":"203.0.113.1"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
+		{"DELETE", "/api/v1/nodes/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
 		{"POST", lb + "/domains", `{"name":"shop.example.com"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"DELETE", "/api/v1/domains/999999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
+		{"DELETE", "/api/v1/domains/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
 
 		// Keys: ADMIN, CONFIG_ADMIN and KEY_ROTATION.
 		{"POST", lb + "/keys", `{"note":"traefik"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"PUT", "/api/v1/keys/999999/networks", `{"networks":[]}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"PUT", "/api/v1/keys/999999/expiry", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"POST", "/api/v1/keys/999999/rotate", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"DELETE", "/api/v1/keys/999999", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
+		{"PUT", "/api/v1/keys/00000000-0000-7000-8000-000000000999/networks", `{"networks":[]}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
+		{"PUT", "/api/v1/keys/00000000-0000-7000-8000-000000000999/expiry", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
+		{"POST", "/api/v1/keys/00000000-0000-7000-8000-000000000999/rotate", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
+		{"DELETE", "/api/v1/keys/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
 
 		// Sessions: ADMIN only.
 		{"GET", "/api/v1/sessions", "", []string{"ADMIN"}},
@@ -438,7 +438,7 @@ func TestDomainErrorsMapToStatusesAndOneJSONShape(t *testing.T) {
 	}{
 		{"invalid wildcard", "POST", lb + "/domains", `{"name":"*.*.example.com"}`, http.StatusBadRequest},
 		{"duplicate domain", "POST", lb + "/domains", `{"name":"shop.example.com"}`, http.StatusConflict},
-		{"unknown lb", "GET", "/api/v1/loadbalancers/999999", "", http.StatusNotFound},
+		{"unknown lb", "GET", "/api/v1/loadbalancers/00000000-0000-7000-8000-000000000999", "", http.StatusNotFound},
 		{"non-empty project", "DELETE", "/api/v1/projects/" + itoa(v.projID), "", http.StatusConflict},
 		{"non-numeric id", "GET", "/api/v1/loadbalancers/banana", "", http.StatusBadRequest},
 	}
@@ -950,12 +950,12 @@ func TestRolledBackChangeLeavesNoAuditEntry(t *testing.T) {
 	ctx := t.Context()
 
 	boom := errors.New("the change failed after its audit entry was written")
-	err := v.db.Transaction(func(tx *gorm.DB) error {
+	err := v.sc.Run(ctx, v.db, func(tx *gorm.DB) error {
 		p, err := inventory.CreateProject(ctx, tx, v.sc, "doomed", "Doomed")
 		if err != nil {
 			return err
 		}
-		err = authz.Record(ctx, tx, nil, authz.SystemActor(), authz.Event{
+		err = authz.Record(ctx, tx, nil, authz.SystemActor().InAccount(v.sc.AccountID()), authz.Event{
 			Action: authz.ActionProjectCreate, ObjectType: authz.ObjectProject,
 			ObjectID: &p.ID, ObjectLabel: p.Slug, ProjectID: &p.ID,
 		})
@@ -1325,7 +1325,7 @@ func TestProjectOutsideTheFirstPageIsStillReadableByID(t *testing.T) {
 	if got.ID != last || got.Slug != "zz-last" {
 		t.Fatalf("got %+v, want project %d", got, last)
 	}
-	if rec := cl.do(http.MethodGet, "/api/v1/projects/999999", ""); rec.Code != http.StatusNotFound {
+	if rec := cl.do(http.MethodGet, "/api/v1/projects/00000000-0000-7000-8000-000000000999", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown project by id: %d, want 404", rec.Code)
 	}
 }

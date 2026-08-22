@@ -37,6 +37,20 @@ type Actor struct {
 	Source      string
 	RequestID   string
 	ClientIP    string
+	// AccountID is the account the action happened inside, so a tenant reading
+	// their own trail sees their own entries and nobody else's. Nil for actions
+	// that belong to no account — the expiry sweep before it knows whose key it
+	// is, and anything the CLI does before an account is resolved.
+	AccountID *model.ID
+}
+
+// InAccount returns a copy of the actor stamped with the account the action is
+// happening inside. It is a copy rather than a setter because an Actor is passed
+// by value everywhere and a mutating setter would silently apply to one caller's
+// copy only.
+func (a Actor) InAccount(id model.ID) Actor {
+	a.AccountID = &id
+	return a
 }
 
 // ConsoleActor builds an Actor from a request that passed Authenticated.
@@ -100,6 +114,7 @@ func Record(ctx context.Context, db *gorm.DB, m *obs.Metrics, a Actor, e Event) 
 
 	entry := &model.AuditEntry{
 		OccurredAt:   time.Now().UTC(),
+		AccountID:    a.AccountID,
 		ActorSubject: nonEmpty(a.Subject),
 		ActorName:    nonEmpty(a.DisplayName),
 		ActorGroups:  a.Groups,

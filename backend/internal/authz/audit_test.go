@@ -111,7 +111,7 @@ func TestScrubHandlesStructs(t *testing.T) {
 // text[] and inet columns take what Record hands them, which no in-memory test
 // can. It skips without TEST_DATABASE_URL (design D13).
 func TestIntegrationRecordWritesAnAttributableRow(t *testing.T) {
-	db := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
 
 	actor := Actor{
@@ -122,7 +122,7 @@ func TestIntegrationRecordWritesAnAttributableRow(t *testing.T) {
 		Source:      SourceConsole,
 		RequestID:   "req-42",
 		ClientIP:    "192.0.2.9",
-	}
+	}.InAccount(sc.AccountID())
 	keyID := model.NewID()
 	err := Record(ctx, db, nil, actor, Event{
 		Action:      "create",
@@ -135,7 +135,7 @@ func TestIntegrationRecordWritesAnAttributableRow(t *testing.T) {
 		t.Fatalf("record: %v", err)
 	}
 
-	entries, err := store.ListAuditEntries(ctx, db, store.AuditFilter{ObjectType: "api_key"})
+	entries, err := store.ListAuditEntries(ctx, db, sc, store.AuditFilter{ObjectType: "api_key"})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -176,12 +176,12 @@ func TestIntegrationRecordWritesAnAttributableRow(t *testing.T) {
 // vocabulary is counted too, under "unknown" — invisible entries would hide
 // exactly the drift this catches.
 func TestIntegrationRecordCountsTheEntryByActionClass(t *testing.T) {
-	db := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
 	m := obs.New()
 
 	for _, action := range []string{ActionProjectCreate, ActionProjectDelete, ActionKeyRevoke, "delte"} {
-		if err := Record(ctx, db, m, SystemActor(), Event{Action: action, ObjectType: ObjectProject}); err != nil {
+		if err := Record(ctx, db, m, SystemActor().InAccount(sc.AccountID()), Event{Action: action, ObjectType: ObjectProject}); err != nil {
 			t.Fatalf("record %s: %v", action, err)
 		}
 	}
@@ -205,16 +205,16 @@ func TestIntegrationRecordCountsTheEntryByActionClass(t *testing.T) {
 }
 
 func TestIntegrationRecordSystemActorHasNoIdentity(t *testing.T) {
-	db := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
 
-	if err := Record(ctx, db, nil, SystemActor(), Event{
+	if err := Record(ctx, db, nil, SystemActor().InAccount(sc.AccountID()), Event{
 		Action: "expire", ObjectType: "challenge", ObjectLabel: "_acme-challenge.example.com",
 	}); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
-	entries, err := store.ListAuditEntries(ctx, db, store.AuditFilter{ObjectType: "challenge"})
+	entries, err := store.ListAuditEntries(ctx, db, sc, store.AuditFilter{ObjectType: "challenge"})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -227,6 +227,17 @@ func TestIntegrationRecordSystemActorHasNoIdentity(t *testing.T) {
 }
 
 const testDatabaseURLEnv = "TEST_DATABASE_URL"
+
+// scopedDB is migratedDB plus the account every audit read is now confined to.
+func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
+	t.Helper()
+	db := migratedDB(t)
+	sc, err := store.ScopeForBootstrap(context.Background(), db)
+	if err != nil {
+		t.Fatalf("bootstrap scope: %v", err)
+	}
+	return db, sc
+}
 
 // migratedDB gives each test its own migrated schema, dropped afterwards.
 // ponytail: a third near-copy of the helper in internal/store, which lives in a
