@@ -81,3 +81,15 @@ func objectFor[T any](ctx context.Context, db *gorm.DB, sc store.Scope, id model
 	}
 	return row, authz.ObjectOf(row), nil
 }
+
+// acl compiles the caller's grants into the filter a listing applies, and
+// converts it into the shape the store speaks.
+//
+// The two types are deliberately separate. authz compiles grants and knows
+// nothing about tables; store applies columns and knows nothing about grants.
+// Passing one type through both would mean store importing authz, and authz
+// already imports store.
+func acl(subj authz.Subject, action authz.Action, target authz.ObjectType) store.ACL {
+	p := authz.CompilePredicate(subj, string(action), target)
+	return store.ACL{All: p.All, Columns: p.Columns}
+}

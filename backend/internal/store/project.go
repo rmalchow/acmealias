@@ -113,6 +113,10 @@ func ListProjectsWithLoadBalancersPage(ctx context.Context, db *gorm.DB, sc Scop
 	return ps, total, nil
 }
 
+// trimmed is strings.TrimSpace, named at the one call site that needs the
+// filter's empty case to read clearly.
+func trimmed(s string) string { return strings.TrimSpace(s) }
+
 // likeEscape wraps a user's free text in wildcards and escapes the two
 // characters LIKE treats as wildcards. Without it a slug containing `_` — the
 // common case — would match every row.

@@ -62,28 +62,29 @@ func CreateProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.
 // ListProjects returns the whole inventory tree: projects, their load balancers,
 // and each load balancer's nodes and domains.
 func ListProjects(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject) ([]model.Project, error) {
-	if err := authorizeInAccount(subj, authz.ActionViewInventory, sc); err != nil {
-		return nil, err
-	}
-	return store.ListProjectsWithLoadBalancers(ctx, db, sc)
+	ps, _, err := ListProjectsPage(ctx, db, sc, subj, "", 1000, 0)
+	return ps, err
 }
 
 // ListProjectsPage is ListProjects with the console's filter and paging. The
 // count it returns is the number of projects MATCHING the filter, not the
 // number on the page and not the number in the table — that is what a pager
 // has to show to be honest about how much is behind it.
-// ponytail: the listing is confined by Scope and gated by a whole-account
-// permission check, not yet by a per-object ACL predicate compiled into the
-// query (design P13, tasks 2.4-2.7). Ceiling: a subject holding a grant over
-// SOME projects sees all of its account's, which is wrong for a customer who
-// wants a contractor to see one project. Upgrade path is the predicate compiler,
-// which turns a subject's grants into a disjunction of single-column predicates
-// — the materialized ancestors of P3 exist precisely so that it can.
+// The listing is ACL-gated in the QUERY (design P13): the caller's grants are
+// compiled into a predicate that is part of the WHERE clause, so a project they
+// may not see is never returned by the database rather than filtered out
+// afterwards.
+//
+// No permission check precedes it. A subject holding no grant compiles to a
+// predicate matching nothing and gets an empty page — which is the right answer
+// and is not the same as a refusal: "you may see none of these" and "you may not
+// ask" are different, and only the first is true of a listing.
+//
+// The count runs the same predicate as the page. A total counting rows the
+// caller cannot see would leak the existence of invisible objects through a
+// number, undoing what returning none of them was protecting.
 func ListProjectsPage(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, query string, limit, offset int) ([]model.Project, int64, error) {
-	if err := authorizeInAccount(subj, authz.ActionViewInventory, sc); err != nil {
-		return nil, 0, err
-	}
-	return store.ListProjectsWithLoadBalancersPage(ctx, db, sc, query, limit, offset)
+	return store.ListProjectsACL(ctx, db, sc, acl(subj, authz.ActionViewInventory, authz.TypeProject), query, limit, offset)
 }
 
 // DeleteProject refuses a project that still owns load balancers.

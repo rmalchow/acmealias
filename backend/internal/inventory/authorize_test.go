@@ -21,11 +21,12 @@ import (
 // So the property is asserted instead, by reading this package's own source. A
 // function added tomorrow is covered without anyone remembering.
 func TestEveryOperationAuthorizes(t *testing.T) {
-	// Functions that legitimately authorize nothing, each with the reason.
+	// Functions that authorize nothing themselves, each with the reason — either
+	// they touch no object, or they delegate to something here that does.
 	// Adding to this list should be a decision somebody makes on purpose.
 	exempt := map[string]string{
 		"RenderZoneSnippet": "pure formatting of a plan the caller was already authorized to have",
-		"ListProjects":      "authorizes through ListProjectsPage's whole-account check; see the ponytail note there",
+		"ListProjects":      "delegates wholesale to ListProjectsPage, which compiles the caller's grants into the query",
 	}
 
 	fset := token.NewFileSet()
@@ -61,8 +62,15 @@ func TestEveryOperationAuthorizes(t *testing.T) {
 				continue
 			}
 			if !callsAuthorizer(fn) {
+				// Delegation counts, but only when it is written down: a
+				// function that hands its subject to another in this package is
+				// authorizing through it, and the reason names which one.
+				if why, allowed := exempt[fn.Name.Name]; allowed && why != "" {
+					continue
+				}
 				t.Errorf("%s takes a subject and never authorizes with it.\n"+
-					"An unused subject is worse than no subject: it reads as a check that is not there.", fn.Name.Name)
+					"An unused subject is worse than no subject: it reads as a check that is not there.\n"+
+					"If it delegates, add it to the exempt list naming what it delegates to.", fn.Name.Name)
 			}
 		}
 	}
@@ -80,6 +88,12 @@ func callsAuthorizer(fn *ast.FuncDecl) bool {
 		if id, ok := call.Fun.(*ast.Ident); ok {
 			switch id.Name {
 			case "authorize", "authorizeInAccount", "requireUnrestricted":
+				found = true
+			case "acl":
+				// A listing authorizes by COMPILING the caller's grants into
+				// the query rather than by checking before it (design P13).
+				// There is nothing to check against — the answer is per row,
+				// and the predicate is what applies it.
 				found = true
 			}
 		}

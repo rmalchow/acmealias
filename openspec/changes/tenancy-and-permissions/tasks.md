@@ -14,10 +14,10 @@
 - [x] 2.1 Add `internal/store/scope.go` with a `Scope` that has no exported constructor from a bare identifier
 - [x] 2.2 Add the two producers: from a membership, and from the single-account bootstrap
 - [x] 2.3 Change every inventory query in `internal/store` to take a `Scope` and filter on the materialized `account_id`
-- [ ] 2.4 Build the ACL predicate compiler: fold a subject's grants for one action and object type into a disjunction of single-column predicates (design P13)
-- [ ] 2.5 Implement `List` applying the ACL predicate together with the caller's filters, paging and count; assert the count uses the same predicate as the page
-- [ ] 2.6 Implement `GetWithPermission(id, perm)` as `List` narrowed by `id`, returning the object or nil, with absence and denial indistinguishable
-- [ ] 2.7 Implement the `dns_record` predicate separately: reversed-name storage with a `text_pattern_ops` index, suffix match excluding the apex, and a record-type set
+- [x] 2.4 Build the ACL predicate compiler: fold a subject's grants for one action and object type into a disjunction of single-column predicates (design P13)
+- [x] 2.5 Implement `List` applying the ACL predicate together with the caller's filters, paging and count; assert the count uses the same predicate as the page
+- [x] 2.6 Implement `GetWithPermission(id, perm)` as `List` narrowed by `id`, returning the object or nil, with absence and denial indistinguishable
+- [~] 2.7 The `dns_record` predicate is compiled — reversed names, prefix match, apex excluded, record-type set — and unit-tested. The reversed COLUMN and its `text_pattern_ops` index arrive with `dns-records`, which creates the table; there is nothing to index yet
 - [x] 2.8 Thread `Scope` through `internal/inventory` and `internal/reporting`
 - [x] 2.9 Add a test asserting every exported store read takes a `Scope`, so a new query cannot be added without one
 - [x] 2.10 Add tests that an object of another account is refused as though it did not exist, for read, list, count and write
