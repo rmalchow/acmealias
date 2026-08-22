@@ -641,6 +641,14 @@ because the dropped column's value is reconstructible from the grant it created.
 - **Should the internal edition expose the role editor at all?** Its four seeded roles are exactly
   what its operators need, and hiding the editor keeps constraint 1 ("no observable change") strictly
   true. Leaning: seed them, show the editor, change nothing by default.
+- **The decisions numbered P4 to P12 are referenced and were never written.** `tasks.md` cites
+  design P4 (the identifier-form check constraint), P7 (permission checks in the service layer),
+  P8 (per-account domain uniqueness and the globally-claimed alias label), P9 (name-pattern
+  semantics), P10 (single-grant containment) and P12 (permitted actions reported per object). The
+  normative content of all six is in the spec deltas, which is where it belongs — but a reader
+  following a task to its stated decision finds nothing. Implementation has proceeded from the spec
+  and recorded the reasoning at the code, which is a worse place for it than here. Either write the
+  six sections or renumber the tasks to cite the requirements they actually implement.
 - **Should the cross-account jobs share one `BYPASSRLS` role or hold one each?** One role is
   simpler and is what the migration creates. One role per job — `svc_satellite_feed`,
   `svc_metering` — would make an audit of who read what across tenants sharper, at the cost of more

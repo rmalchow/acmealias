@@ -30,25 +30,25 @@
 
 ## 3. Permission model
 
-- [ ] 3.0 Create `users` as a global table, and `account_members` binding a user to an account and role; a user is not owned by an account and outlives its deletion (design P18)
-- [ ] 3.1 Create `roles`, `role_grants`, `api_key_grants` in the model and a migration, with the identifier-form check constraint from design P4
-- [ ] 3.2 Implement the `Grant` type, its three identifier forms, and JSON encoding of the `dns_record` selector
-- [ ] 3.3 Implement ancestor-chain resolution (design P3) with a per-request memo
-- [ ] 3.4 Implement `Can(subject, action, object)` as a union over grants, with inheritance and anchored wildcards
-- [ ] 3.5 Implement name-pattern matching per design P9; reject interior wildcards at write time
-- [ ] 3.6 Table-driven tests for `Can` across every combination of wildcard, identity, selector and inheritance
-- [ ] 3.7 Property test asserting an inheritable grant matches exactly the objects contained by the one it names
+- [x] 3.0 Create `users` as a global table, and `account_members` binding a user to an account and role; a user is not owned by an account and outlives its deletion (design P18)
+- [x] 3.1 Create `roles`, `role_grants`, `api_key_grants` in the model and a migration, with the identifier-form check constraint from design P4
+- [x] 3.2 Implement the `Grant` type, its three identifier forms, and JSON encoding of the `dns_record` selector
+- [x] 3.3 Ancestor resolution needs no chain walk and no memo: design P3 materialized every ancestor a grant may name onto the row, so `authz.ObjectOf` reads them as fields. The memo was for a walk that no longer exists
+- [x] 3.4 Implement `Can(subject, action, object)` as a union over grants, with inheritance and anchored wildcards
+- [x] 3.5 Implement name-pattern matching per design P9; reject interior wildcards at write time
+- [x] 3.6 Table-driven tests for `Can` across every combination of wildcard, identity, selector and inheritance
+- [x] 3.7 Property test asserting an inheritable grant matches exactly the objects contained by the one it names
 
 ## 4. The subset rule
 
-- [ ] 4.1 Implement single-grant containment `g ⊑ e` over action, type, object and selector (design P10)
-- [ ] 4.2 Implement pattern containment (`*.a.b ⊑ *.b`, `a.b ⊑ *.b`, `*.b ⋢ *.a.b`) with an exhaustive test table
+- [x] 4.1 Implement single-grant containment `g ⊑ e` over action, type, object and selector (design P10)
+- [x] 4.2 Implement pattern containment (`*.a.b ⊑ *.b`, `a.b ⊑ *.b`, `*.b ⋢ *.a.b`) with an exhaustive test table
 - [ ] 4.3 Enforce the rule on every write to `role_grants` and `api_key_grants`
-- [ ] 4.4 Test that union coverage is refused, and document the refusal as intended in the test name
+- [x] 4.4 Test that union coverage is refused, and document the refusal as intended in the test name
 
 ## 5. Roles replace the fixed four
 
-- [ ] 5.1 Seed the four roles with grants reproducing today's permission matrix, in the migration
+- [x] 5.1 Seed the four roles with grants reproducing today's permission matrix, in the migration
 - [ ] 5.2 Change `authz.Mapping` to resolve a configured group to a role record rather than a constant; report at startup when a setting names no role
 - [ ] 5.3 Derive memberships per request from the group claim, keeping the existing no-role refusal and observed-groups response
 - [ ] 5.4 Implement role creation, edit and deletion behind the role-administration permission

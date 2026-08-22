@@ -53,8 +53,14 @@ var AllActions = []Action{
 	ActionViewInventory,
 }
 
-// Can reports whether an actor holding roles may perform action.
-func Can(roles RoleSet, action Action) bool {
+// CanRole reports whether an actor holding roles may perform action.
+//
+// This is the pre-grant model: a verb and nothing else, against four fixed role
+// names. It survives only until roles become rows and the route middleware that
+// calls it is removed — Can in evaluate.go is the model everything moves to. It
+// is kept, and renamed rather than deleted, so the two can be compared during
+// the migration and so a call site that still uses it is obvious at a glance.
+func CanRole(roles RoleSet, action Action) bool {
 	for r := range permissions[action] {
 		if roles[r] {
 			return true
@@ -69,7 +75,7 @@ func Can(roles RoleSet, action Action) bool {
 func Allowed(roles RoleSet) []Action {
 	out := make([]Action, 0, len(AllActions))
 	for _, a := range AllActions {
-		if Can(roles, a) {
+		if CanRole(roles, a) {
 			out = append(out, a)
 		}
 	}

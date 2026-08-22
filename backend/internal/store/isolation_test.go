@@ -43,6 +43,9 @@ var crossAccountReaders = map[string]string{
 	"Cleanup":                     "challenges carry no policy; the alias was resolved under a scope",
 	"AppendAuditEntry":            "the entry carries its own account and is written inside the caller's transaction",
 	"CrossAccount":                "the escape itself",
+	"MembershipsFor":              "resolves which account a person may act in, before any scope exists",
+	"AccountsForUser":             "which accounts a person can reach cannot be answered from inside one",
+	"FindOrCreateUser":            "a user is global (design P18) and exists before belonging to any account",
 }
 
 // nonQueries are exported functions that touch no table at all.

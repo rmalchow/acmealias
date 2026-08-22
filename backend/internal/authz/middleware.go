@@ -108,7 +108,7 @@ func Require(action Action) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			roles := RolesFromContext(c)
-			if !Can(roles, action) {
+			if !CanRole(roles, action) {
 				return echo.NewHTTPError(http.StatusForbidden,
 					"your roles ("+joinRoles(roles)+") do not permit "+string(action))
 			}

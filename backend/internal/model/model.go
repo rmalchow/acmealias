@@ -81,6 +81,11 @@ func (n *APIKeyNetwork) BeforeCreate(*gorm.DB) error        { ensureID(&n.ID); r
 func (c *Challenge) BeforeCreate(*gorm.DB) error            { ensureID(&c.ID); return nil }
 func (e *AuditEntry) BeforeCreate(*gorm.DB) error           { ensureID(&e.ID); return nil }
 func (i *ChallengeInteraction) BeforeCreate(*gorm.DB) error { ensureID(&i.ID); return nil }
+func (u *User) BeforeCreate(*gorm.DB) error                 { ensureID(&u.ID); return nil }
+func (r *Role) BeforeCreate(*gorm.DB) error                 { ensureID(&r.ID); return nil }
+func (m *AccountMember) BeforeCreate(*gorm.DB) error        { ensureID(&m.ID); return nil }
+func (g *RoleGrant) BeforeCreate(*gorm.DB) error            { ensureID(&g.ID); return nil }
+func (g *APIKeyGrant) BeforeCreate(*gorm.DB) error          { ensureID(&g.ID); return nil }
 
 // StringArray maps a PostgreSQL text[] column onto []string.
 //
@@ -118,9 +123,10 @@ func (a StringArray) Value() (driver.Value, error) {
 // test walks it, so a new model must be added here.
 func Models() []any {
 	return []any{
-		&Account{}, &Project{}, &LoadBalancer{}, &LBNode{}, &Alias{}, &Domain{},
-		&APIKey{}, &APIKeyNetwork{}, &Challenge{}, &Session{}, &AuditEntry{},
-		&ChallengeInteraction{}, &ProjectDailyStat{},
+		&Account{}, &User{}, &Role{}, &AccountMember{}, &RoleGrant{},
+		&Project{}, &LoadBalancer{}, &LBNode{}, &Alias{}, &Domain{},
+		&APIKey{}, &APIKeyGrant{}, &APIKeyNetwork{}, &Challenge{}, &Session{},
+		&AuditEntry{}, &ChallengeInteraction{}, &ProjectDailyStat{},
 	}
 }
 
@@ -137,6 +143,94 @@ type Account struct {
 }
 
 func (Account) TableName() string { return "accounts" }
+
+// User is a person, globally (design P18). They exist before belonging to any
+// account, may belong to several, and outlive the deletion of any of them —
+// which is why this table has no account_id and no policy. What confines a
+// listing of people is account_members, which has both.
+//
+// Subject is the identity provider's stable identifier for them, not their email
+// address: an address changes and is reused, a subject does not.
+type User struct {
+	ID          ID `gorm:"primaryKey"`
+	Subject     string
+	Email       *string
+	DisplayName string `gorm:"column:display_name"`
+	CreatedAt   time.Time
+}
+
+func (User) TableName() string { return "users" }
+
+// Role is a named set of grants inside one account. Roles are rows rather than
+// four constants in Go, which is the whole point of the change: what a customer
+// needs their operators to be able to do is not a thing this codebase can
+// enumerate in advance.
+type Role struct {
+	ID          ID `gorm:"primaryKey"`
+	AccountID   ID `gorm:"column:account_id"`
+	Name        string
+	Description string
+	// Unrestricted marks the account's fixed role: every action on every object
+	// of that account. It is a flag rather than a set of grants so that it
+	// cannot be edited away one row at a time, and so "there is always a way
+	// back into an account" holds without depending on which rows survive.
+	Unrestricted bool
+	CreatedAt    time.Time
+
+	Grants []RoleGrant `gorm:"foreignKey:RoleID"`
+}
+
+func (Role) TableName() string { return "roles" }
+
+// AccountMember binds a user to a role in an account. A person holds roles
+// through membership; roles held in one account confer nothing in another.
+type AccountMember struct {
+	ID        ID `gorm:"primaryKey"`
+	AccountID ID `gorm:"column:account_id"`
+	UserID    ID `gorm:"column:user_id"`
+	RoleID    ID `gorm:"column:role_id"`
+	CreatedAt time.Time
+
+	User *User `gorm:"foreignKey:UserID"`
+	Role *Role `gorm:"foreignKey:RoleID"`
+}
+
+func (AccountMember) TableName() string { return "account_members" }
+
+// RoleGrant is one grant held by a role. ObjectID and Selector are mutually
+// exclusive and both null for a wildcard identifier; the database enforces the
+// same rule, so a row that disagrees cannot be stored.
+type RoleGrant struct {
+	ID          ID              `gorm:"primaryKey"`
+	RoleID      ID              `gorm:"column:role_id"`
+	AccountID   ID              `gorm:"column:account_id"`
+	ObjectType  string          `gorm:"column:object_type"`
+	ObjectID    *ID             `gorm:"column:object_id"`
+	Selector    json.RawMessage `gorm:"column:selector;type:jsonb"`
+	Action      string
+	Inheritable bool
+	CreatedAt   time.Time
+}
+
+func (RoleGrant) TableName() string { return "role_grants" }
+
+// APIKeyGrant is one grant held by an API key. Same shape as RoleGrant, in its
+// own table: the two subjects have different lifecycles, different write paths
+// and different audit vocabulary, and one table would need a check constraint
+// saying exactly one owner is set — the same complexity somewhere less obvious.
+type APIKeyGrant struct {
+	ID          ID              `gorm:"primaryKey"`
+	APIKeyID    ID              `gorm:"column:api_key_id"`
+	AccountID   ID              `gorm:"column:account_id"`
+	ObjectType  string          `gorm:"column:object_type"`
+	ObjectID    *ID             `gorm:"column:object_id"`
+	Selector    json.RawMessage `gorm:"column:selector;type:jsonb"`
+	Action      string
+	Inheritable bool
+	CreatedAt   time.Time
+}
+
+func (APIKeyGrant) TableName() string { return "api_key_grants" }
 
 // ProjectDailyStat is one project's inventory size on one day: the only thing in
 // the reporting capability that is stored rather than aggregated on read, because
@@ -244,6 +338,9 @@ type APIKey struct {
 
 	LoadBalancer *LoadBalancer   `gorm:"foreignKey:LoadBalancerID"`
 	Networks     []APIKeyNetwork `gorm:"foreignKey:APIKeyID"`
+	// Grants are preloaded with the key on the authentication path, so the
+	// challenge handler adds no query to check a permission (constraint 2).
+	Grants []APIKeyGrant `gorm:"foreignKey:APIKeyID"`
 }
 
 func (APIKey) TableName() string { return "api_keys" }

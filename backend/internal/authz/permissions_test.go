@@ -32,8 +32,8 @@ func TestCanEveryRoleAgainstEveryAction(t *testing.T) {
 		}
 		for _, role := range AllRoles {
 			want := row[role]
-			if got := Can(NewRoleSet(role), action); got != want {
-				t.Errorf("Can(%s, %s) = %v, want %v", role, action, got, want)
+			if got := CanRole(NewRoleSet(role), action); got != want {
+				t.Errorf("CanRole(%s, %s) = %v, want %v", role, action, got, want)
 			}
 		}
 	}
@@ -41,7 +41,7 @@ func TestCanEveryRoleAgainstEveryAction(t *testing.T) {
 
 func TestCanNoRolesPermitsNothing(t *testing.T) {
 	for _, action := range AllActions {
-		if Can(RoleSet{}, action) {
+		if CanRole(RoleSet{}, action) {
 			t.Errorf("an actor with no roles was permitted %s", action)
 		}
 	}
@@ -50,7 +50,7 @@ func TestCanNoRolesPermitsNothing(t *testing.T) {
 func TestCanUnknownActionFailsClosed(t *testing.T) {
 	// A typo in a route's required permission must refuse everyone, including
 	// an administrator.
-	if Can(NewRoleSet(RoleAdmin), Action("inventory.wriet")) {
+	if CanRole(NewRoleSet(RoleAdmin), Action("inventory.wriet")) {
 		t.Error("an unknown action was permitted")
 	}
 }
@@ -60,13 +60,13 @@ func TestCanRolesAreAdditive(t *testing.T) {
 	// inventory writes that KEY_ROTATION alone does not have, and still does
 	// not gain project administration.
 	union := NewRoleSet(RoleKeyRotation, RoleConfigAdmin)
-	if !Can(union, ActionInventoryWrite) {
+	if !CanRole(union, ActionInventoryWrite) {
 		t.Error("KEY_ROTATION+CONFIG_ADMIN may not write inventory")
 	}
-	if !Can(union, ActionKeyWrite) {
+	if !CanRole(union, ActionKeyWrite) {
 		t.Error("KEY_ROTATION+CONFIG_ADMIN may not write keys")
 	}
-	if Can(union, ActionProjectAdmin) {
+	if CanRole(union, ActionProjectAdmin) {
 		t.Error("KEY_ROTATION+CONFIG_ADMIN reached an ADMIN-only action")
 	}
 
@@ -79,8 +79,8 @@ func TestCanRolesAreAdditive(t *testing.T) {
 		want[a] = true
 	}
 	for _, a := range AllActions {
-		if got := Can(union, a); got != want[a] {
-			t.Errorf("Can(union, %s) = %v, want %v", a, got, want[a])
+		if got := CanRole(union, a); got != want[a] {
+			t.Errorf("CanRole(union, %s) = %v, want %v", a, got, want[a])
 		}
 	}
 }
@@ -88,10 +88,10 @@ func TestCanRolesAreAdditive(t *testing.T) {
 func TestCanBoundaryBetweenConfigAdminAndKeyRotation(t *testing.T) {
 	// The one boundary that is easy to get wrong: a key yes, a domain no.
 	keyRotation := NewRoleSet(RoleKeyRotation)
-	if !Can(keyRotation, ActionKeyWrite) || !Can(keyRotation, ActionKeySecretView) {
+	if !CanRole(keyRotation, ActionKeyWrite) || !CanRole(keyRotation, ActionKeySecretView) {
 		t.Error("KEY_ROTATION cannot create a key or see its secret")
 	}
-	if Can(keyRotation, ActionInventoryWrite) {
+	if CanRole(keyRotation, ActionInventoryWrite) {
 		t.Error("KEY_ROTATION can change the inventory")
 	}
 }
@@ -99,7 +99,7 @@ func TestCanBoundaryBetweenConfigAdminAndKeyRotation(t *testing.T) {
 func TestCanOnlyAdminReachesAdminOnlyActions(t *testing.T) {
 	for _, role := range []Role{RoleConfigAdmin, RoleKeyRotation, RoleReadOnly} {
 		for _, action := range []Action{ActionProjectAdmin, ActionSessionAdmin} {
-			if Can(NewRoleSet(role), action) {
+			if CanRole(NewRoleSet(role), action) {
 				t.Errorf("%s reached ADMIN-only action %s", role, action)
 			}
 		}

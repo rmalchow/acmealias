@@ -1,0 +1,168 @@
+package authz
+
+import (
+	"slices"
+	"strings"
+
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
+)
+
+// Object is the thing a permission check is about: what it is, which one, and
+// which ancestors it has.
+//
+// The ancestors are fields rather than a lookup because design P3 materialized
+// them onto every row for exactly this reason. Checking one loaded object needs
+// no query and no join: the chain is at most three long and it is already in
+// memory. That is what keeps the challenge path's promise of adding no query.
+type Object struct {
+	Type           ObjectType
+	ID             model.ID
+	AccountID      model.ID
+	ProjectID      model.ID
+	LoadBalancerID model.ID
+	// Zone, Name and RecordType are set only for TypeDNSRecord, where the
+	// identifier is a selector rather than an id. Nothing constructs one yet —
+	// dns-records creates the objects — but the grammar has to accommodate them
+	// before they exist, or it would have to change once they do.
+	Zone       string
+	Name       string
+	RecordType string
+}
+
+// ancestor returns this object's identifier of the given type, and whether it
+// has one.
+func (o Object) ancestor(t ObjectType) (model.ID, bool) {
+	switch t {
+	case TypeProject:
+		return o.ProjectID, o.ProjectID != model.NilID
+	case TypeLoadBalancer:
+		return o.LoadBalancerID, o.LoadBalancerID != model.NilID
+	}
+	return model.NilID, false
+}
+
+// Subject is something that holds grants: a person through their roles, or an
+// API key. Both reduce to the same two things — an anchor, and a set of grants —
+// so the evaluator does not know which it is looking at.
+type Subject struct {
+	// AccountID is the anchor. Every grant this subject holds is confined to
+	// it, and a wildcard means "within this account".
+	AccountID model.ID
+	// Unrestricted short-circuits the evaluation: the account's fixed role
+	// confers every action on every object of that account. It is a flag rather
+	// than a set of grants so it cannot be edited away one row at a time, and so
+	// that "there is always a way back into an account" cannot be undone by a
+	// grant edit.
+	Unrestricted bool
+	Grants       []Grant
+}
+
+// Can reports whether subject may perform action on object.
+//
+// Evaluation is a union over grants and nothing else: authority is granted, never
+// denied, and no grant removes what another confers (the spec calls this out
+// because a deny rule is where permission models stop being answerable). Order
+// is therefore irrelevant, and so is the order grants were written in.
+func Can(s Subject, action string, o Object) bool {
+	// Tenancy first, and not as a permission. A subject cannot hold a grant
+	// naming another account's object, so this is a belt-and-braces assertion of
+	// something the grant grammar already makes unrepresentable — but it is the
+	// assertion that keeps an evaluator bug inside one tenant.
+	if s.AccountID == model.NilID || o.AccountID != s.AccountID {
+		return false
+	}
+	if s.Unrestricted {
+		return true
+	}
+	for _, g := range s.Grants {
+		if matches(g, action, o) {
+			return true
+		}
+	}
+	return false
+}
+
+// matches reports whether one grant covers one action on one object.
+func matches(g Grant, action string, o Object) bool {
+	if g.AccountID != o.AccountID {
+		return false
+	}
+	if g.Action != Wildcard && g.Action != action {
+		return false
+	}
+
+	switch {
+	case g.Type == TypeAny:
+		// A wildcard type with a wildcard identifier is "everything in this
+		// account". A wildcard type cannot name one object — Validate refuses
+		// that — so there is nothing else to compare.
+		return g.Form() == FormWildcard
+
+	case g.Type == o.Type:
+		switch g.Form() {
+		case FormWildcard:
+			return true
+		case FormID:
+			return *g.ObjectID == o.ID
+		case FormSelector:
+			return matchesSelector(*g.Selector, o)
+		}
+
+	case Contains(g.Type, o.Type):
+		// The grant names an ancestor. Only an inheritable grant reaches down;
+		// without the flag a grant on a project is a grant on the project row.
+		if !g.Inheritable {
+			return false
+		}
+		switch g.Form() {
+		case FormWildcard:
+			return true
+		case FormID:
+			id, ok := o.ancestor(g.Type)
+			return ok && id == *g.ObjectID
+		case FormSelector:
+			// A selector describes objects of its own type; it cannot describe
+			// an ancestor of a different type.
+			return false
+		}
+	}
+	// Inheritance never reaches upward: a grant on a load balancer says nothing
+	// about the project containing it.
+	return false
+}
+
+// matchesSelector applies the three-part DNS record predicate. All three parts
+// must match — a grant over A records under a subtree is not a grant over the MX
+// at the same name.
+func matchesSelector(sel DNSSelector, o Object) bool {
+	if o.Type != TypeDNSRecord {
+		return false
+	}
+	if !strings.EqualFold(normalizeName(sel.Zone), normalizeName(o.Zone)) {
+		return false
+	}
+	if !MatchPattern(sel.Names, o.Name) {
+		return false
+	}
+	if len(sel.Types) == 0 {
+		// An empty type set selects nothing. The alternative — reading it as
+		// "every type" — would make an under-specified grant the widest one.
+		return false
+	}
+	return slices.ContainsFunc(sel.Types, func(t string) bool {
+		return strings.EqualFold(t, o.RecordType)
+	})
+}
+
+// Permitted lists the actions a subject may perform on one object, from a
+// candidate vocabulary. The console renders buttons from it; the server still
+// checks every request, because the client is not the enforcement point.
+func Permitted(s Subject, actions []string, o Object) []string {
+	out := make([]string, 0, len(actions))
+	for _, a := range actions {
+		if Can(s, a, o) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
