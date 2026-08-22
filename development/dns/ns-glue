@@ -1,0 +1,5 @@
+# Glue for the NS names our own zone advertises (ACME_NS_NAMES), pointed at
+# CoreDNS rather than at the service: see the Corefile block that loads this.
+# Development-only — in production these names resolve to the real server.
+172.28.0.53 ns1.dev.acmeservice.internal
+172.28.0.53 ns2.dev.acmeservice.internal

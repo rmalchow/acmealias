@@ -1,0 +1,10 @@
+drop table if exists audit_entries;
+drop table if exists sessions;
+drop table if exists challenges;
+drop table if exists api_key_networks;
+drop table if exists api_keys;
+drop table if exists domains;
+drop table if exists aliases;
+drop table if exists lb_nodes;
+drop table if exists load_balancers;
+drop table if exists projects;

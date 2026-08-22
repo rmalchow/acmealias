@@ -1,0 +1,52 @@
+<header class="shell-bar">
+  <div class="ac-page bar-inner">
+    <a class="brand" routerLink="/projects">acmeservice</a>
+
+    <nav>
+      @for (item of nav(); track item.path) {
+        <a [routerLink]="item.path" routerLinkActive="active">{{ item.label }}</a>
+      }
+    </nav>
+
+    @if (session.me(); as me) {
+      <button class="account" nz-button nzType="text" nz-dropdown [nzDropdownMenu]="account">
+        <span nz-icon nzType="user"></span>
+        {{ me.displayName }}
+        <span nz-icon nzType="down"></span>
+      </button>
+      <nz-dropdown-menu #account="nzDropdownMenu">
+        <ul nz-menu>
+          <li nz-menu-item nzDisabled>
+            <div>
+              <div>{{ me.roles.join(', ') || 'no roles' }}</div>
+              <div class="ac-hint">{{ me.groups.join(', ') }}</div>
+            </div>
+          </li>
+          <li nz-menu-divider></li>
+          <li nz-menu-item tabindex="0" (click)="session.signOut()" (keydown.enter)="session.signOut()">
+            <span nz-icon nzType="logout"></span>
+            Sign out
+          </li>
+        </ul>
+      </nz-dropdown-menu>
+    }
+  </div>
+</header>
+
+<main class="ac-page">
+  <router-outlet />
+</main>
+
+<nz-modal
+  [nzVisible]="session.expired()"
+  nzTitle="Your session has expired"
+  [nzClosable]="false"
+  [nzMaskClosable]="false"
+  [nzCancelText]="null"
+  nzOkText="Sign in again"
+  (nzOnOk)="session.signIn()"
+>
+  <ng-container *nzModalContent>
+    <p>You were signed out, so the last request was not carried out. Sign in again to continue where you were.</p>
+  </ng-container>
+</nz-modal>

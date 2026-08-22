@@ -1,0 +1,47 @@
+; The customer's DNS, as the CA sees it. example.com is reserved by RFC 2606,
+; so serving it here cannot collide with anything real.
+;
+; THIS IS A TEMPLATE. development/scripts/lib.sh renders it to
+; example.com.zone — which is gitignored — substituting the challenge
+; delegation below. Edit this file; never the generated one, which the next
+; seed overwrites.
+;
+; The contents mirror what development/scripts/seed.sh puts in the inventory:
+; project `demo`, load balancer `prod`, domains `demo.example.com` and
+; `*.demo.example.com`. Change the seed and this file must change with it —
+; `acmeservice adminctl loadbalancer dns demo/prod` prints exactly what belongs here.
+$ORIGIN example.com.
+$TTL 60
+
+@   IN SOA ns.example.com. hostmaster.example.com. (
+        2026082001 ; serial
+        7200       ; refresh
+        3600       ; retry
+        1209600    ; expire
+        60 )       ; minimum
+@   IN NS  ns.example.com.
+ns  IN A   172.28.0.53
+
+; The customer-like load balancer (traefik-lb) answers for both names. The
+; wildcard is what makes `*.demo.example.com` resolve to the same place.
+;
+; These deliberately DIFFER from the addresses the generated plan prints
+; (203.0.113.10/.11, the seeded node addresses — TEST-NET-3, unroutable by
+; design). Only the _acme-challenge CNAME below has to match the plan; the A
+; records just have to point at something that answers, which here is the
+; container.
+demo    IN A 172.28.0.30
+*.demo  IN A 172.28.0.30
+
+; The one record the whole design turns on. `demo.example.com` and
+; `*.demo.example.com` are two domain rows sharing ONE challenge name, hence
+; ONE alias, hence ONE CNAME — a certificate covering both validates two
+; authorizations at this single name.
+;
+; The target label is NOT written here and cannot be: with the shipped default
+; (ACME_ALIAS_USE_DOMAIN unset) the service generates a random label such as
+; jxet64y6bngq4j37, and only the running system knows which one it picked.
+; development/scripts/seed.sh reads it back out of
+; `adminctl loadbalancer dns demo/prod` and substitutes the CNAME records —
+; one per alias — for the marker below.
+@@CHALLENGE_DELEGATION@@

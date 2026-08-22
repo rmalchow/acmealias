@@ -1,0 +1,16 @@
+# Names that must resolve to a container instead of to the real internet.
+# Consulted by the catch-all block of the Corefile, with fallthrough, so
+# anything not listed here is forwarded upstream as usual.
+#
+# Empty on purpose, and kept rather than deleted: the Corefile's catch-all
+# block consults it, and this is where a name that must resolve to a container
+# and CANNOT be a Docker network alias would go.
+#
+# The dev hostnames — acme-console.localhost, acme-api.localhost,
+# acme-challenge.localhost, keycloak.localhost — are not here. They are
+# network aliases on the traefik service in compose.yaml, which Docker's own
+# embedded resolver answers before anything reaches CoreDNS. keycloak.localhost
+# in particular is load-bearing rather than merely convenient: it is the OIDC
+# issuer host, and the issuer has to be ONE URL that resolves from the browser
+# on the host and from inside the api container alike, because go-oidc
+# requires the issuer it discovers to match the one it was configured with.

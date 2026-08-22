@@ -1,0 +1,197 @@
+package authz
+
+import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"strings"
+	"time"
+
+	"github.com/labstack/echo/v4"
+	"gorm.io/gorm"
+
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
+)
+
+// Where an audited action came from.
+const (
+	SourceConsole = "console"
+	SourceCLI     = "cli"
+	SourceSystem  = "system"
+)
+
+// Actor is who did it.
+//
+// Roles is recorded alongside Groups deliberately. Group membership changes in
+// the identity provider and the group-to-role mapping changes in the
+// environment, so an entry that records only a name — or only a group — cannot
+// answer "how was this person allowed to do that" six months later. The roles
+// held at the time can.
+type Actor struct {
+	Subject     string
+	DisplayName string
+	Groups      []string
+	Roles       RoleSet
+	Source      string
+	RequestID   string
+	ClientIP    string
+}
+
+// ConsoleActor builds an Actor from a request that passed Authenticated.
+func ConsoleActor(c echo.Context) Actor {
+	sess := SessionFromContext(c)
+	a := Actor{
+		Roles:     RolesFromContext(c),
+		Source:    SourceConsole,
+		RequestID: requestID(c),
+		ClientIP:  c.RealIP(),
+	}
+	if sess != nil {
+		a.Subject, a.DisplayName, a.Groups = sess.Subject, sess.DisplayName, sess.Groups
+	}
+	return a
+}
+
+// SystemActor is the actor for something the service did on its own — a sweep,
+// a scheduled job. It has no subject and no roles.
+func SystemActor() Actor { return Actor{Source: SourceSystem} }
+
+func requestID(c echo.Context) string {
+	if id := c.Response().Header().Get(echo.HeaderXRequestID); id != "" {
+		return id
+	}
+	return c.Request().Header.Get(echo.HeaderXRequestID)
+}
+
+// Event is what happened. ObjectLabel is denormalized so the entry stays
+// readable after the object is deleted.
+//
+// Before and After are arbitrary values, JSON-encoded; they are scrubbed of
+// secret-looking fields before they are written (see scrub).
+type Event struct {
+	Action      string
+	ObjectType  string
+	ObjectID    *int64
+	ObjectLabel string
+	ProjectID   *int64
+	Before      any
+	After       any
+}
+
+// Record appends one audit row. Callers should treat a failure here as a
+// failure of the action itself: a privileged change that was not recorded is
+// worse than one that did not happen.
+//
+// m may be nil for a caller that has no metrics registry — the CLI is the one
+// such caller. Every long-running path MUST pass it: a counter that is
+// incremented on some write paths and not others reports plausible numbers
+// while missing most of what it claims to count.
+func Record(ctx context.Context, db *gorm.DB, m *obs.Metrics, a Actor, e Event) error {
+	before, err := scrub(e.Before)
+	if err != nil {
+		return err
+	}
+	after, err := scrub(e.After)
+	if err != nil {
+		return err
+	}
+
+	entry := &model.AuditEntry{
+		OccurredAt:   time.Now().UTC(),
+		ActorSubject: nonEmpty(a.Subject),
+		ActorName:    nonEmpty(a.DisplayName),
+		ActorGroups:  a.Groups,
+		ActorRoles:   a.Roles.List(),
+		ActorSource:  cmp.Or(a.Source, SourceSystem),
+		RequestID:    nonEmpty(a.RequestID),
+		ClientIP:     nonEmpty(a.ClientIP),
+		Action:       e.Action,
+		ObjectType:   e.ObjectType,
+		ObjectID:     e.ObjectID,
+		ObjectLabel:  e.ObjectLabel,
+		ProjectID:    e.ProjectID,
+		Before:       before,
+		After:        after,
+	}
+	if err := store.AppendAuditEntry(ctx, db, entry); err != nil {
+		return err
+	}
+	// ponytail: counted here, inside the caller's transaction, so every writer
+	// gets the counter for free. The ceiling is that a transaction that rolls
+	// back after this point leaves the count one too high — audit writes are
+	// the last thing in each of the three transactions and a rollback after
+	// one is a failing action, so the drift is bounded by the failure rate. If
+	// that ever matters, hand callers a post-commit hook instead.
+	if m != nil {
+		m.AuditEntries.WithLabelValues(cmp.Or(ActionClass(e.Action), obs.ActionClassUnknown)).Inc()
+	}
+	return nil
+}
+
+// secretish names the field names that must never reach an audit row. The
+// match is a case-insensitive substring, so "secret", "SecretHash" and
+// "api_key_secret" all go.
+var secretish = []string{"secret", "token", "password", "passphrase", "credential", "cookie", "session_id", "sessionid", "private_key", "privatekey"}
+
+// scrub JSON-encodes v and replaces any secret-looking field with "[redacted]",
+// at any depth.
+//
+// ponytail: a name-based filter, applied at the one place audit rows are
+// written, rather than trusting every caller to hand over a clean struct. It
+// catches the fields this schema actually has. Its ceiling is that a secret
+// stored under an innocuous name still gets through — if that ever becomes a
+// risk, give Event an explicit allowlist of fields per ObjectType instead.
+func scrub(v any) (json.RawMessage, error) {
+	if v == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, err
+	}
+	return json.Marshal(redact(decoded))
+}
+
+func redact(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, sub := range t {
+			if isSecretish(k) {
+				t[k] = "[redacted]"
+				continue
+			}
+			t[k] = redact(sub)
+		}
+		return t
+	case []any:
+		for i, sub := range t {
+			t[i] = redact(sub)
+		}
+		return t
+	default:
+		return v
+	}
+}
+
+func isSecretish(key string) bool {
+	k := strings.ToLower(key)
+	for _, s := range secretish {
+		if strings.Contains(k, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func nonEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}

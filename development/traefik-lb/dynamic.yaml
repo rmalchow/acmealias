@@ -1,0 +1,22 @@
+# One router, one backend, one certificate — the smallest thing that exercises
+# a full DNS-01 issuance. The certificate deliberately covers the base name AND
+# the wildcard, because that is the case the alias model exists for: two
+# authorizations validated at one challenge name, so two TXT values must be
+# answerable there simultaneously (design D6).
+http:
+  routers:
+    whoami:
+      rule: "Host(`demo.example.com`)"
+      entryPoints: ["websecure"]
+      service: whoami
+      tls:
+        certResolver: pebble
+        domains:
+          - main: "demo.example.com"
+            sans: ["*.demo.example.com"]
+
+  services:
+    whoami:
+      loadBalancer:
+        servers:
+          - url: "http://whoami:80"

@@ -1,0 +1,58 @@
+# The fake internet's DNS for the dev stack — design D14 in miniature.
+#
+# This directory is deliberately self-contained (Corefile + zones/ + hosts) so
+# development/acceptance/ can mount the same one rather than growing a second
+# copy that drifts.
+#
+# Three jobs, in order:
+
+# 1. Authoritative for example.com. RFC 2606 reserves it, so hijacking it here
+#    cannot collide with anything real. This is the "customer's DNS": the
+#    address records for the domains in the seeded inventory, and the one
+#    _acme-challenge CNAME that points at our zone.
+example.com:53 {
+    file /etc/coredns/zones/example.com.zone
+    log
+    errors
+}
+
+# 2. Our own zone, served by the acmeservice binary in the `api` container on
+#    :8053 (ACME_DNS_LISTEN — not :53, so the container needs no
+#    CAP_NET_BIND_SERVICE; CoreDNS is what holds 53 here).
+#
+#    forward's target must be an IP:port. CoreDNS does not resolve names for
+#    it — that is the reason `api` has a static address in compose.yaml.
+dev.acmeservice.internal:53 {
+    # The glue for our own NS names is overridden here, and it matters more
+    # than it looks. lego's propagation check does not trust a recursive
+    # answer: it reads the zone's NS RRset (ns1/ns2.dev.acmeservice.internal,
+    # ACME_NS_NAMES) and then queries those servers DIRECTLY — on port 53,
+    # always, with no way to say otherwise. In development the service listens
+    # on 8053, so pointing the glue at the service's own address would make
+    # every propagation check time out with "could not determine authoritative
+    # nameservers" while `dig` through this resolver looks perfect.
+    #
+    # Pointing it at CoreDNS instead gives lego something on 53 that forwards
+    # to the service. In production the NS names resolve to the real server,
+    # which really does listen on 53, and none of this exists.
+    hosts /etc/coredns/ns-glue {
+        fallthrough
+    }
+    forward . 172.28.0.10:8053
+    log
+    errors
+}
+
+# 3. Everything else: a real upstream, with a cache, so containers still reach
+#    the actual internet. The hosts file in front of it carries the handful of
+#    names that must resolve to a container rather than to the outside world
+#    (see development/dns/hosts); `fallthrough` means a miss there continues to
+#    the forward rather than becoming NXDOMAIN.
+.:53 {
+    hosts /etc/coredns/hosts {
+        fallthrough
+    }
+    forward . 1.1.1.1 8.8.8.8
+    cache 30
+    errors
+}

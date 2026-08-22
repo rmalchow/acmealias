@@ -1,0 +1,87 @@
+{
+  "realm": "acmeservice",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "groups": [
+    { "name": "acme-admin" },
+    { "name": "acme-config-admin" },
+    { "name": "acme-key-rotation" },
+    { "name": "acme-read-only" }
+  ],
+  "users": [
+    {
+      "username": "admin-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin-user@dev.acmeservice.internal",
+      "firstName": "Admin",
+      "lastName": "Dev",
+      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }],
+      "groups": ["/acme-admin"]
+    },
+    {
+      "username": "config-admin-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "config-admin-user@dev.acmeservice.internal",
+      "firstName": "ConfigAdmin",
+      "lastName": "Dev",
+      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }],
+      "groups": ["/acme-config-admin"]
+    },
+    {
+      "username": "key-rotation-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "key-rotation-user@dev.acmeservice.internal",
+      "firstName": "KeyRotation",
+      "lastName": "Dev",
+      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }],
+      "groups": ["/acme-key-rotation"]
+    },
+    {
+      "username": "read-only-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "read-only-user@dev.acmeservice.internal",
+      "firstName": "ReadOnly",
+      "lastName": "Dev",
+      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }],
+      "groups": ["/acme-read-only"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "acmeservice-console",
+      "name": "acmeservice console (dev)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-console-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://acme-console.localhost/api/v1/auth/callback"],
+      "webOrigins": ["http://acme-console.localhost"],
+      "attributes": {
+        "post.logout.redirect.uris": "http://acme-console.localhost/"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}

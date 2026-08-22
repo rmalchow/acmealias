@@ -1,0 +1,55 @@
+/* The shell: a bar whose CONTENTS are constrained to the same width as the page below it
+ * (.ac-page), while the bar itself spans the window — so the brand sits directly above the page
+ * heading and the bar's bottom edge still reaches both window edges. */
+.shell-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 3rem;
+  background: #1f1f1f;
+  border-bottom: 1px solid #303030;
+}
+
+.bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  height: 100%;
+}
+
+.brand {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgb(255 255 255 / 85%);
+  text-decoration: none;
+}
+
+nav {
+  display: flex;
+  gap: 1.25rem;
+  height: 100%;
+  align-items: center;
+}
+
+nav a {
+  color: rgb(255 255 255 / 65%);
+  text-decoration: none;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+}
+
+nav a:hover {
+  color: rgb(255 255 255 / 85%);
+}
+
+/* The current screen, marked on the bar rather than only in the breadcrumb. */
+nav a.active {
+  color: #177ddc;
+  border-bottom-color: #177ddc;
+}
+
+.account {
+  margin-left: auto;
+}

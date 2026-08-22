@@ -1,0 +1,336 @@
+name: acmeservice-dev
+
+# Local development stack — design D12, plus the DNS-01 rehearsal rig of D14.
+#
+# EVERYTHING runs in a container, including the Go binary (under `air`) and the
+# Angular dev server (under `ng serve`), both live-reloading off bind-mounted
+# source. Nothing here talks to the host: one bridge network, every service
+# reachable by name. The only things published to the host are the ports a
+# developer actually points a browser or a `dig` at.
+#
+# No named volumes anywhere — every stateful service and every build cache
+# bind-mounts under ./data/<name>/ so `development/scripts/reset.sh` is an
+# `rm -rf`. The caches in particular live under data/ rather than in the source
+# tree so container-created, root-owned artefacts never land in backend/ or
+# frontend/. See development/scripts/lib.sh, DATA_DIRS.
+#
+# Two profiles:
+#   (default)   postgres, keycloak, coredns, api, web, traefik  — the dev loop.
+#   acme        pebble, traefik-lb, whoami — a fake CA and a customer-like load
+#               balancer that really obtains a certificate over DNS-01.
+#               Opt in with: development/scripts/up.sh --acme
+#
+# `dns: ["172.28.0.53"]` on every service does NOT break resolution of
+# container names: /etc/resolv.conf still points at Docker's embedded resolver
+# (127.0.0.11), which answers service names itself and only forwards names it
+# cannot answer to what `dns:` names. CoreDNS lives in the default profile
+# precisely so that this setting is always valid — a resolver that exists only
+# under a profile would break name resolution for everyone whenever the
+# profile is off.
+
+networks:
+  default:
+    name: acmeservice-dev
+    ipam:
+      config:
+        # Fixed subnet because three addresses in it are written into config
+        # files rather than resolved: CoreDNS's own (it goes into resolv.conf
+        # before any name resolution exists), the api's (CoreDNS's `forward`
+        # takes an IP, never a name), traefik-lb's (it is the A record the
+        # fake example.com zone hands out) and the dev overlay's (the
+        # *.localhost names resolve to it).
+        - subnet: 172.28.0.0/24
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # Reachable as `http://keycloak.localhost` from BOTH sides, which is the
+  # whole reason for the odd hostname: the OIDC issuer string has to be one
+  # URL that the browser on the host and the api container can each open. The
+  # host resolves any *.localhost name to loopback (RFC 6761; systemd-resolved
+  # and every current browser do this), and inside the network CoreDNS answers
+  # it from development/dns/hosts — in both cases with the dev Traefik's
+  # address, which routes the name on to this container's :8082.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.20
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_HOSTNAME: ${KC_HOSTNAME}
+      KC_HTTP_PORT: ${KC_HTTP_PORT}
+      # Behind the overlay, so build redirect/issuer URLs from the forwarded
+      # host and scheme rather than from this container's own :8082.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./data/keycloak:/opt/keycloak/data
+      - ./realm:/opt/keycloak/data/import:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.keycloak.rule: "Host(`keycloak.localhost`)"
+      traefik.http.routers.keycloak.entrypoints: web
+      traefik.http.services.keycloak.loadbalancer.server.port: "8082"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nhost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # The fake internet's DNS. Authoritative for example.com (RFC 2606 reserves
+  # it, so hijacking it is safe), forwards our own zone to the api container's
+  # authoritative listener, and forwards everything else to a real upstream so
+  # containers still reach the internet. See development/dns/Corefile.
+  coredns:
+    image: coredns/coredns:1.11.3
+    restart: unless-stopped
+    command: ["-conf", "/etc/coredns/Corefile"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.53
+    volumes:
+      - ./dns:/etc/coredns:ro
+    ports:
+      # The fake internet's resolver, on all interfaces so another machine can
+      # point at it and see the same hijacked example.com.
+      - "8053:53/udp"
+      - "8053:53/tcp"
+
+  # The Go service, rebuilt and restarted by air on every .go change. Source is
+  # bind-mounted; the module cache, build cache and air's output directory are
+  # mounted out of it so nothing root-owned is created inside backend/.
+  #
+  # Linux propagates inotify events through bind mounts, so the watcher works
+  # as-is. On Docker Desktop (macOS/Windows) it usually does not — the knob is
+  # `poll = true` in backend/.air.toml. Do not turn it on here; it burns CPU
+  # for nothing on Linux.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.10
+    env_file: [.env]
+    environment:
+      CGO_ENABLED: "0"
+    working_dir: /src
+    command: ["air", "-c", ".air.toml"]
+    volumes:
+      - ../backend:/src
+      - ./data/go_mod:/go/pkg/mod
+      - ./data/go_build:/root/.cache/go-build
+      - ./data/air_tmp:/src/tmp
+    depends_on:
+      postgres: {condition: service_healthy}
+    labels:
+      traefik.enable: "true"
+
+      # The admin API under the CONSOLE's own origin. Higher priority than the
+      # SPA's catch-all on the same hostname, so `/api` can never be shadowed
+      # by it.
+      traefik.http.routers.admin-api.rule: "Host(`acme-console.localhost`) && PathPrefix(`/api`)"
+      traefik.http.routers.admin-api.priority: "100"
+      traefik.http.routers.admin-api.entrypoints: web
+      traefik.http.routers.admin-api.service: admin-api
+
+      # The same admin API on a hostname of its own, for everything that is
+      # NOT the browser session: curl, the CLI, an API-key client.
+      #
+      # The console must keep calling its own origin's /api rather than this
+      # one. The session and CSRF cookies are host-only and `SameSite=Lax`,
+      # and browsers compute "same site" from the registrable domain —
+      # `localhost` is not a public suffix, so `acme-console.localhost` and
+      # `acme-api.localhost` are two different sites, not two hosts of one
+      # site. An XHR between them would carry no session cookie, and no CORS
+      # header can put it back: SameSite is a browser rule, not a server one.
+      traefik.http.routers.admin-api-host.rule: "Host(`acme-api.localhost`)"
+      traefik.http.routers.admin-api-host.priority: "100"
+      traefik.http.routers.admin-api-host.entrypoints: web
+      traefik.http.routers.admin-api-host.service: admin-api
+
+      # The ACME challenge API (lego's httpreq endpoint). traefik-lb reaches
+      # it as http://api:8080 on the network without going through here; this
+      # route exists so a developer can curl /present and /cleanup by hand.
+      traefik.http.routers.challenge-api.rule: "Host(`acme-challenge.localhost`)"
+      traefik.http.routers.challenge-api.entrypoints: web
+      traefik.http.routers.challenge-api.service: challenge-api
+
+      traefik.http.services.admin-api.loadbalancer.server.port: "8081"
+      traefik.http.services.challenge-api.loadbalancer.server.port: "8080"
+    ports:
+      # Not HTTP, so the overlay cannot carry it: our authoritative DNS, for
+      # `dig -p 8153`. Every HTTP surface of this container is a route above.
+      - "8153:8053/udp"
+      - "8153:8053/tcp"
+
+  # `ng serve` in a container. node_modules is its OWN mount rather than part
+  # of the bind-mounted tree: mounting ./frontend over /app would otherwise
+  # hide anything the image installed, and this way the container's dependency
+  # tree and a developer's host-side frontend/node_modules never touch each
+  # other. It starts out empty, hence the `npm ci` guard.
+  web:
+    image: node:22-alpine
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - >-
+        [ -d node_modules/@angular/cli ] || npm ci;
+        exec npx ng serve admin --host 0.0.0.0 --disable-host-check --port 4200
+    labels:
+      traefik.enable: "true"
+      # The catch-all for the console origin: everything the admin-api router
+      # above did not claim, HMR websocket included — Traefik forwards
+      # `Upgrade`/`Connection` on any matched route by default.
+      traefik.http.routers.spa.rule: "Host(`acme-console.localhost`)"
+      traefik.http.routers.spa.priority: "1"
+      traefik.http.routers.spa.entrypoints: web
+      traefik.http.services.spa.loadbalancer.server.port: "4200"
+    volumes:
+      - ../frontend:/app
+      - ./data/node_modules:/app/node_modules
+      - ./data/ng_cache:/app/.angular/cache
+
+  # Dev-only reverse proxy. It presents the console and its admin API at one
+  # origin, http://acme-console.localhost — design D12 explains why one origin
+  # matters (session cookie SameSite=Lax + CSRF, no dev-only CORS branch) — and
+  # additionally gives the API and the IdP hostnames of their own,
+  # http://acme-api.localhost and http://keycloak.localhost. See the labels on
+  # the `api` service for why the console must NOT call the api hostname.
+  #
+  # Static address: the *.localhost names above are answered inside the stack
+  # from development/dns/hosts, and CoreDNS's hosts plugin takes an address,
+  # never a service name.
+  #
+  # The routes live as labels on the services themselves; this reads them off
+  # the Docker socket, mounted read-only. Nothing else in the stack publishes
+  # an HTTP port to the host any more — one way in, on :80, by name.
+  traefik:
+    # v3.6, not the v3.1 the customer-like traefik-lb below runs: everything
+    # up to v3.5 asks the Docker socket for API 1.24, which Docker 29 refuses
+    # ("client version 1.24 is too old"), and the provider then builds no
+    # routes at all. The version is hardcoded in those releases — no
+    # DOCKER_API_VERSION or config knob moves it — so the fix is the image.
+    # traefik-lb touches no socket and stays on v3.1 on purpose: it is the
+    # stand-in for whatever a customer already runs.
+    image: traefik:v3.6
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.40
+        # Every dev hostname IS this container, as far as the stack is
+        # concerned. Docker's embedded resolver (127.0.0.11, which every
+        # container consults before the `dns:` server below it) answers these
+        # aliases itself, so nothing has to be written into CoreDNS's hosts
+        # file and no address is hardcoded anywhere. On the host side the
+        # names need no configuration either: *.localhost is loopback by
+        # definition (RFC 6761), and loopback:80 is this container's
+        # published port. One URL, both sides.
+        aliases:
+          - acme-console.localhost
+          - acme-api.localhost
+          - acme-challenge.localhost
+          - keycloak.localhost
+    command:
+      - "--configFile=/etc/traefik/traefik.yaml"
+    volumes:
+      - ./traefik:/etc/traefik:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      # All interfaces, not just loopback: the console has to be reachable
+      # from another machine on the LAN (a phone, a second laptop, a
+      # colleague) — this is a trusted network and a throwaway stack. Note
+      # that only the *port* is open that way; the hostnames still have to
+      # resolve, so a visitor needs the names in their own hosts file.
+      - "80:80"
+    depends_on: [api, web, keycloak]
+
+  # ---------------------------------------------------------------------------
+  # profile: acme — the DNS-01 rehearsal rig (design D14, in miniature)
+  # ---------------------------------------------------------------------------
+
+  # Let's Encrypt's own test CA. Real ACME protocol, real DNS-01 validation
+  # against our fake internet, throwaway certificates, no rate limits.
+  # NOSLEEP and NONCEREJECT off: pebble deliberately injects delays and rejects
+  # ~5% of nonces to shake out *client* bugs. The client is not what we are
+  # testing here, so that is pure flakiness.
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:latest
+    profiles: [acme]
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    command: ["-config", "/test/config/pebble-config.json", "-dnsserver", "coredns:53"]
+    environment:
+      PEBBLE_VA_NOSLEEP: "1"
+      PEBBLE_WFE_NONCEREJECT: "0"
+    ports:
+      - "127.0.0.1:14000:14000"   # ACME directory
+      - "127.0.0.1:15000:15000"   # management API (roots, at /roots/0)
+    depends_on: [coredns]
+
+  # A customer-like load balancer: stock Traefik, real configuration, actually
+  # obtains a certificate for demo.example.com + *.demo.example.com over
+  # DNS-01 through our service. Nothing about it is stubbed — the claim under
+  # test is precisely that unmodified Traefik works against this service.
+  traefik-lb:
+    image: traefik:v3.1
+    profiles: [acme]
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.30
+    command: ["--configFile=/etc/traefik/traefik.yaml"]
+    environment:
+      # lego posts challenges to our challenge API...
+      HTTPREQ_ENDPOINT: "http://api:8080/"
+      # ...and must trust pebble's throwaway CA to talk to it at all.
+      # up.sh --acme copies this out of the pebble image.
+      LEGO_CA_CERTIFICATES: /pebble/minica.pem
+    # HTTPREQ_USERNAME / HTTPREQ_PASSWORD for the API key, which only exists
+    # once the seed has run: the secret is displayed exactly once by
+    # `adminctl key create`, so seed.sh captures it into this file. up.sh
+    # writes an empty placeholder so compose does not fail before the seed.
+    env_file: [./data/acme-key.env]
+    volumes:
+      - ./traefik-lb:/etc/traefik:ro
+      - ./data/traefik_lb:/data
+      - ./data/pebble:/pebble:ro
+    ports:
+      # All interfaces, same reasoning as the overlay's :80.
+      - "443:443"
+    depends_on: [pebble, coredns]
+
+  whoami:
+    image: traefik/whoami:v1.10
+    profiles: [acme]
+    restart: unless-stopped
+    dns: ["172.28.0.53"]

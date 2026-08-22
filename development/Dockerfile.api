@@ -1,0 +1,15 @@
+# Development image for the Go service: the toolchain plus air, nothing else.
+# The source is bind-mounted at run time (see compose.yaml), never copied in —
+# this image exists only so `air` has a Go to call.
+#
+# CGO_ENABLED=0 because every dependency here is pure Go (pgx, miekg/dns,
+# gorm's postgres driver), so there is no reason to install gcc and musl-dev
+# on top of alpine. It is set again in compose.yaml so a rebuild of the binary
+# after an image change cannot silently pick up cgo.
+FROM golang:alpine
+
+ENV CGO_ENABLED=0
+RUN go install github.com/air-verse/air@latest
+
+WORKDIR /src
+CMD ["air", "-c", ".air.toml"]

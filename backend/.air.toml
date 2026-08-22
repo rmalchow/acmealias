@@ -1,0 +1,21 @@
+# air (https://github.com/air-verse/air) config for the dev loop — design
+# D12. Rebuilds and restarts the acmeservice binary on change. Run from
+# backend/ as `air -c .air.toml`; expects development/.env already sourced
+# into the environment (development/scripts/up.sh + scripts/dev.sh do this) so
+# ACME_* config reaches the built binary.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/acmeservice ./cmd/acmeservice"
+bin = "./tmp/acmeservice"
+include_ext = ["go"]
+exclude_dir = ["tmp", "internal/webui/dist", "acceptance"]
+delay = 200
+stop_on_error = true
+
+[log]
+time = false
+
+[misc]
+clean_on_exit = true

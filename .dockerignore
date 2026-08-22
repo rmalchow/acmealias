@@ -1,0 +1,8 @@
+development/
+docs/
+openspec/
+frontend/node_modules/
+frontend/.angular/
+backend/tmp/
+backend/acmeservice
+.git/

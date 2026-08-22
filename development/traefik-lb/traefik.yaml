@@ -1,0 +1,35 @@
+# Static configuration for traefik-lb — the customer-like load balancer of the
+# `acme` profile. This is stock Traefik with the configuration a real customer
+# would write; only the CA and the resolver are fake.
+entryPoints:
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yaml
+    watch: true
+
+certificatesResolvers:
+  pebble:
+    acme:
+      email: dev@example.com
+      storage: /data/acme.json
+      # The fake CA. LEGO_CA_CERTIFICATES (set in compose.yaml) points lego at
+      # pebble's minica so this HTTPS endpoint is trusted at all.
+      caServer: https://pebble:14000/dir
+      dnsChallenge:
+        # Publishes the TXT value to our challenge API over lego's httpreq
+        # provider — HTTPREQ_ENDPOINT and the HTTPREQ_USERNAME/PASSWORD basic
+        # auth credentials come from the environment. Default mode, not RAW:
+        # the service answers 400 with a message naming both if RAW is used.
+        provider: httpreq
+        # lego's own propagation check must consult the fake internet, not the
+        # container's resolver, and it is the step that follows the
+        # _acme-challenge CNAME into our zone. An IP, because lego wants one.
+        resolvers: ["172.28.0.53:53"]
+
+log:
+  level: INFO
+
+accessLog: {}

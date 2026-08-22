@@ -1,0 +1,40 @@
+# Static configuration for the dev-only Traefik overlay — design D12.
+#
+# Port 80, so every dev URL is a bare hostname with no port on it:
+# http://acme-console.localhost, http://acme-api.localhost,
+# http://acme-challenge.localhost, http://keycloak.localhost. Names ending in
+# `.localhost` resolve to loopback on the host by themselves (RFC 6761) and
+# are answered inside the stack by CoreDNS from development/dns/hosts, so one
+# URL works from both sides.
+#
+# The routes themselves are Docker labels on the services they belong to, in
+# compose.yaml — a service and the hostname it answers on are then one thing
+# to read and one thing to change, and there is no second file to keep in
+# step. `exposedByDefault: false` means a container is routed only when it
+# says so: pebble, postgres, coredns and the customer-like traefik-lb carry no
+# labels and stay unreachable through here.
+#
+# The socket is mounted read-only. Traefik only ever lists containers and
+# watches events; it never creates or execs anything.
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: acmeservice-dev
+    watch: true
+    # Only this stack's containers. The socket shows EVERY container on the
+    # host, including other Compose projects, and Traefik merges what it finds
+    # by router name — so a co-resident project that also defines a router
+    # called `admin-api` makes Traefik log "Router defined multiple times with
+    # different configurations" and drop BOTH. The symptom is not an error
+    # page: `/api` quietly falls through to the SPA catch-all and the console
+    # answers HTML to its own API calls. Found when another project on this
+    # host did exactly that.
+    constraints: "Label(`com.docker.compose.project`,`acmeservice-dev`)"
+
+log:
+  level: INFO
