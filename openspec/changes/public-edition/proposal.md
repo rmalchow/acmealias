@@ -1,0 +1,212 @@
+## Why
+
+### One change was doing two jobs
+
+`add-accounts-and-public-edition` argued for two things at once, and said so in its own opening:
+*"introduce the small number of seams that let one codebase serve both, and — the part with a
+deadline on it — get the data model ready before there is public data in it."*
+
+Those two halves have come apart, decisively and in the right direction. The half with the
+deadline — an owner above `projects`, authorization that takes an object, query confinement that
+cannot be forgotten — has been superseded in far more detail by seven changes that did not exist
+when it was written. `tenancy-and-permissions` alone replaced its four fixed roles with a
+permission model, its plans with a different economic model, and its account-scoped queries with a
+mechanism that gates reads inside the query rather than after it.
+
+What remains is the other half: **the public edition as a product.** Signing strangers up,
+authenticating them without an identity provider we run, taking their money, protecting the shared
+service from them, and telling them what it does — none of which any other change has touched, and
+none of which the data-model work depends on.
+
+This change is that residue, made coherent on its own terms. It is deliberately a *smaller and
+more commercial* proposal than the one it replaces, and that is the point: a decision not to sell
+this can now be taken without unpicking anything, because nothing structural is left inside it.
+
+### What a "public edition" is
+
+The service answers ACME DNS-01 challenges — and, once `dns-records` lands, serves authoritative
+DNS — for domains whose zones we do not administer. A customer publishes one `CNAME` record once,
+and their load balancer can thereafter prove control of that domain to a certificate authority by
+asking us, rather than by holding write credentials for their own DNS.
+
+Two audiences can be sold that, and they share nothing else:
+
+- **The internal edition** — our own operators, signing in through our own identity provider,
+  administering our own fleet. Everyone who can sign in is trusted. This is what exists today.
+- **The public edition** — the same machinery offered to strangers. Someone finds a marketing
+  page, clicks "try now", registers with an email address, confirms it, adds a domain, publishes
+  the `CNAME` we show them, buys credits, and is running within a few minutes. They must never
+  see, or be able to reach, another customer's anything.
+
+The isolation half of that last sentence is `tenancy-and-permissions`' problem and is solved
+there. This change is everything else a stranger needs before and around it.
+
+### Why the remainder is worth a change of its own
+
+Because every item in it is a genuine commitment we do not currently carry, and each one is
+individually decidable:
+
+- **Local passwords** mean owning argon2id, credential-stuffing resistance, and a reset flow that
+  cannot itself be an account-takeover vector. Today the service owns none of that: `oidcauth`
+  delegates every one of those problems to Keycloak.
+- **Email becomes load-bearing.** A confirmation message that bounces is a customer who cannot get
+  in. Deliverability is an operational commitment, not a library dependency.
+- **Taking money** means a payment provider in the request path of something, webhook
+  verification, and an auditable trail from a card charge to a credit balance.
+- **Strangers on shared infrastructure** need limits that exist regardless of what they have paid,
+  because the first abusive account will not be a paying one.
+
+Bundled into a data-model change, none of those got a decision of its own. Separated, each does.
+
+## What Changes
+
+### Editions are selected by configuration, not by build
+
+One artifact. `ACME_EDITION=internal|public` is read at startup and selects which implementations
+are wired into the composition root, and the value in force is reported in the startup log and on
+the readiness endpoint, so an operator looking at a running process can see which policy it holds.
+This is decision E1 of `add-accounts-and-public-edition`, adopted unchanged.
+
+Two editions never share a datastore or a DNS zone. Two deployments, two databases, two zones —
+never one deployment serving both audiences.
+
+### Authentication becomes a seam with a second implementation
+
+`internal/oidcauth` becomes one implementation of an interface. A second, `internal/localauth`,
+adds what a public edition needs: email and password with argon2id hashing, an email-confirmation
+token, password reset, and rate limiting on authentication attempts.
+
+Both produce the same thing — a server-side session — and the session machinery, its expiry and
+revocation, and the cross-site request forgery protection are identical whichever authenticated
+it. That was true in the original proposal and remains true; what has changed is only what a
+session carries once established, which `tenancy-and-permissions` now specifies.
+
+A vocabulary note that matters more than it looks: **registering creates a *user*, not an
+account.** In the model these changes now share, a user is a person and exists outside every
+account; an account is the billing entity that holds credits and owns projects. A newly registered
+user belongs to no account at all, and `tenancy-and-permissions` specifies that state as a normal
+one. The original spec text called registration "creating an account", which is now ambiguous
+between two different entities, and this change renames it.
+
+### Payment funds credits, not subscriptions
+
+The original proposed flat monthly plans with quotas, and a Stripe adapter turning
+checkout and webhooks into subscription state. `metering-and-credits` replaced that model
+wholesale: credits are **prepaid**, actions are deducted, active zones accrue over time, and an
+overdraft carries an account briefly before its zones are withdrawn.
+
+So what this change keeps is only the part that model does not have: **the payment provider
+integration that turns money into credits.** A customer buys a quantity of credits; the provider
+confirms the payment; the balance rises. Purchase state is derived from what the provider reports
+and can never be typed in by hand, because a balance a human can edit is not an auditable one.
+
+Everything downstream of the balance — the ledger, accrual, the overdraft, warning by projected
+time remaining, suspension, restoration — belongs to `metering-and-credits` and is not restated
+here.
+
+### Abuse limits are not the same thing as credits, and survive separately
+
+The original's quotas did two unrelated jobs under one name. The product half (how many domains
+your plan permits) is gone, replaced by credits. The **protective** half survives and is separated
+out, because it answers a different question: not *have you paid for this*, but *can one account
+degrade the service for everyone else*.
+
+Concurrency and rate limits therefore apply in every edition, to every account, independently of
+its balance. A prepaid account with a large balance is not entitled to publish a million challenge
+values at once, and an internal deployment that bills nobody still wants the protection.
+
+### A stranger reaches a verified domain without help
+
+The onboarding story survives as written, and it is the clearest thing the original had: a person
+who has just confirmed their address is led to a first verified domain. The console shows the
+exact record to publish, in the form it must be published in; lets them check it; and reports what
+was found against what was expected, plainly enough to act on.
+
+`GET /loadbalancers/:id/verification` already answers exactly that question, so "try now" has a
+satisfying shape built almost entirely from endpoints that exist. No certificate is issued, because
+issuing certificates is not what this service does.
+
+### The marketing site is not in the binary
+
+The console is compiled into the Go binary, which is right for an administration UI delivered and
+versioned with the service. Every reason for that is inverted for a marketing site: it changes on a
+commercial cadence for commercial reasons, it must serve people who have no account and no session,
+and a copy change must never require redeploying a DNS service. Static site, its own pipeline, its
+own domain; the only coupling is a link into the public edition's registration route.
+
+### Not in scope
+
+- **Anything about tenancy, permissions, roles or query confinement.** All of it belongs to
+  `tenancy-and-permissions`.
+- **The credit ledger itself** — accrual, overdraft, suspension, restoration, warnings. Those are
+  `metering-and-credits`.
+- **Invitations.** `account-invitations` owns the whole flow, including registration reached
+  *through* an invitation link.
+- **Certificate issuance, storage or distribution.** Unchanged: we answer challenges.
+- **Social sign-in, SSO for public customers, SCIM.** The identity seam makes them additive.
+
+## What this change no longer contains
+
+Everything below was in `add-accounts-and-public-edition` and has been taken over, in most cases in
+considerably more depth. A reader of the old change needs to be told where its content went:
+
+| Removed from this change | Now specified by |
+| --- | --- |
+| The whole `accounts-and-tenancy` capability — the account entity, ownership by inheritance, account-scoped queries, the single-account internal edition | `tenancy-and-permissions` |
+| Roles held per account, the four fixed role names, and *"within an account there SHALL be no finer scoping"* | `tenancy-and-permissions`, which **contradicts** all three: roles become per-account records holding permission grants, and the set is no longer closed |
+| The non-goal *"per-project or per-domain roles inside an account"* | Reversed by `tenancy-and-permissions`; per-project API keys and per-name DNS record grants are the reason it exists |
+| *"A person may hold memberships in several accounts"* and the acting-account rule | `tenancy-and-permissions`, whose P19 makes the acting account a session selection that is additionally named on every request |
+| `service-inventory` MODIFIED *"The inventory is projects, load balancers and domains"* | `tenancy-and-permissions` modifies the same requirement; keeping it here would be a direct delta collision |
+| `service-inventory` MODIFIED *"An alias is one label in the served zone per challenge name"* | `tenancy-and-permissions`, likewise |
+| *"A domain earns nothing until it is verified"* | Its ownership half is `tenancy-and-permissions`' *"A domain name is unique within an account and not across the service"*, which states the same rule and the same CNAME-as-proof argument. Its billing half has no home; see *Impact* |
+| Plans, product quotas, subscription state | `metering-and-credits`, which replaces flat plans with prepaid credits |
+| *"Suspension does not break certificate renewal without warning"* | `metering-and-credits`, which specifies a soft-suspension lifecycle in detail: existing service continues, new publishes are refused, zone-time accrues into an overdraft, and only exhausting the overdraft withdraws zones |
+| `admin-console` *"The console makes the acting account unambiguous"* | `tenancy-and-permissions`' session selection, which gates functionality on a selected account rather than merely displaying one |
+| Decision E6, alias labels as an edition behaviour | Already superseded before this collapse, by the archived change `generate-alias-labels`: label style is one setting, not an edition difference |
+
+## Capabilities
+
+### New Capabilities
+
+- `credit-purchase`: buying credits through a payment provider — checkout, verified provider
+  notifications, the derivation of balance increases from confirmed payments, and the absence of
+  any interface for setting a balance by hand.
+- `abuse-limits`: concurrency and rate limits that protect the shared service from any single
+  account in any edition, independently of payment.
+
+### Modified Capabilities
+
+- `identity-and-roles`: authentication becomes a seam with one implementation per edition; local
+  registration with a confirmed email address, memory-hard password storage, single-use expiring
+  reset, and rate-limited authentication attempts are added.
+- `service-operations`: one artifact serves both editions with the edition selected at startup and
+  reported at runtime; editions never share a datastore or a zone; public-facing content is
+  released separately from the service; the acceptance environment exercises both editions.
+- `admin-console`: the console gains registration, confirmation and reset screens, the onboarding
+  path to a first verified domain, and the account's credit balance and payment state.
+
+## Impact
+
+- **`internal/oidcauth`.** Moves behind an interface with no behavioural change. The interface is
+  the whole of the work; the existing flow is not rewritten.
+- **`internal/localauth`.** New: argon2id, confirmation tokens, reset tokens, attempt rate
+  limiting. This is the largest single piece of new security-sensitive code in the change, and the
+  open question below asks whether we should own it at all.
+- **Email delivery.** New operational dependency, and the first one whose failure locks a customer
+  out rather than degrading a feature. `account-invitations` depends on the same delivery path.
+- **Payment provider.** New external dependency and a webhook endpoint whose verification is
+  security-critical. The endpoint is unauthenticated by nature and must be verified by signature.
+- **`internal/config`.** `ACME_EDITION` and the settings each edition requires, validated at
+  startup so a public deployment cannot start without the things a public deployment needs.
+- **The console.** Registration, confirmation, reset and purchase screens; the onboarding path.
+- **The acceptance harness.** Must run both editions, or the edition that is not used daily will be
+  broken exactly when it matters.
+- **Marketing site.** A separate deployment with its own pipeline and release cadence.
+- **One requirement is left unhoused deliberately.** The billing half of *"A domain earns nothing
+  until it is verified"* — that an unverified domain is not charged for — is not stated anywhere.
+  It plausibly belongs beside `metering-and-credits`' *"Active zones are charged over time"*, but
+  that change is already written and this one does not edit it. Note that under a credit model the
+  billed unit is the zone rather than the domain, so the gap may be empty in practice; it is
+  flagged rather than closed.
+- **Nothing on the DNS or challenge answering path.** `internal/dnsserver` and `internal/zoneview`
+  are untouched.
