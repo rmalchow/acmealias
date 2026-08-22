@@ -126,8 +126,41 @@ create index projects_account_id_idx       on projects (account_id);
 -- not so that the table can never gain a column. The re-enable is not conditional
 -- and not deferred — if it were skipped the trail would silently stop being
 -- append-only, which is worse than the migration failing.
+-- Two things stand in the way of backfilling this column, and both are the
+-- append-only protection working as designed:
+--
+--   1. The trigger from 000003 refuses UPDATE outright.
+--   2. 000003 also REVOKEs update from the connecting role. Its own comment
+--      says that revoke is "a statement of intent rather than a lock until
+--      ownership is split", on the grounds that a table owner keeps every
+--      privilege no matter what is revoked. That is not so — a revoke from the
+--      owner does take effect — and the reason nobody noticed is that the
+--      service used to connect as a SUPERUSER, which bypasses privilege checks
+--      entirely. It no longer does (store.CheckTenantIsolation refuses to
+--      start as one), so the lock is real now and this migration is the first
+--      thing to meet it.
+--
+-- Both are lifted for exactly these statements and restored immediately after.
+-- A schema migration may legitimately do this and application code may not: the
+-- protection exists so nobody rewrites history THROUGH THE SERVICE, not so the
+-- table can never gain a column. Neither restore is conditional or deferred —
+-- skipping one would leave the trail quietly writable, which is worse than the
+-- migration failing.
 alter table audit_entries add column account_id uuid;
+
+do $$
+begin
+  execute format('grant update on audit_entries to %I', current_user);
+end
+$$;
 alter table audit_entries disable trigger audit_entries_no_rewrite;
+
 update audit_entries set account_id = (select id from accounts where slug = 'internal');
+
 alter table audit_entries enable trigger audit_entries_no_rewrite;
+do $$
+begin
+  execute format('revoke update on audit_entries from %I', current_user);
+end
+$$;
 create index audit_entries_account_occurred_idx on audit_entries (account_id, occurred_at desc);

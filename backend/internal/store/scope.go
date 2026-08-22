@@ -146,15 +146,38 @@ func (s Scope) Run(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error)
 	if !s.Valid() {
 		return ErrNoScope
 	}
-	// An already-open transaction keeps its setting: nesting would issue a second
-	// SET LOCAL for the same account, which is harmless, but re-entering would also
-	// hide a caller that opened a transaction for a different scope.
-	if committer, ok := db.Statement.ConnPool.(gorm.TxCommitter); ok && committer != nil {
-		return fn(db.WithContext(ctx))
-	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// Inside an already-open transaction this joins it rather than nesting — but
+	// it still issues the SET LOCAL, and that is the whole point.
+	//
+	// An earlier version skipped the setting when it found a transaction,
+	// reasoning that whoever opened it had already set the tenant. That is false
+	// for every caller that opens a transaction to group several writes and
+	// their audit entry: those transactions are opened from a plain handle, so
+	// the tenant was never set, and every write inside them was refused by the
+	// policy. It did not show up in tests because the test connection was a
+	// superuser, which bypasses policies entirely; the dev stack found it within
+	// a minute of connecting as an ordinary role.
+	//
+	// Setting it again for the same account is harmless. Setting it for a
+	// DIFFERENT account inside someone else's transaction would be a bug, and it
+	// is one this makes visible — the statements after it move to the new tenant
+	// — rather than one that silently writes nothing.
+	setTenant := func(tx *gorm.DB) error {
 		if err := tx.Exec("select set_config('app.account_id', ?, true)", s.accountID.String()).Error; err != nil {
 			return fmt.Errorf("store: set scope: %w", err)
+		}
+		return nil
+	}
+	if committer, ok := db.Statement.ConnPool.(gorm.TxCommitter); ok && committer != nil {
+		tx := db.WithContext(ctx)
+		if err := setTenant(tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := setTenant(tx); err != nil {
+			return err
 		}
 		return fn(tx)
 	})
