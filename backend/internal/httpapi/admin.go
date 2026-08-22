@@ -24,9 +24,9 @@ import (
 //
 //   - the session is resolved once, by authz.Guard.Authenticated, which also
 //     refuses an authenticated user who maps to no role at all;
-//   - the permission is declared on the route itself, as
-//     authz.Require(action), so a route that forgets one does not silently
-//     inherit "any signed-in user may";
+//   - the permission is checked in internal/inventory, beside the operation and
+//     with the object in hand, so the API and the CLI cannot diverge (design
+//     P7). Session administration is the one exception and says why below;
 //   - every error leaves through one JSON shape (errors.go), so the console
 //     never has to guess whether a failure is HTML, a bare string, or an
 //     object.
@@ -123,60 +123,71 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	// group still only guards the state-changing routes.
 	sec := api.Group("", o.Auth.CSRF(), o.Guard.Authenticated())
 
-	view := authz.Require(authz.ActionViewInventory)
-	write := authz.Require(authz.ActionInventoryWrite)
-	projects := authz.Require(authz.ActionProjectAdmin)
-	keys := authz.Require(authz.ActionKeyWrite)
-	plan := authz.Require(authz.ActionDNSPlan)
+	// No permission middleware on the routes (design P7). The check moved into
+	// internal/inventory, where it can name the object being acted on and where
+	// `adminctl` calls the same code — a rule enforced at the door was a rule
+	// the CLI walked straight past.
+	//
+	// Two things still gate every route below: the session, and the account it
+	// is confined to. Both are properties of the caller rather than of the path.
+	//
+	// The route table loses the property that made the middleware worth having —
+	// a route that forgot its permission failed closed. That is now the job of
+	// the test in internal/inventory that reads the package's own source and
+	// asserts nothing performs an operation without authorizing it first.
+	// Sessions keep a route-level check, deliberately. A session belongs to a
+	// person rather than to an account, so there is no object to authorize
+	// against and nothing for the service layer to name — the question really is
+	// "may this role administer sessions", which is what the old model asked.
 	sessions := authz.Require(authz.ActionSessionAdmin)
 
 	// Every signed-in user may read their own identity; there is nothing here
 	// they did not already supply.
 	sec.GET("/me", a.me)
 
-	sec.GET("/projects", a.listProjects, view)
-	sec.POST("/projects", a.createProject, projects)
-	sec.GET("/projects/:id", a.getProject, view)
-	sec.PATCH("/projects/:id", a.updateProject, projects)
-	sec.DELETE("/projects/:id", a.deleteProject, projects)
+	sec.GET("/projects", a.listProjects)
+	sec.POST("/projects", a.createProject)
+	sec.GET("/projects/:id", a.getProject)
+	sec.PATCH("/projects/:id", a.updateProject)
+	sec.DELETE("/projects/:id", a.deleteProject)
 
 	// Reporting reads history and writes nothing, so it sits behind the same
 	// `view` permission as the rest of the read surface — every role that may
 	// read the inventory may read the numbers describing it.
-	sec.GET("/projects/:id/usage", a.getProjectUsage, view)
-	sec.GET("/projects/:id/inventory-history", a.getProjectInventoryHistory, view)
+	sec.GET("/projects/:id/usage", a.getProjectUsage)
+	sec.GET("/projects/:id/inventory-history", a.getProjectInventoryHistory)
 
-	sec.GET("/projects/:id/loadbalancers", a.listLoadBalancers, view)
-	sec.POST("/projects/:id/loadbalancers", a.createLoadBalancer, write)
-	sec.GET("/loadbalancers/:id", a.getLoadBalancer, view)
-	sec.PATCH("/loadbalancers/:id", a.updateLoadBalancer, write)
-	sec.DELETE("/loadbalancers/:id", a.deleteLoadBalancer, write)
+	sec.GET("/projects/:id/loadbalancers", a.listLoadBalancers)
+	sec.POST("/projects/:id/loadbalancers", a.createLoadBalancer)
+	sec.GET("/loadbalancers/:id", a.getLoadBalancer)
+	sec.PATCH("/loadbalancers/:id", a.updateLoadBalancer)
+	sec.DELETE("/loadbalancers/:id", a.deleteLoadBalancer)
 
-	sec.POST("/loadbalancers/:id/nodes", a.createNode, write)
-	sec.PATCH("/nodes/:id", a.updateNode, write)
-	sec.DELETE("/nodes/:id", a.deleteNode, write)
+	sec.POST("/loadbalancers/:id/nodes", a.createNode)
+	sec.PATCH("/nodes/:id", a.updateNode)
+	sec.DELETE("/nodes/:id", a.deleteNode)
 
-	sec.GET("/loadbalancers/:id/domains", a.listDomains, view)
-	sec.POST("/loadbalancers/:id/domains", a.createDomain, write)
-	sec.DELETE("/domains/:id", a.deleteDomain, write)
+	sec.GET("/loadbalancers/:id/domains", a.listDomains)
+	sec.POST("/loadbalancers/:id/domains", a.createDomain)
+	sec.DELETE("/domains/:id", a.deleteDomain)
 
-	sec.GET("/loadbalancers/:id/interactions", a.listInteractions, view)
-	sec.GET("/loadbalancers/:id/keys", a.listKeys, view)
-	sec.POST("/loadbalancers/:id/keys", a.createKey, keys)
-	sec.PUT("/keys/:id/networks", a.restrictKey, keys)
-	sec.PUT("/keys/:id/expiry", a.setKeyExpiry, keys)
-	sec.POST("/keys/:id/rotate", a.rotateKey, keys)
-	sec.DELETE("/keys/:id", a.revokeKey, keys)
+	sec.GET("/loadbalancers/:id/interactions", a.listInteractions)
+	sec.GET("/loadbalancers/:id/keys", a.listKeys)
+	sec.POST("/loadbalancers/:id/keys", a.createKey)
+	sec.PUT("/keys/:id/networks", a.restrictKey)
+	sec.PUT("/keys/:id/expiry", a.setKeyExpiry)
+	sec.POST("/keys/:id/rotate", a.rotateKey)
+	sec.DELETE("/keys/:id", a.revokeKey)
 
-	sec.GET("/loadbalancers/:id/plan", a.getPlan, plan)
-	sec.GET("/loadbalancers/:id/plan/zone", a.getPlanZone, plan)
+	sec.GET("/loadbalancers/:id/plan", a.getPlan)
+	sec.GET("/loadbalancers/:id/plan/zone", a.getPlanZone)
 	// Verification is a read: it resolves names and stores nothing, so it is a
 	// GET and needs no CSRF token.
-	sec.GET("/loadbalancers/:id/verification", a.verifyPlan, plan)
+	sec.GET("/loadbalancers/:id/verification", a.verifyPlan)
 
-	sec.GET("/challenges", a.listChallenges, view)
-	sec.GET("/audit", a.listAudit, view)
-	sec.GET("/config", a.getConfig, view)
+	sec.GET("/challenges", a.listChallenges)
+	sec.GET("/audit", a.listAudit)
+	sec.GET("/config", a.getConfig)
 
 	sec.GET("/sessions", a.listSessions, sessions)
 	sec.DELETE("/sessions", a.revokeSubjectSessions, sessions)

@@ -178,3 +178,19 @@ func ReportUnresolvedRoles(ctx context.Context, db *gorm.DB, sc store.Scope, m M
 			slog.String("consequence", "nobody in that group holds any permission"))
 	}
 }
+
+// CLISubject is the authority `internal/adminctl` acts with.
+//
+// It is unrestricted, and that is a statement of fact rather than a grant of
+// convenience: the CLI runs with the database connection string and no session,
+// so whoever can run it can already write any row directly. Pretending otherwise
+// — giving it a narrower subject it could trivially bypass — would put a check
+// in the way of the honest path while leaving the dishonest one open, and would
+// make the audit trail claim a constraint that did not exist.
+//
+// What the CLI does NOT get is a way past tenancy: it is anchored to one
+// account, like every other subject, and the Scope it was built from decides
+// which.
+func CLISubject(accountID model.ID) Subject {
+	return Subject{AccountID: accountID, Unrestricted: true}
+}

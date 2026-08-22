@@ -122,11 +122,15 @@ func (a *admin) listProjects(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	page, err := readPage(c, 50, 500)
 	if err != nil {
 		return err
 	}
-	ps, total, err := inventory.ListProjectsPage(c.Request().Context(), a.db(), sc,
+	ps, total, err := inventory.ListProjectsPage(c.Request().Context(), a.db(), sc, subj,
 		c.QueryParam("q"), page.Limit, page.Offset)
 	if err != nil {
 		return err
@@ -144,6 +148,10 @@ func (a *admin) createProject(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	var body struct{ Slug, Name string }
 	if err := bind(c, &body); err != nil {
 		return err
@@ -151,7 +159,7 @@ func (a *admin) createProject(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out projectView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		p, err := inventory.CreateProject(ctx, tx, sc, body.Slug, body.Name)
+		p, err := inventory.CreateProject(ctx, tx, sc, subj, body.Slug, body.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -206,6 +214,9 @@ func (a *admin) updateProject(c echo.Context) error {
 	if body.Name == "" {
 		return fmt.Errorf("%w: project name is empty", inventory.ErrInvalid)
 	}
+	if err := a.authorizeUnrestricted(c, "changing a project"); err != nil {
+		return err
+	}
 	ctx := c.Request().Context()
 	var out projectView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
@@ -234,6 +245,10 @@ func (a *admin) deleteProject(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -244,7 +259,7 @@ func (a *admin) deleteProject(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		if err := inventory.DeleteProject(ctx, tx, sc, id); err != nil {
+		if err := inventory.DeleteProject(ctx, tx, sc, subj, id); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -310,6 +325,10 @@ func (a *admin) createLoadBalancer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	projectID, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -321,7 +340,7 @@ func (a *admin) createLoadBalancer(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out loadBalancerView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		lb, err := inventory.CreateLoadBalancer(ctx, tx, sc, projectID, body.Slug, body.Name)
+		lb, err := inventory.CreateLoadBalancer(ctx, tx, sc, subj, projectID, body.Slug, body.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -359,6 +378,9 @@ func (a *admin) updateLoadBalancer(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
+		if err := a.authorize(c, authz.ActionInventoryWrite, authz.ObjectOf(lb)); err != nil {
+			return nil, err
+		}
 		before := toLoadBalancer(*lb, nil)
 		if err := tx.WithContext(ctx).Model(&model.LoadBalancer{}).Where("id = ?", id).Update("name", body.Name).Error; err != nil {
 			return nil, err
@@ -380,6 +402,10 @@ func (a *admin) deleteLoadBalancer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -394,7 +420,7 @@ func (a *admin) deleteLoadBalancer(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		if err := inventory.DeleteLoadBalancer(ctx, tx, sc, id); err != nil {
+		if err := inventory.DeleteLoadBalancer(ctx, tx, sc, subj, id); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -414,6 +440,10 @@ func (a *admin) createNode(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	loadBalancerID, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -429,7 +459,7 @@ func (a *admin) createNode(c echo.Context) error {
 	ctx := c.Request().Context()
 	var v nodeView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		n, err := inventory.AddNode(ctx, tx, sc, loadBalancerID, body.Label, body.IPv4, body.IPv6)
+		n, err := inventory.AddNode(ctx, tx, sc, subj, loadBalancerID, body.Label, body.IPv4, body.IPv6)
 		if err != nil {
 			return nil, err
 		}
@@ -447,6 +477,10 @@ func (a *admin) createNode(c echo.Context) error {
 
 func (a *admin) updateNode(c echo.Context) error {
 	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	subj, err := a.subject(c)
 	if err != nil {
 		return err
 	}
@@ -468,7 +502,7 @@ func (a *admin) updateNode(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		n, err := inventory.UpdateNodeAddresses(ctx, tx, sc, id, body.IPv4, body.IPv6)
+		n, err := inventory.UpdateNodeAddresses(ctx, tx, sc, subj, id, body.IPv4, body.IPv6)
 		if err != nil {
 			return nil, err
 		}
@@ -490,6 +524,10 @@ func (a *admin) deleteNode(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -500,7 +538,7 @@ func (a *admin) deleteNode(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		if err := inventory.DeleteNode(ctx, tx, sc, id); err != nil {
+		if err := inventory.DeleteNode(ctx, tx, sc, subj, id); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -559,6 +597,10 @@ func (a *admin) createDomain(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	loadBalancerID, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -584,7 +626,7 @@ func (a *admin) createDomain(c echo.Context) error {
 	var out domainCreated
 	var aliasCreated bool
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		res, err := inventory.CreateDomain(ctx, tx, sc, loadBalancerID, body.Name, a.opts.Config.AliasUseDomain, body.IncludeWildcard)
+		res, err := inventory.CreateDomain(ctx, tx, sc, subj, loadBalancerID, body.Name, a.opts.Config.AliasUseDomain, body.IncludeWildcard)
 		if err != nil {
 			return nil, err
 		}
@@ -634,6 +676,10 @@ func (a *admin) deleteDomain(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -651,7 +697,7 @@ func (a *admin) deleteDomain(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, sc, id)
+		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, sc, subj, id)
 		if err != nil {
 			return nil, err
 		}

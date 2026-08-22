@@ -1,0 +1,101 @@
+package inventory
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"strings"
+	"testing"
+)
+
+// TestEveryOperationAuthorizes replaces the property the route middleware used
+// to give us for free.
+//
+// With `authz.Require(action)` declared beside each path, a route that forgot
+// its permission did not silently inherit "any signed-in user may" — it had no
+// permission and was refused. Moving the check into this package (design P7) is
+// right for every other reason and loses that: a new function here that forgets
+// to authorize is simply unguarded, and nothing says so.
+//
+// So the property is asserted instead, by reading this package's own source. A
+// function added tomorrow is covered without anyone remembering.
+func TestEveryOperationAuthorizes(t *testing.T) {
+	// Functions that legitimately authorize nothing, each with the reason.
+	// Adding to this list should be a decision somebody makes on purpose.
+	exempt := map[string]string{
+		"RenderZoneSnippet": "pure formatting of a plan the caller was already authorized to have",
+		"ListProjects":      "authorizes through ListProjectsPage's whole-account check; see the ponytail note there",
+	}
+
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse package: %v", err)
+	}
+	pkg, ok := pkgs["inventory"]
+	if !ok {
+		t.Fatal("package inventory not found")
+	}
+
+	for _, file := range pkg.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || !fn.Name.IsExported() || fn.Body == nil {
+				continue
+			}
+			var takesSubject bool
+			for _, p := range fn.Type.Params.List {
+				if types(p.Type) == "authz.Subject" {
+					takesSubject = true
+				}
+			}
+			if !takesSubject {
+				if _, allowed := exempt[fn.Name.Name]; allowed {
+					continue
+				}
+				t.Errorf("%s takes no authz.Subject, so it cannot authorize anything.\n"+
+					"Either give it one and check, or add it to the exempt list with the reason.", fn.Name.Name)
+				continue
+			}
+			if !callsAuthorizer(fn) {
+				t.Errorf("%s takes a subject and never authorizes with it.\n"+
+					"An unused subject is worse than no subject: it reads as a check that is not there.", fn.Name.Name)
+			}
+		}
+	}
+}
+
+// callsAuthorizer reports whether the function body calls one of this package's
+// gates.
+func callsAuthorizer(fn *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if id, ok := call.Fun.(*ast.Ident); ok {
+			switch id.Name {
+			case "authorize", "authorizeInAccount", "requireUnrestricted":
+				found = true
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func types(e ast.Expr) string {
+	switch t := e.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return "*" + types(t.X)
+	case *ast.SelectorExpr:
+		return types(t.X) + "." + t.Sel.Name
+	}
+	return ""
+}

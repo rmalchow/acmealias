@@ -119,6 +119,18 @@ func UpdateLBNode(ctx context.Context, db *gorm.DB, sc Scope, n *model.LBNode) e
 	})
 }
 
+// GetLBNode loads one node by id within the scope's account.
+func GetLBNode(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) (*model.LBNode, error) {
+	var n model.LBNode
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return sc.Where(tx).First(&n, "id = ?", id).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: get lb node %s: %w", id, err)
+	}
+	return &n, nil
+}
+
 // DeleteLBNode deletes a node by id. Nodes cascade with their load balancer, but can
 // also be removed individually (e.g. shrinking a three-node cluster).
 func DeleteLBNode(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) error {

@@ -24,11 +24,11 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := t.Context()
 
-	p, err := inventory.CreateProject(ctx, db, sc, "acme", "Acme")
+	p, err := inventory.CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), "acme", "Acme")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, p.ID, "eu", "EU")
+	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, authz.CLISubject(sc.AccountID()), p.ID, "eu", "EU")
 	if err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/dnsname"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
@@ -49,9 +50,12 @@ type DNSPlan struct {
 }
 
 // Plan generates the DNS plan for a load balancer (design D5).
-func Plan(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID, opts PlanOptions) (*DNSPlan, error) {
+func Plan(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, loadBalancerID model.ID, opts PlanOptions) (*DNSPlan, error) {
 	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
+		return nil, err
+	}
+	if err := authorize(subj, authz.ActionDNSPlan, authz.ObjectOf(lb)); err != nil {
 		return nil, err
 	}
 	project, err := store.GetProject(ctx, db, sc, lb.ProjectID)

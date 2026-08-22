@@ -67,12 +67,12 @@
 
 ## 7. Management API
 
-- [ ] 7.1 Remove `authz.Require(action)` route middleware; move permission checks into `internal/inventory`, the service layer the API and the CLI share (design P7)
+- [x] 7.1 Remove `authz.Require(action)` route middleware; move permission checks into `internal/inventory`, the service layer the API and the CLI share (design P7)
 - [ ] 7.1a Split the route tree: versioned public API under `/api/v1/**`, unversioned administrative API under `/api/admin/**` (design P15)
 - [ ] 7.1b Publish an OpenAPI document for the public API only, and add a test asserting every console request is an operation it describes
 - [ ] 7.2 Add role, membership and grant routes
 - [ ] 7.3 Report permitted actions per object on every listing and read (design P12)
-- [ ] 7.4 Make project creation require membership of the account's unrestricted role, not a grant; refuse any grant naming an account as its object (design P14)
+- [x] 7.4 Make project creation require membership of the account's unrestricted role, not a grant; refuse any grant naming an account as its object (design P14)
 - [ ] 7.4a Add account creation for any authenticated user, making the creator an unrestricted member in the same transaction
 - [ ] 7.4b Add the member roster: readable by any member of the account without a grant, confined by `Scope`, including outstanding invitations
 - [ ] 7.4c Add `sessions.selected_account_id` (nullable); gate account-scoped routes on it and refuse with a distinct "no account selected" response

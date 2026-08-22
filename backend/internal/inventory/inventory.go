@@ -15,6 +15,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/dnsname"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
@@ -37,7 +38,14 @@ var ErrNotEmpty = errors.New("inventory: not empty")
 // CreateProject creates a project. The slug is validated as a DNS label —
 // lowercase letters, digits and hyphens — because it is what appears in URLs,
 // CLI arguments and log lines.
-func CreateProject(ctx context.Context, db *gorm.DB, sc store.Scope, slug, name string) (*model.Project, error) {
+func CreateProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, slug, name string) (*model.Project, error) {
+	// Membership, not a grant (design P14): a project sits at the top of the
+	// containment tree, so a grant permitting its creation would have to name
+	// the account, and an account is deliberately not an object a grant can
+	// name.
+	if err := requireUnrestricted(subj, "creating a project"); err != nil {
+		return nil, err
+	}
 	if err := dnsname.ValidateLabel(slug); err != nil {
 		return nil, fmt.Errorf("project slug: %w", err)
 	}
@@ -53,7 +61,10 @@ func CreateProject(ctx context.Context, db *gorm.DB, sc store.Scope, slug, name 
 
 // ListProjects returns the whole inventory tree: projects, their load balancers,
 // and each load balancer's nodes and domains.
-func ListProjects(ctx context.Context, db *gorm.DB, sc store.Scope) ([]model.Project, error) {
+func ListProjects(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject) ([]model.Project, error) {
+	if err := authorizeInAccount(subj, authz.ActionViewInventory, sc); err != nil {
+		return nil, err
+	}
 	return store.ListProjectsWithLoadBalancers(ctx, db, sc)
 }
 
@@ -61,12 +72,25 @@ func ListProjects(ctx context.Context, db *gorm.DB, sc store.Scope) ([]model.Pro
 // count it returns is the number of projects MATCHING the filter, not the
 // number on the page and not the number in the table — that is what a pager
 // has to show to be honest about how much is behind it.
-func ListProjectsPage(ctx context.Context, db *gorm.DB, sc store.Scope, query string, limit, offset int) ([]model.Project, int64, error) {
+// ponytail: the listing is confined by Scope and gated by a whole-account
+// permission check, not yet by a per-object ACL predicate compiled into the
+// query (design P13, tasks 2.4-2.7). Ceiling: a subject holding a grant over
+// SOME projects sees all of its account's, which is wrong for a customer who
+// wants a contractor to see one project. Upgrade path is the predicate compiler,
+// which turns a subject's grants into a disjunction of single-column predicates
+// — the materialized ancestors of P3 exist precisely so that it can.
+func ListProjectsPage(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, query string, limit, offset int) ([]model.Project, int64, error) {
+	if err := authorizeInAccount(subj, authz.ActionViewInventory, sc); err != nil {
+		return nil, 0, err
+	}
 	return store.ListProjectsWithLoadBalancersPage(ctx, db, sc, query, limit, offset)
 }
 
 // DeleteProject refuses a project that still owns load balancers.
-func DeleteProject(ctx context.Context, db *gorm.DB, sc store.Scope, id model.ID) error {
+func DeleteProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, id model.ID) error {
+	if err := requireUnrestricted(subj, "deleting a project"); err != nil {
+		return err
+	}
 	p, err := store.GetProject(ctx, db, sc, id)
 	if err != nil {
 		return err
@@ -85,14 +109,21 @@ func DeleteProject(ctx context.Context, db *gorm.DB, sc store.Scope, id model.ID
 }
 
 // CreateLoadBalancer creates a load balancer under a project.
-func CreateLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, projectID model.ID, slug, name string) (*model.LoadBalancer, error) {
+func CreateLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, projectID model.ID, slug, name string) (*model.LoadBalancer, error) {
 	if err := dnsname.ValidateLabel(slug); err != nil {
 		return nil, fmt.Errorf("load balancer slug: %w", err)
 	}
 	if name == "" {
 		return nil, fmt.Errorf("%w: load balancer name is empty", ErrInvalid)
 	}
-	if _, err := store.GetProject(ctx, db, sc, projectID); err != nil {
+	// Creating is authorized on the PARENT: there is no object yet to hold a
+	// grant, and "may write inventory in this project" is what confers the
+	// ability to add a load balancer to it.
+	parent, err := store.GetProject(ctx, db, sc, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(parent)); err != nil {
 		return nil, err
 	}
 	p := &model.LoadBalancer{ProjectID: projectID, Slug: slug, Name: name}
@@ -104,9 +135,12 @@ func CreateLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, projec
 
 // DeleteLoadBalancer refuses a load balancer that still owns domains or aliases. Nodes
 // cascade with the load balancer, so they do not block it.
-func DeleteLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, id model.ID) error {
+func DeleteLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, id model.ID) error {
 	lb, err := store.GetLoadBalancer(ctx, db, sc, id)
 	if err != nil {
+		return err
+	}
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(lb)); err != nil {
 		return err
 	}
 	domains, err := store.ListDomainsForLoadBalancer(ctx, db, sc, id)
@@ -129,7 +163,7 @@ func DeleteLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, id mod
 // AddNode adds a node to a load balancer. ipv4 and ipv6 are optional strings, but
 // a node with neither would contribute nothing to the DNS plan and is
 // refused. Addresses are stored canonicalized.
-func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID, label, ipv4, ipv6 string) (*model.LBNode, error) {
+func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, loadBalancerID model.ID, label, ipv4, ipv6 string) (*model.LBNode, error) {
 	if err := dnsname.ValidateLabel(label); err != nil {
 		return nil, fmt.Errorf("node label: %w", err)
 	}
@@ -137,7 +171,11 @@ func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID mo
 	if err != nil {
 		return nil, err
 	}
-	if _, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID); err != nil {
+	parent, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(parent)); err != nil {
 		return nil, err
 	}
 	n := &model.LBNode{LoadBalancerID: loadBalancerID, Label: label, IPv4: v4, IPv6: v6}
@@ -148,24 +186,37 @@ func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID mo
 }
 
 // UpdateNodeAddresses replaces a node's addresses (the renumbering case).
-func UpdateNodeAddresses(ctx context.Context, db *gorm.DB, sc store.Scope, nodeID model.ID, ipv4, ipv6 string) (*model.LBNode, error) {
+func UpdateNodeAddresses(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, nodeID model.ID, ipv4, ipv6 string) (*model.LBNode, error) {
 	v4, v6, err := parseAddrs(ipv4, ipv6)
 	if err != nil {
 		return nil, err
 	}
-	var n model.LBNode
-	if err := db.WithContext(ctx).First(&n, nodeID).Error; err != nil {
-		return nil, fmt.Errorf("inventory: get lb node %d: %w", nodeID, err)
-	}
-	n.IPv4, n.IPv6 = v4, v6
-	if err := store.UpdateLBNode(ctx, db, sc, &n); err != nil {
+	// Scoped read, not a bare First: the node has to be one of this account's
+	// before anything is decided about it, and the unscoped version reached any
+	// node in the deployment by identifier alone.
+	n, err := store.GetLBNode(ctx, db, sc, nodeID)
+	if err != nil {
 		return nil, err
 	}
-	return &n, nil
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(n)); err != nil {
+		return nil, err
+	}
+	n.IPv4, n.IPv6 = v4, v6
+	if err := store.UpdateLBNode(ctx, db, sc, n); err != nil {
+		return nil, err
+	}
+	return n, nil
 }
 
 // DeleteNode removes a node.
-func DeleteNode(ctx context.Context, db *gorm.DB, sc store.Scope, nodeID model.ID) error {
+func DeleteNode(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, nodeID model.ID) error {
+	n, err := store.GetLBNode(ctx, db, sc, nodeID)
+	if err != nil {
+		return err
+	}
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(n)); err != nil {
+		return err
+	}
 	return store.DeleteLBNode(ctx, db, sc, nodeID)
 }
 

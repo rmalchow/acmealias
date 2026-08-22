@@ -173,6 +173,9 @@ func (a *admin) rotateKey(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := a.authorize(c, authz.ActionKeyWrite, authz.ObjectOf(old)); err != nil {
+		return err
+	}
 	nets := make([]string, 0, len(old.Networks))
 	for _, n := range old.Networks {
 		nets = append(nets, n.CIDR)
@@ -290,6 +293,9 @@ func (a *admin) restrictKey(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
+		if err := a.authorize(c, authz.ActionKeyWrite, authz.ObjectOf(k)); err != nil {
+			return nil, err
+		}
 		before := toKey(*k)
 
 		if err := tx.Where("api_key_id = ?", id).Delete(&model.APIKeyNetwork{}).Error; err != nil {
@@ -336,6 +342,9 @@ func (a *admin) revokeKey(c echo.Context) error {
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
 		k, err := key(ctx, tx, sc, id)
 		if err != nil {
+			return nil, err
+		}
+		if err := a.authorize(c, authz.ActionKeyWrite, authz.ObjectOf(k)); err != nil {
 			return nil, err
 		}
 		before := toKey(*k)
@@ -388,6 +397,9 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
 		k, err := key(ctx, tx, sc, id)
 		if err != nil {
+			return nil, err
+		}
+		if err := a.authorize(c, authz.ActionKeyWrite, authz.ObjectOf(k)); err != nil {
 			return nil, err
 		}
 		before := toKey(*k)

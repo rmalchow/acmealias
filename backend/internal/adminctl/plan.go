@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
@@ -20,7 +21,7 @@ func LoadBalancerDNS(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Wr
 	if err != nil {
 		return err
 	}
-	plan, err := inventory.Plan(ctx, db, sc, lb.ID, opts)
+	plan, err := inventory.Plan(ctx, db, sc, authz.CLISubject(sc.AccountID()), lb.ID, opts)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/labstack/echo/v4"
@@ -65,4 +66,38 @@ func (a *admin) subject(c echo.Context) (authz.Subject, error) {
 		return authz.Subject{}, echo.ErrUnauthorized
 	}
 	return authz.SubjectForGroups(c.Request().Context(), a.opts.DB, sc, authz.MappingFromConfig(a.opts.Config), sess.Groups)
+}
+
+// authorize checks one action against one object for the acting caller.
+//
+// Most permission checks live in internal/inventory, beside the operation and
+// shared with the CLI (design P7). These are the handlers that do not go through
+// that package — updating a name, and the key lifecycle — and they are exactly
+// the ones that silently lost their check when the route middleware went away.
+// The test in internal/inventory cannot see them, so they are listed in
+// admin_test.go's route table instead, which is what caught this.
+func (a *admin) authorize(c echo.Context, action authz.Action, o authz.Object) error {
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
+	if authz.Can(subj, string(action), o) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", authz.ErrNotPermitted, action)
+}
+
+// authorizeUnrestricted gates what membership governs rather than a grant
+// (design P14): operations on a project itself, which no grant may name because
+// no grant may name the account above it.
+func (a *admin) authorizeUnrestricted(c echo.Context, what string) error {
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
+	if subj.Unrestricted {
+		return nil
+	}
+	return fmt.Errorf("%w: %s is governed by membership of the account's unrestricted role, not by a grant",
+		authz.ErrNotPermitted, what)
 }

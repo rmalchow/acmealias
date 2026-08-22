@@ -35,7 +35,7 @@ func TestIntegrationGeneratedLabelIsNotDerivableFromTheDomain(t *testing.T) {
 	oneID := loadBalancerFixture(t, db, sc, "one")
 	twoID := loadBalancerFixture(t, db, sc, "two")
 
-	first, err := CreateDomain(ctx, db, sc, oneID, "demo.example.com", generated, false)
+	first, err := CreateDomain(ctx, db, sc, testSubject(sc), oneID, "demo.example.com", generated, false)
 	if err != nil {
 		t.Fatalf("create demo.example.com: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestIntegrationGeneratedLabelIsNotDerivableFromTheDomain(t *testing.T) {
 
 	// Same name, different load balancer: two draws from the same source, so
 	// two different labels. A hash of the challenge name would produce one.
-	second, err := CreateDomain(ctx, db, sc, twoID, "demo.example.net", generated, false)
+	second, err := CreateDomain(ctx, db, sc, testSubject(sc), twoID, "demo.example.net", generated, false)
 	if err != nil {
 		t.Fatalf("create demo.example.net: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestIntegrationExistingAliasKeepsItsLabelWhenTheSettingChanges(t *testing.T
 	ctx := context.Background()
 	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
 
-	apex, err := CreateDomain(ctx, db, sc, loadBalancerID, "demo.example.com", derived, false)
+	apex, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "demo.example.com", derived, false)
 	if err != nil {
 		t.Fatalf("create demo.example.com: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestIntegrationExistingAliasKeepsItsLabelWhenTheSettingChanges(t *testing.T
 
 	// The setting flips to the default; the wildcard shares the apex's
 	// challenge name, so it must reuse the alias exactly as it stands.
-	wild, err := CreateDomain(ctx, db, sc, loadBalancerID, "*.demo.example.com", generated, false)
+	wild, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "*.demo.example.com", generated, false)
 	if err != nil {
 		t.Fatalf("create *.demo.example.com: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestIntegrationExistingAliasKeepsItsLabelWhenTheSettingChanges(t *testing.T
 	}
 
 	// A new challenge name under the new setting does get a generated label.
-	other, err := CreateDomain(ctx, db, sc, loadBalancerID, "shop.example.com", generated, false)
+	other, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "shop.example.com", generated, false)
 	if err != nil {
 		t.Fatalf("create shop.example.com: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestIntegrationCounterpartCreatesThePair(t *testing.T) {
 			ctx := context.Background()
 			lbID := loadBalancerFixture(t, db, sc, "pair")
 
-			c, err := CreateDomain(ctx, db, sc, lbID, tc.submitted, generated, withCounterpart)
+			c, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, tc.submitted, generated, withCounterpart)
 			if err != nil {
 				t.Fatalf("create %q with its counterpart: %v", tc.submitted, err)
 			}
@@ -201,7 +201,7 @@ func TestIntegrationCounterpartIsOptional(t *testing.T) {
 	ctx := context.Background()
 	lbID := loadBalancerFixture(t, db, sc, "single")
 
-	c, err := CreateDomain(ctx, db, sc, lbID, "example.com", generated, nameOnly)
+	c, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "example.com", generated, nameOnly)
 	if err != nil {
 		t.Fatalf("create example.com: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestIntegrationRefusedCounterpartCreatesNothing(t *testing.T) {
 		t.Fatalf("co.uk should be a valid plain name: %v", err)
 	}
 
-	_, err := CreateDomain(ctx, db, sc, lbID, "co.uk", generated, withCounterpart)
+	_, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "co.uk", generated, withCounterpart)
 	if !errors.Is(err, dnsname.ErrInvalid) {
 		t.Fatalf("error = %v, want a validation error", err)
 	}
@@ -249,10 +249,10 @@ func TestIntegrationConflictingCounterpartCreatesNothing(t *testing.T) {
 		ctx := context.Background()
 		lbID := loadBalancerFixture(t, db, sc, "dup")
 
-		if _, err := CreateDomain(ctx, db, sc, lbID, "*.example.com", generated, nameOnly); err != nil {
+		if _, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "*.example.com", generated, nameOnly); err != nil {
 			t.Fatalf("seed *.example.com: %v", err)
 		}
-		_, err := CreateDomain(ctx, db, sc, lbID, "example.com", generated, withCounterpart)
+		_, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "example.com", generated, withCounterpart)
 		if !errors.Is(err, ErrConflict) {
 			t.Fatalf("error = %v, want a conflict", err)
 		}
@@ -267,10 +267,10 @@ func TestIntegrationConflictingCounterpartCreatesNothing(t *testing.T) {
 		mine := loadBalancerFixture(t, db, sc, "mine")
 		theirs := loadBalancerFixture(t, db, sc, "theirs")
 
-		if _, err := CreateDomain(ctx, db, sc, theirs, "*.example.com", generated, nameOnly); err != nil {
+		if _, err := CreateDomain(ctx, db, sc, testSubject(sc), theirs, "*.example.com", generated, nameOnly); err != nil {
 			t.Fatalf("seed *.example.com on the other load balancer: %v", err)
 		}
-		_, err := CreateDomain(ctx, db, sc, mine, "example.com", generated, withCounterpart)
+		_, err := CreateDomain(ctx, db, sc, testSubject(sc), mine, "example.com", generated, withCounterpart)
 		if !errors.Is(err, ErrConflict) {
 			t.Fatalf("error = %v, want a conflict", err)
 		}

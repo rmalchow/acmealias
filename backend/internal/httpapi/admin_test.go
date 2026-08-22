@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/apikey"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/dnsname"
@@ -104,15 +107,15 @@ func newAdminEnv(t *testing.T) *adminEnv {
 		t.Fatalf("bootstrap scope: %v", err)
 	}
 
-	p, err := inventory.CreateProject(ctx, db, sc, "acme", "Acme")
+	p, err := inventory.CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), "acme", "Acme")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, p.ID, "eu-prod", "EU production")
+	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, authz.CLISubject(sc.AccountID()), p.ID, "eu-prod", "EU production")
 	if err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
-	if _, err := inventory.AddNode(ctx, db, sc, lb.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
+	if _, err := inventory.AddNode(ctx, db, sc, authz.CLISubject(sc.AccountID()), lb.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
 		t.Fatalf("add node: %v", err)
 	}
 
@@ -147,6 +150,82 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	e.GET("/*", func(c echo.Context) error { return c.HTML(http.StatusOK, "<html>console</html>") })
 
 	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID}
+}
+
+// Seeders for the destructive rows of TestEveryRouteEnforcesItsRole. Each
+// creates one throwaway object and returns the path addressing it, so every
+// role's attempt acts on something that exists and belongs to the account —
+// which is what makes a refusal mean "you may not" rather than "there is no
+// such thing".
+//
+// They go through the service layer with an unrestricted subject, which is the
+// same authority the CLI has: seeding is setup, not part of what is under test.
+
+func seedProject(t *testing.T, v *adminEnv, suffix string) string {
+	t.Helper()
+	p, err := inventory.CreateProject(t.Context(), v.db, v.sc, authz.CLISubject(v.sc.AccountID()),
+		fmt.Sprintf("seed-p%d", seedCounter.Add(1)), "Seed "+suffix)
+	if err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	return "/api/v1/projects/" + p.ID.String()
+}
+
+func seedLoadBalancer(t *testing.T, v *adminEnv, suffix string) string {
+	t.Helper()
+	subj := authz.CLISubject(v.sc.AccountID())
+	lb, err := inventory.CreateLoadBalancer(t.Context(), v.db, v.sc, subj, v.projID,
+		fmt.Sprintf("seed-lb%d", seedCounter.Add(1)), "Seed LB "+suffix)
+	if err != nil {
+		t.Fatalf("seed load balancer: %v", err)
+	}
+	return "/api/v1/loadbalancers/" + lb.ID.String()
+}
+
+// seedCounter keeps seeded labels and slugs distinct. A node label is unique
+// per load balancer, so deriving one from the role name collides the moment two
+// rows seed for the same role.
+var seedCounter atomic.Int64
+
+func seedNode(t *testing.T, v *adminEnv, suffix string) string {
+	t.Helper()
+	subj := authz.CLISubject(v.sc.AccountID())
+	n, err := inventory.AddNode(t.Context(), v.db, v.sc, subj, v.lb.ID,
+		fmt.Sprintf("n%d", seedCounter.Add(1)), "203.0.113.200", "")
+	if err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	return "/api/v1/nodes/" + n.ID.String()
+}
+
+func seedDomain(t *testing.T, v *adminEnv, suffix string) string {
+	t.Helper()
+	subj := authz.CLISubject(v.sc.AccountID())
+	res, err := inventory.CreateDomain(t.Context(), v.db, v.sc, subj, v.lb.ID,
+		fmt.Sprintf("seed-d%d.example.com", seedCounter.Add(1)), false, false)
+	if err != nil {
+		t.Fatalf("seed domain: %v", err)
+	}
+	return "/api/v1/domains/" + res.Domains[0].ID.String()
+}
+
+// seedKeyPath returns a seeder for a key route, since the key rows differ only
+// by what follows the identifier.
+func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
+	return func(t *testing.T, v *adminEnv, suffix string) string {
+		t.Helper()
+		k, _, err := apikey.New()
+		if err != nil {
+			t.Fatalf("seed key: %v", err)
+		}
+		k.Grants = []model.APIKeyGrant{
+			{ObjectType: "load_balancer", ObjectID: &v.lb.ID, Action: "challenge.publish", Inheritable: true},
+		}
+		if err := store.CreateAPIKey(t.Context(), v.db, v.sc, k); err != nil {
+			t.Fatalf("seed key: %v", err)
+		}
+		return "/api/v1/keys/" + k.ID.String() + tail
+	}
 }
 
 // session inserts a session row in the given groups and returns a client
@@ -254,6 +333,14 @@ func assertEveryRouteHasARow(t *testing.T, e *echo.Echo, covered map[string]bool
 // a naive "any role may write", and the session routes are the only ones
 // ADMIN alone may reach. The rest would pass under a much weaker
 // implementation, and are here so a future edit cannot quietly widen one.
+//
+// The destructive rows address REAL objects, seeded fresh for each role, and
+// that matters more since the permission check moved into the service layer
+// (design P7). A check that names its object cannot run before the object is
+// loaded, so a request for an identifier nothing holds is refused as not-found
+// — correctly, since absence and denial must be indistinguishable. Pointed at a
+// made-up identifier, every one of these rows would pass against a route with no
+// check at all.
 func TestEveryRouteEnforcesItsRole(t *testing.T) {
 	v := newAdminEnv(t)
 
@@ -270,56 +357,64 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 	cases := []struct {
 		method, path, body string
 		allowed            []string
+		// seed, when set, creates a disposable object for THIS role's attempt
+		// and returns the path addressing it. Rows that mutate use it, so a
+		// refusal is a refusal about permission rather than about a missing row.
+		seed func(t *testing.T, v *adminEnv, suffix string) string
 	}{
 		// Reads: every role.
-		{"GET", "/api/v1/me", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", "/api/v1/projects", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", proj + "/loadbalancers", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", lb, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", lb + "/domains", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", lb + "/keys", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", lb + "/plan", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", lb + "/plan/zone", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", "/api/v1/challenges", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", "/api/v1/audit", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", "/api/v1/config", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", proj, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", proj + "/usage", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", proj + "/inventory-history", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", lb + "/interactions", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
-		{"GET", lb + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}},
+		{"GET", "/api/v1/me", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/projects", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/loadbalancers", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", lb, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", lb + "/domains", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", lb + "/keys", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", lb + "/plan", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", lb + "/plan/zone", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/challenges", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/audit", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", "/api/v1/config", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/usage", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/inventory-history", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", lb + "/interactions", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", lb + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 
 		// Projects: ADMIN only.
-		{"POST", "/api/v1/projects", `{"slug":"other","name":"Other"}`, []string{"ADMIN"}},
-		{"PATCH", proj, `{"name":"Renamed"}`, []string{"ADMIN"}},
-		{"DELETE", "/api/v1/projects/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN"}},
+		{"POST", "/api/v1/projects", `{"slug":"other","name":"Other"}`, []string{"ADMIN"}, nil},
+		{"PATCH", proj, `{"name":"Renamed"}`, []string{"ADMIN"}, nil},
+		{"DELETE", "", "", []string{"ADMIN"}, seedProject},
 
 		// Inventory: ADMIN and CONFIG_ADMIN. KEY_ROTATION must not pass here.
-		{"POST", proj + "/loadbalancers", `{"slug":"x","name":"X"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"PATCH", lb, `{"name":"Renamed"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"DELETE", "/api/v1/loadbalancers/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"POST", lb + "/nodes", `{"label":"z","ipv4":"203.0.113.99"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"PATCH", "/api/v1/nodes/00000000-0000-7000-8000-000000000999", `{"ipv4":"203.0.113.1"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"DELETE", "/api/v1/nodes/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"POST", lb + "/domains", `{"name":"shop.example.com"}`, []string{"ADMIN", "CONFIG_ADMIN"}},
-		{"DELETE", "/api/v1/domains/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN"}},
+		{"POST", proj + "/loadbalancers", `{"slug":"x","name":"X"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
+		{"PATCH", lb, `{"name":"Renamed"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
+		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedLoadBalancer},
+		{"POST", lb + "/nodes", `{"label":"z","ipv4":"203.0.113.99"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
+		{"PATCH", "", `{"ipv4":"203.0.113.1"}`, []string{"ADMIN", "CONFIG_ADMIN"}, seedNode},
+		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedNode},
+		{"POST", lb + "/domains", `{"name":"shop.example.com"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
+		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedDomain},
 
 		// Keys: ADMIN, CONFIG_ADMIN and KEY_ROTATION.
-		{"POST", lb + "/keys", `{"note":"traefik"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"PUT", "/api/v1/keys/00000000-0000-7000-8000-000000000999/networks", `{"networks":[]}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"PUT", "/api/v1/keys/00000000-0000-7000-8000-000000000999/expiry", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"POST", "/api/v1/keys/00000000-0000-7000-8000-000000000999/rotate", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
-		{"DELETE", "/api/v1/keys/00000000-0000-7000-8000-000000000999", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}},
+		{"POST", lb + "/keys", `{"note":"traefik"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, nil},
+		{"PUT", "", `{"networks":[]}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/networks")},
+		{"PUT", "", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/expiry")},
+		{"POST", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/rotate")},
+		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("")},
 
 		// Sessions: ADMIN only.
-		{"GET", "/api/v1/sessions", "", []string{"ADMIN"}},
-		{"DELETE", "/api/v1/sessions?subject=nobody", "", []string{"ADMIN"}},
-		{"DELETE", "/api/v1/sessions/" + strings.Repeat("0", 64), "", []string{"ADMIN"}},
+		{"GET", "/api/v1/sessions", "", []string{"ADMIN"}, nil},
+		{"DELETE", "/api/v1/sessions?subject=nobody", "", []string{"ADMIN"}, nil},
+		{"DELETE", "/api/v1/sessions/" + strings.Repeat("0", 64), "", []string{"ADMIN"}, nil},
 	}
 
 	covered := map[string]bool{}
 	for _, tc := range cases {
-		req := httptest.NewRequest(tc.method, tc.path, nil)
+		path := tc.path
+		if tc.seed != nil {
+			path = tc.seed(t, v, "coverage")
+		}
+		req := httptest.NewRequest(tc.method, path, nil)
 		c := v.e.NewContext(req, httptest.NewRecorder())
 		v.e.Router().Find(tc.method, req.URL.Path, c)
 		covered[tc.method+" "+c.Path()] = true
@@ -329,16 +424,20 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 	for _, tc := range cases {
 		for role, cl := range clients {
 			t.Run(tc.method+" "+tc.path+" as "+role, func(t *testing.T) {
-				rec := cl.do(tc.method, tc.path, tc.body)
+				path := tc.path
+				if tc.seed != nil {
+					path = tc.seed(t, v, role)
+				}
+				rec := cl.do(tc.method, path, tc.body)
 				if contains(tc.allowed, role) {
 					if rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
 						t.Fatalf("%s %s as %s: %d %s, want the role to be accepted",
-							tc.method, tc.path, role, rec.Code, rec.Body.String())
+							tc.method, path, role, rec.Code, rec.Body.String())
 					}
 					return
 				}
 				if rec.Code != http.StatusForbidden {
-					t.Fatalf("%s %s as %s: %d %s, want 403", tc.method, tc.path, role, rec.Code, rec.Body.String())
+					t.Fatalf("%s %s as %s: %d %s, want 403", tc.method, path, role, rec.Code, rec.Body.String())
 				}
 			})
 		}
@@ -939,7 +1038,7 @@ func TestRolledBackChangeLeavesNoAuditEntry(t *testing.T) {
 
 	boom := errors.New("the change failed after its audit entry was written")
 	err := v.sc.Run(ctx, v.db, func(tx *gorm.DB) error {
-		p, err := inventory.CreateProject(ctx, tx, v.sc, "doomed", "Doomed")
+		p, err := inventory.CreateProject(ctx, tx, v.sc, authz.CLISubject(v.sc.AccountID()), "doomed", "Doomed")
 		if err != nil {
 			return err
 		}

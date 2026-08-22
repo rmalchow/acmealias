@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/dnsname"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
@@ -58,8 +59,15 @@ type DomainCreation struct {
 // The alias belongs to exactly one load balancer: if the challenge name is already
 // claimed by a different load balancer, the creation is refused and the error names
 // that load balancer.
-func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID, name string, useDomainLabel bool, includeCounterpart bool) (*DomainCreation, error) {
-	if _, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID); err != nil {
+func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, loadBalancerID model.ID, name string, useDomainLabel bool, includeCounterpart bool) (*DomainCreation, error) {
+	parent, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
+	if err != nil {
+		return nil, err
+	}
+	// Authorized on the parent, like every creation: there is no domain yet to
+	// hold a grant, and the authority to add one to this load balancer is what
+	// is being asked about.
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(parent)); err != nil {
 		return nil, err
 	}
 
@@ -237,9 +245,12 @@ func resolveLabel(ctx context.Context, db *gorm.DB, sc store.Scope, challenge st
 // is what stops further challenge writes for the name. The returned bool is
 // true when a label disappeared from the served zone, so the caller knows to
 // refresh the zone view.
-func DeleteDomain(ctx context.Context, db *gorm.DB, sc store.Scope, domainID model.ID) (aliasRemoved bool, err error) {
+func DeleteDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, domainID model.ID) (aliasRemoved bool, err error) {
 	d, err := store.GetDomain(ctx, db, sc, domainID)
 	if err != nil {
+		return false, err
+	}
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(d)); err != nil {
 		return false, err
 	}
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

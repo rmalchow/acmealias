@@ -63,7 +63,7 @@ func ProjectCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 	var p *model.Project
 	err := mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		p, err = inventory.CreateProject(ctx, tx, sc, slug, name)
+		p, err = inventory.CreateProject(ctx, tx, sc, authz.CLISubject(sc.AccountID()), slug, name)
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +82,7 @@ func ProjectCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 // ProjectList prints every project, its load balancers, and each load balancer's nodes and
 // domains.
 func ProjectList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer) error {
-	ps, err := inventory.ListProjects(ctx, db, sc)
+	ps, err := inventory.ListProjects(ctx, db, sc, authz.CLISubject(sc.AccountID()))
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func ProjectDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 		return err
 	}
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := inventory.DeleteProject(ctx, tx, sc, p.ID); err != nil {
+		if err := inventory.DeleteProject(ctx, tx, sc, authz.CLISubject(sc.AccountID()), p.ID); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -147,7 +147,7 @@ func LoadBalancerCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io
 	var p *model.LoadBalancer
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		p, err = inventory.CreateLoadBalancer(ctx, tx, sc, project.ID, slug, name)
+		p, err = inventory.CreateLoadBalancer(ctx, tx, sc, authz.CLISubject(sc.AccountID()), project.ID, slug, name)
 		if err != nil {
 			return nil, err
 		}
@@ -170,7 +170,7 @@ func LoadBalancerDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io
 		return err
 	}
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := inventory.DeleteLoadBalancer(ctx, tx, sc, lb.ID); err != nil {
+		if err := inventory.DeleteLoadBalancer(ctx, tx, sc, authz.CLISubject(sc.AccountID()), lb.ID); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -194,7 +194,7 @@ func NodeAdd(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, re
 	var n *model.LBNode
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		n, err = inventory.AddNode(ctx, tx, sc, lb.ID, label, ipv4, ipv6)
+		n, err = inventory.AddNode(ctx, tx, sc, authz.CLISubject(sc.AccountID()), lb.ID, label, ipv4, ipv6)
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +219,7 @@ func NodeDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer,
 		if err := tx.WithContext(ctx).First(&n, "id = ?", id).Error; err != nil {
 			return nil, fmt.Errorf("get lb node %s: %w", id, err)
 		}
-		if err := inventory.DeleteNode(ctx, tx, sc, id); err != nil {
+		if err := inventory.DeleteNode(ctx, tx, sc, authz.CLISubject(sc.AccountID()), id); err != nil {
 			return nil, err
 		}
 		projectID := n.ProjectID
@@ -248,7 +248,7 @@ func DomainCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Write
 	var result *inventory.DomainCreation
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		result, err = inventory.CreateDomain(ctx, tx, sc, lb.ID, name, useDomainLabel, includeWildcard)
+		result, err = inventory.CreateDomain(ctx, tx, sc, authz.CLISubject(sc.AccountID()), lb.ID, name, useDomainLabel, includeWildcard)
 		if err != nil {
 			return nil, err
 		}
@@ -327,7 +327,7 @@ func DomainDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Write
 		if err != nil {
 			return nil, err
 		}
-		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, sc, id)
+		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, sc, authz.CLISubject(sc.AccountID()), id)
 		if err != nil {
 			return nil, err
 		}
