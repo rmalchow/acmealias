@@ -21,9 +21,9 @@ func AppendAuditEntry(ctx context.Context, db *gorm.DB, e *model.AuditEntry) err
 // AuditFilter narrows ListAuditEntries. Zero values are "don't filter on
 // this field"; Limit <= 0 defaults to 200.
 type AuditFilter struct {
-	ProjectID  *int64
+	ProjectID  *model.ID
 	ObjectType string
-	ObjectID   *int64
+	ObjectID   *model.ID
 	Action     string
 	Limit      int
 }

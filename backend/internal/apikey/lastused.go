@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
@@ -24,31 +25,31 @@ const touchInterval = time.Minute
 // in the database, so it needs no eviction until that stops being a small
 // number. Upgrade path: a sync.Map, or an LRU if key counts ever grow.
 type LastUsed struct {
-	touch func(ctx context.Context, id int64) error
+	touch func(ctx context.Context, id model.ID) error
 	log   *slog.Logger
 
 	mu   sync.Mutex
-	seen map[int64]time.Time
+	seen map[model.ID]time.Time
 }
 
 // NewLastUsed writes through store.TouchLastUsed.
 func NewLastUsed(db *gorm.DB, log *slog.Logger) *LastUsed {
-	return newLastUsed(func(ctx context.Context, id int64) error {
+	return newLastUsed(func(ctx context.Context, id model.ID) error {
 		return store.TouchLastUsed(ctx, db, id)
 	}, log)
 }
 
-func newLastUsed(touch func(context.Context, int64) error, log *slog.Logger) *LastUsed {
+func newLastUsed(touch func(context.Context, model.ID) error, log *slog.Logger) *LastUsed {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &LastUsed{touch: touch, log: log, seen: map[int64]time.Time{}}
+	return &LastUsed{touch: touch, log: log, seen: map[model.ID]time.Time{}}
 }
 
 // Touch records a use of key id, writing through at most once per minute. A
 // failed write is logged and dropped: this is display bookkeeping, and losing a
 // timestamp must never fail an otherwise valid request.
-func (l *LastUsed) Touch(ctx context.Context, id int64) {
+func (l *LastUsed) Touch(ctx context.Context, id model.ID) {
 	now := time.Now()
 	l.mu.Lock()
 	if last, ok := l.seen[id]; ok && now.Sub(last) < touchInterval {
@@ -60,6 +61,6 @@ func (l *LastUsed) Touch(ctx context.Context, id int64) {
 
 	if err := l.touch(ctx, id); err != nil {
 		l.log.WarnContext(ctx, "api key last_used_at not recorded",
-			slog.Int64("api_key_id", id), slog.Any("error", err))
+			slog.String("api_key_id", id.String()), slog.Any("error", err))
 	}
 }

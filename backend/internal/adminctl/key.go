@@ -17,8 +17,8 @@ import (
 // KeyCreate mints an API key for a load balancer and prints its secret. The
 // secret is never stored — only its digest is — so this is the one and only
 // time it is ever shown; the output says so plainly.
-func KeyCreate(ctx context.Context, db *gorm.DB, out io.Writer, ref, note string, expiresIn time.Duration) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, ref)
+func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref, note string, expiresIn time.Duration) error {
+	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
@@ -32,8 +32,8 @@ func KeyCreate(ctx context.Context, db *gorm.DB, out io.Writer, ref, note string
 		t := time.Now().UTC().Add(expiresIn)
 		k.ExpiresAt = &t
 	}
-	err = mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := store.CreateAPIKey(ctx, tx, k); err != nil {
+	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
+		if err := store.CreateAPIKey(ctx, tx, sc, k); err != nil {
 			return nil, err
 		}
 		// k carries SecretHash; authz.Record scrubs it out by name before the
@@ -58,12 +58,12 @@ func KeyCreate(ctx context.Context, db *gorm.DB, out io.Writer, ref, note string
 
 // KeyList prints every key on a load balancer. The secret is never included —
 // there is nothing to show, only the digest is stored.
-func KeyList(ctx context.Context, db *gorm.DB, out io.Writer, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, ref)
+func KeyList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref string) error {
+	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
-	ks, err := store.ListAPIKeysForLoadBalancer(ctx, db, lb.ID)
+	ks, err := store.ListAPIKeysForLoadBalancer(ctx, db, sc, lb.ID)
 	if err != nil {
 		return err
 	}
@@ -88,19 +88,16 @@ func KeyList(ctx context.Context, db *gorm.DB, out io.Writer, ref string) error 
 
 // KeyRevoke disables a key by id. Revocation, not deletion: the row still
 // identifies past audit entries and challenge attributions.
-func KeyRevoke(ctx context.Context, db *gorm.DB, out io.Writer, id int64) error {
-	err := mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
+func KeyRevoke(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, id model.ID) error {
+	err := mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var k model.APIKey
-		if err := tx.WithContext(ctx).Preload("Networks").First(&k, id).Error; err != nil {
-			return nil, fmt.Errorf("get api key %d: %w", id, err)
+		if err := tx.WithContext(ctx).Preload("Networks").First(&k, "id = ?", id).Error; err != nil {
+			return nil, fmt.Errorf("get api key %s: %w", id, err)
 		}
-		if err := store.RevokeAPIKey(ctx, tx, id); err != nil {
+		if err := store.RevokeAPIKey(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
-		projectID, err := store.ProjectIDForLoadBalancer(ctx, tx, k.LoadBalancerID)
-		if err != nil {
-			return nil, err
-		}
+		projectID := k.ProjectID
 		return []authz.Event{{
 			Action: authz.ActionKeyRevoke, ObjectType: authz.ObjectAPIKey,
 			ObjectID: &id, ObjectLabel: k.Identifier, ProjectID: &projectID, Before: k,

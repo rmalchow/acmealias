@@ -131,10 +131,10 @@ func ExpireKeys(ctx context.Context, db *gorm.DB, m *obs.Metrics) (int, error) {
 			if res.RowsAffected == 0 {
 				return nil
 			}
-			projectID, err := store.ProjectIDForLoadBalancer(ctx, tx, k.LoadBalancerID)
-			if err != nil {
-				return err
-			}
+			// The project is on the key's own row since design P3 materialized
+			// every ancestor a grant may name, so the extra lookup this used to
+			// need is gone.
+			projectID := k.ProjectID
 			networks := make([]string, 0, len(k.Networks))
 			for _, n := range k.Networks {
 				networks = append(networks, n.CIDR)

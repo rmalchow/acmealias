@@ -26,8 +26,8 @@ import (
 // return keyCreated, and only because apikey.New just produced the value.
 
 type keyView struct {
-	ID             int64      `json:"id"`
-	LoadBalancerID int64      `json:"loadBalancerId"`
+	ID             model.ID   `json:"id"`
+	LoadBalancerID model.ID   `json:"loadBalancerId"`
 	Identifier     string     `json:"identifier"`
 	DisplayPrefix  string     `json:"displayPrefix"`
 	Note           string     `json:"note"`
@@ -65,15 +65,19 @@ func toKey(k model.APIKey) keyView {
 }
 
 func (a *admin) listKeys(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	loadBalancerID, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
-	if _, err := store.GetLoadBalancer(ctx, a.db(), loadBalancerID); err != nil {
+	if _, err := store.GetLoadBalancer(ctx, a.db(), sc, loadBalancerID); err != nil {
 		return err
 	}
-	ks, err := store.ListAPIKeysForLoadBalancer(ctx, a.db(), loadBalancerID)
+	ks, err := store.ListAPIKeysForLoadBalancer(ctx, a.db(), sc, loadBalancerID)
 	if err != nil {
 		return err
 	}
@@ -85,6 +89,10 @@ func (a *admin) listKeys(c echo.Context) error {
 }
 
 func (a *admin) createKey(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	loadBalancerID, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -106,7 +114,7 @@ func (a *admin) createKey(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	if _, err := store.GetLoadBalancer(ctx, a.db(), loadBalancerID); err != nil {
+	if _, err := store.GetLoadBalancer(ctx, a.db(), sc, loadBalancerID); err != nil {
 		return err
 	}
 	return a.mint(c, loadBalancerID, body.Note, nets, expires, authz.ActionKeyCreate)
@@ -144,8 +152,12 @@ func (a *admin) rotateKey(c echo.Context) error {
 
 // mint is the shared body of create and rotate: generate, persist, audit,
 // answer once with the secret.
-func (a *admin) mint(c echo.Context, loadBalancerID int64, note string, networks []string, expires *time.Time, action string) error {
+func (a *admin) mint(c echo.Context, loadBalancerID model.ID, note string, networks []string, expires *time.Time, action string) error {
 	ctx := c.Request().Context()
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 
 	k, secret, err := apikey.New()
 	if err != nil {
@@ -160,7 +172,7 @@ func (a *admin) mint(c echo.Context, loadBalancerID int64, note string, networks
 
 	var v keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := store.CreateAPIKey(ctx, tx, k); err != nil {
+		if err := store.CreateAPIKey(ctx, tx, sc, k); err != nil {
 			return nil, err
 		}
 		v = toKey(*k)
@@ -170,7 +182,7 @@ func (a *admin) mint(c echo.Context, loadBalancerID int64, note string, networks
 		// asks for. keyView carries Networks, so the CIDR list rides along.
 		return []authz.Event{{
 			Action: action, ObjectType: authz.ObjectAPIKey, ObjectID: &k.ID, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, loadBalancerID), After: v,
+			ProjectID: projectOf(ctx, tx, sc, loadBalancerID), After: v,
 		}}, nil
 	}); err != nil {
 		return err
@@ -198,6 +210,10 @@ func (a *admin) restrictKey(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	var out keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
 		k, err := key(ctx, tx, id)
@@ -226,7 +242,7 @@ func (a *admin) restrictKey(c echo.Context) error {
 		out = toKey(*k)
 		return []authz.Event{{
 			Action: authz.ActionKeyRestrict, ObjectType: authz.ObjectAPIKey, ObjectID: &id, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, k.LoadBalancerID), Before: before, After: out,
+			ProjectID: projectOf(ctx, tx, sc, k.LoadBalancerID), Before: before, After: out,
 		}}, nil
 	}); err != nil {
 		return err
@@ -237,6 +253,10 @@ func (a *admin) restrictKey(c echo.Context) error {
 // revokeKey disables a key. Revocation, not deletion: the row still names the
 // key in past audit entries and challenge attributions.
 func (a *admin) revokeKey(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -249,7 +269,7 @@ func (a *admin) revokeKey(c echo.Context) error {
 			return nil, err
 		}
 		before := toKey(*k)
-		if err := store.RevokeAPIKey(ctx, tx, id); err != nil {
+		if err := store.RevokeAPIKey(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
 		k, err = key(ctx, tx, id)
@@ -259,7 +279,7 @@ func (a *admin) revokeKey(c echo.Context) error {
 		out = toKey(*k)
 		return []authz.Event{{
 			Action: authz.ActionKeyRevoke, ObjectType: authz.ObjectAPIKey, ObjectID: &id, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, k.LoadBalancerID), Before: before, After: out,
+			ProjectID: projectOf(ctx, tx, sc, k.LoadBalancerID), Before: before, After: out,
 		}}, nil
 	}); err != nil {
 		return err
@@ -290,6 +310,10 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	var out keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
 		k, err := key(ctx, tx, id)
@@ -306,7 +330,7 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 		return []authz.Event{{
 			Action: authz.ActionKeyExpiryChange, ObjectType: authz.ObjectAPIKey,
 			ObjectID: &id, ObjectLabel: k.Identifier,
-			ProjectID: projectOf(ctx, tx, k.LoadBalancerID), Before: before, After: out,
+			ProjectID: projectOf(ctx, tx, sc, k.LoadBalancerID), Before: before, After: out,
 		}}, nil
 	}); err != nil {
 		return err
@@ -314,7 +338,7 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
-func key(ctx context.Context, db *gorm.DB, id int64) (*model.APIKey, error) {
+func key(ctx context.Context, db *gorm.DB, id model.ID) (*model.APIKey, error) {
 	var k model.APIKey
 	if err := db.WithContext(ctx).Preload("Networks").First(&k, id).Error; err != nil {
 		return nil, fmt.Errorf("get api key %d: %w", id, err)

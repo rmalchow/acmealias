@@ -8,18 +8,19 @@ import (
 	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
 // LoadBalancerDNS renders a load balancer's DNS plan: a human-readable table, followed
 // by the zone-file snippet inventory.RenderZoneSnippet produces — the same
 // rendering the console's DNS plan view uses, so the CLI output is what the
 // acceptance suite asserts against (task 20.3).
-func LoadBalancerDNS(ctx context.Context, db *gorm.DB, out io.Writer, opts inventory.PlanOptions, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, ref)
+func LoadBalancerDNS(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, opts inventory.PlanOptions, ref string) error {
+	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
-	plan, err := inventory.Plan(ctx, db, lb.ID, opts)
+	plan, err := inventory.Plan(ctx, db, sc, lb.ID, opts)
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
 // SnapshotInterval is how often the inventory snapshot runs.
@@ -94,7 +95,7 @@ type InventoryPoint struct {
 // the inventory tables rather than from the snapshot — so the console's
 // "current" figure includes the domain that was added five minutes ago and the
 // snapshot has not seen yet.
-func CurrentInventory(ctx context.Context, db *gorm.DB, projectID int64) (InventoryPoint, error) {
+func CurrentInventory(ctx context.Context, db *gorm.DB, sc store.Scope, projectID model.ID) (InventoryPoint, error) {
 	var row struct {
 		AliasCount, DomainCount, LoadBalancerCount int
 	}
@@ -133,7 +134,7 @@ type InventoryHistory struct {
 // Days with no row are LEFT OUT rather than filled in. Carrying yesterday's
 // count forward across a gap would invent a reading for a day nobody measured,
 // which is the one thing this table exists to avoid.
-func ProjectInventoryHistory(ctx context.Context, db *gorm.DB, projectID int64, from, to time.Time) (InventoryHistory, error) {
+func ProjectInventoryHistory(ctx context.Context, db *gorm.DB, sc store.Scope, projectID model.ID, from, to time.Time) (InventoryHistory, error) {
 	var rows []model.ProjectDailyStat
 	err := db.WithContext(ctx).
 		Where("project_id = ? AND day >= ?::date AND day <= ?::date",

@@ -73,9 +73,9 @@ func requestID(c echo.Context) string {
 type Event struct {
 	Action      string
 	ObjectType  string
-	ObjectID    *int64
+	ObjectID    *model.ID
 	ObjectLabel string
-	ProjectID   *int64
+	ProjectID   *model.ID
 	Before      any
 	After       any
 }

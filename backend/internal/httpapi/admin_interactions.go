@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
@@ -18,7 +19,7 @@ import (
 // inventory). It shows up here as a publication that was never queried.
 
 type interactionView struct {
-	ID             int64      `json:"id"`
+	ID             model.ID   `json:"id"`
 	AliasLabel     string     `json:"aliasLabel"`
 	ChallengeName  string     `json:"challengeName"`
 	DomainNames    []string   `json:"domainNames"`
@@ -44,6 +45,10 @@ type interactionView struct {
 }
 
 func (a *admin) listInteractions(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -54,7 +59,7 @@ func (a *admin) listInteractions(c echo.Context) error {
 	}
 
 	ins, total, err := store.ListInteractionsForLoadBalancer(
-		c.Request().Context(), a.db(), id,
+		c.Request().Context(), a.db(), sc, id,
 		c.QueryParam("q"),
 		c.QueryParam("unqueried") == "true",
 		page.Limit, page.Offset,

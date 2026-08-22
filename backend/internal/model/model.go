@@ -18,8 +18,37 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// ID is the identifier type for every row in this schema (design P17). It is a
+// UUIDv7: a 48-bit millisecond timestamp followed by randomness, so rows sort
+// roughly by creation and index inserts stay at the right-hand edge, while the
+// value discloses neither how many of a thing exist nor what the next one will be.
+//
+// NewID is the only way application code should mint one. The database has a
+// uuidv7() default for rows created by SQL, but Go-side generation keeps the
+// identifier known before the insert, which several callers rely on.
+type ID = uuid.UUID
+
+// NilID is the zero identifier. It is never a valid stored value.
+var NilID ID
+
+// NewID returns a fresh UUIDv7.
+func NewID() ID {
+	id, err := uuid.NewV7()
+	if err != nil {
+		// uuid.NewV7 fails only if crypto/rand fails, which is not a condition a
+		// caller can do anything useful with.
+		panic(fmt.Sprintf("model: generate identifier: %v", err))
+	}
+	return id
+}
+
+// ParseID parses the canonical text form, as it arrives in a URL path or a
+// request body.
+func ParseID(s string) (ID, error) { return uuid.Parse(s) }
 
 // StringArray maps a PostgreSQL text[] column onto []string.
 //
@@ -57,11 +86,25 @@ func (a StringArray) Value() (driver.Value, error) {
 // test walks it, so a new model must be added here.
 func Models() []any {
 	return []any{
-		&Project{}, &LoadBalancer{}, &LBNode{}, &Alias{}, &Domain{},
+		&Account{}, &Project{}, &LoadBalancer{}, &LBNode{}, &Alias{}, &Domain{},
 		&APIKey{}, &APIKeyNetwork{}, &Challenge{}, &Session{}, &AuditEntry{},
 		&ChallengeInteraction{}, &ProjectDailyStat{},
 	}
 }
+
+// Account owns inventory and anchors every grant. The internal edition has exactly
+// one, seeded by the migration; the public edition has one per customer.
+//
+// Nothing below an account may name it as the object of a grant: operations on the
+// account itself are governed by membership, not by grants (design P14).
+type Account struct {
+	ID        ID `gorm:"primaryKey"`
+	Slug      string
+	Name      string
+	CreatedAt time.Time
+}
+
+func (Account) TableName() string { return "accounts" }
 
 // ProjectDailyStat is one project's inventory size on one day: the only thing in
 // the reporting capability that is stored rather than aggregated on read, because
@@ -71,7 +114,7 @@ func Models() []any {
 // The row is a level, not an increment, which is what makes writing it twice in a
 // day harmless — see reporting.Snapshot.
 type ProjectDailyStat struct {
-	ProjectID         int64     `gorm:"primaryKey;column:project_id"`
+	ProjectID         ID        `gorm:"primaryKey;column:project_id"`
 	Day               time.Time `gorm:"primaryKey;column:day;type:date"`
 	ProjectSlug       string    `gorm:"column:project_slug"`
 	AliasCount        int       `gorm:"column:alias_count"`
@@ -82,7 +125,8 @@ type ProjectDailyStat struct {
 func (ProjectDailyStat) TableName() string { return "project_daily_stats" }
 
 type Project struct {
-	ID        int64 `gorm:"primaryKey"`
+	ID        ID `gorm:"primaryKey"`
+	AccountID ID `gorm:"column:account_id"`
 	Slug      string
 	Name      string
 	CreatedAt time.Time
@@ -93,8 +137,9 @@ type Project struct {
 func (Project) TableName() string { return "projects" }
 
 type LoadBalancer struct {
-	ID        int64 `gorm:"primaryKey"`
-	ProjectID int64 `gorm:"column:project_id"`
+	ID        ID `gorm:"primaryKey"`
+	AccountID ID `gorm:"column:account_id"`
+	ProjectID ID `gorm:"column:project_id"`
 	Slug      string
 	Name      string
 	CreatedAt time.Time
@@ -107,8 +152,10 @@ type LoadBalancer struct {
 func (LoadBalancer) TableName() string { return "load_balancers" }
 
 type LBNode struct {
-	ID             int64   `gorm:"primaryKey"`
-	LoadBalancerID int64   `gorm:"column:load_balancer_id"`
+	ID             ID      `gorm:"primaryKey"`
+	AccountID      ID      `gorm:"column:account_id"`
+	ProjectID      ID      `gorm:"column:project_id"`
+	LoadBalancerID ID      `gorm:"column:load_balancer_id"`
 	Label          string  // 'a' / 'b'
 	IPv4           *string `gorm:"column:ipv4;type:inet"`
 	IPv6           *string `gorm:"column:ipv6;type:inet"`
@@ -119,8 +166,10 @@ func (LBNode) TableName() string { return "lb_nodes" }
 // Alias is one challenge name, owned by exactly one load balancer. Several domains
 // (typically example.com and *.example.com) share one alias.
 type Alias struct {
-	ID             int64  `gorm:"primaryKey"`
-	LoadBalancerID int64  `gorm:"column:load_balancer_id"`
+	ID             ID     `gorm:"primaryKey"`
+	AccountID      ID     `gorm:"column:account_id"`
+	ProjectID      ID     `gorm:"column:project_id"`
+	LoadBalancerID ID     `gorm:"column:load_balancer_id"`
 	ChallengeFQDN  string `gorm:"column:challenge_fqdn"`
 	Label          string
 	CreatedAt      time.Time
@@ -132,9 +181,11 @@ type Alias struct {
 func (Alias) TableName() string { return "aliases" }
 
 type Domain struct {
-	ID             int64 `gorm:"primaryKey"`
-	LoadBalancerID int64 `gorm:"column:load_balancer_id"`
-	AliasID        int64 `gorm:"column:alias_id"`
+	ID             ID `gorm:"primaryKey"`
+	AccountID      ID `gorm:"column:account_id"`
+	ProjectID      ID `gorm:"column:project_id"`
+	LoadBalancerID ID `gorm:"column:load_balancer_id"`
+	AliasID        ID `gorm:"column:alias_id"`
 	Name           string
 	CreatedAt      time.Time
 
@@ -146,8 +197,10 @@ func (Domain) TableName() string { return "domains" }
 // APIKey stores only the SHA-256 digest of the secret; the secret itself is shown
 // once at creation and never persisted (design D3).
 type APIKey struct {
-	ID             int64  `gorm:"primaryKey"`
-	LoadBalancerID int64  `gorm:"column:load_balancer_id"`
+	ID             ID     `gorm:"primaryKey"`
+	AccountID      ID     `gorm:"column:account_id"`
+	ProjectID      ID     `gorm:"column:project_id"`
+	LoadBalancerID ID     `gorm:"column:load_balancer_id"`
 	Identifier     string // 'k_7f3a91c4', non-secret
 	SecretHash     []byte `gorm:"column:secret_hash"`
 	DisplayPrefix  string
@@ -165,8 +218,8 @@ func (APIKey) TableName() string { return "api_keys" }
 
 // APIKeyNetwork is one CIDR block a key is pinned to. No rows means unrestricted.
 type APIKeyNetwork struct {
-	ID       int64  `gorm:"primaryKey"`
-	APIKeyID int64  `gorm:"column:api_key_id"`
+	ID       ID     `gorm:"primaryKey"`
+	APIKeyID ID     `gorm:"column:api_key_id"`
 	CIDR     string `gorm:"column:cidr;type:cidr"`
 }
 
@@ -179,10 +232,10 @@ func (APIKeyNetwork) TableName() string { return "api_key_networks" }
 // labels as text — a history that disappears when a domain is deleted cannot
 // answer the question it exists for. See the migration for the full reasoning.
 type ChallengeInteraction struct {
-	ID             int64       `gorm:"primaryKey"`
-	ProjectID      *int64      `gorm:"column:project_id"`
-	LoadBalancerID *int64      `gorm:"column:load_balancer_id"`
-	AliasID        *int64      `gorm:"column:alias_id"`
+	ID             ID          `gorm:"primaryKey"`
+	ProjectID      *ID         `gorm:"column:project_id"`
+	LoadBalancerID *ID         `gorm:"column:load_balancer_id"`
+	AliasID        *ID         `gorm:"column:alias_id"`
 	AliasLabel     string      `gorm:"column:alias_label"`
 	ChallengeFQDN  string      `gorm:"column:challenge_fqdn"`
 	DomainNames    StringArray `gorm:"column:domain_names;type:text[]"`
@@ -203,8 +256,8 @@ func (ChallengeInteraction) TableName() string { return "challenge_interactions"
 // Challenge is one TXT value published at an alias. PublishedBy holds the key
 // identifier as text, deliberately not a foreign key (design D6).
 type Challenge struct {
-	ID          int64 `gorm:"primaryKey"`
-	AliasID     int64 `gorm:"column:alias_id"`
+	ID          ID `gorm:"primaryKey"`
+	AliasID     ID `gorm:"column:alias_id"`
 	Value       string
 	PublishedBy *string
 	CreatedAt   time.Time
@@ -233,7 +286,8 @@ func (Session) TableName() string { return "sessions" }
 // AuditEntry is append-only. ObjectLabel and ProjectID are denormalized on purpose
 // so an entry stays readable after the object it describes is deleted.
 type AuditEntry struct {
-	ID           int64 `gorm:"primaryKey"`
+	ID           ID  `gorm:"primaryKey"`
+	AccountID    *ID `gorm:"column:account_id"`
 	OccurredAt   time.Time
 	ActorSubject *string
 	ActorName    *string
@@ -244,9 +298,9 @@ type AuditEntry struct {
 	ClientIP     *string `gorm:"column:client_ip;type:inet"`
 	Action       string
 	ObjectType   string
-	ObjectID     *int64
+	ObjectID     *ID
 	ObjectLabel  string
-	ProjectID    *int64
+	ProjectID    *ID
 	Before       json.RawMessage `gorm:"type:jsonb"`
 	After        json.RawMessage `gorm:"type:jsonb"`
 }

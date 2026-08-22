@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
 // Bucket sizes the time axis of a usage report.
@@ -75,7 +76,7 @@ type ProjectUsage struct {
 // single-digit rows a day. Ceiling: the range's rows are held in memory. Upgrade
 // path: aggregate in SQL and group issuances per bucket, when a range first
 // holds enough rows to notice.
-func ProjectAttempts(ctx context.Context, db *gorm.DB, projectID int64, from, to time.Time, size BucketSize) (ProjectUsage, error) {
+func ProjectAttempts(ctx context.Context, db *gorm.DB, sc store.Scope, projectID model.ID, from, to time.Time, size BucketSize) (ProjectUsage, error) {
 	var ins []model.ChallengeInteraction
 	err := db.WithContext(ctx).
 		Where("project_id = ? AND published_at >= ? AND published_at <= ?", projectID, from, to).

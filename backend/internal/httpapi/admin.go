@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -14,6 +13,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/zoneview"
 )
@@ -96,7 +96,7 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
-	a := &admin{opts: o, resolver: verificationResolver(o.Config, o.Log)}
+	a := &admin{opts: o, resolver: verificationResolver(o.Config, o.Log), scopes: &scopeResolver{}}
 
 	e.HTTPErrorHandler = a.handleError
 
@@ -194,6 +194,8 @@ type admin struct {
 	// registration. Empty means none could be determined and the verification
 	// route says so rather than silently querying nothing.
 	resolver string
+	// scopes memoizes the account every request is confined to; see scope.go.
+	scopes *scopeResolver
 }
 
 func (a *admin) db() *gorm.DB      { return a.opts.DB }
@@ -202,13 +204,18 @@ func (a *admin) planOptions() inventory.PlanOptions {
 	return inventory.PlanOptions{Zone: a.opts.Config.Zone, CAAIssuers: a.opts.Config.CAAIssuers}
 }
 
-// idParam reads a positive integer path parameter. A non-numeric id is a
-// client mistake, so it is a 400 rather than a 404 that would read as "that
-// object was deleted".
-func idParam(c echo.Context, name string) (int64, error) {
-	id, err := strconv.ParseInt(c.Param(name), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("%w: %s must be a positive integer, got %q", inventory.ErrInvalid, name, c.Param(name))
+// idParam reads an identifier path parameter. A malformed id is a client
+// mistake, so it is a 400 rather than a 404 that would read as "that object was
+// deleted".
+//
+// Identifiers are UUIDs since design P17, so this rejects anything that is not
+// one — including the integers earlier versions of this API used, which is the
+// intended behaviour rather than a compatibility gap: there is no integer whose
+// meaning survives the conversion.
+func idParam(c echo.Context, name string) (model.ID, error) {
+	id, err := model.ParseID(c.Param(name))
+	if err != nil || id == model.NilID {
+		return model.NilID, fmt.Errorf("%w: %s must be an identifier, got %q", inventory.ErrInvalid, name, c.Param(name))
 	}
 	return id, nil
 }

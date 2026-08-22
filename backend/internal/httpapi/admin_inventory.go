@@ -26,7 +26,7 @@ import (
 // convenience is naming: the console is TypeScript and reads camelCase.
 
 type projectView struct {
-	ID            int64              `json:"id"`
+	ID            model.ID           `json:"id"`
 	Slug          string             `json:"slug"`
 	Name          string             `json:"name"`
 	CreatedAt     time.Time          `json:"createdAt"`
@@ -34,8 +34,8 @@ type projectView struct {
 }
 
 type loadBalancerView struct {
-	ID        int64        `json:"id"`
-	ProjectID int64        `json:"projectId"`
+	ID        model.ID     `json:"id"`
+	ProjectID model.ID     `json:"projectId"`
 	Slug      string       `json:"slug"`
 	Name      string       `json:"name"`
 	CreatedAt time.Time    `json:"createdAt"`
@@ -44,19 +44,19 @@ type loadBalancerView struct {
 }
 
 type nodeView struct {
-	ID             int64   `json:"id"`
-	LoadBalancerID int64   `json:"loadBalancerId"`
-	Label          string  `json:"label"`
-	IPv4           *string `json:"ipv4"`
-	IPv6           *string `json:"ipv6"`
+	ID             model.ID `json:"id"`
+	LoadBalancerID model.ID `json:"loadBalancerId"`
+	Label          string   `json:"label"`
+	IPv4           *string  `json:"ipv4"`
+	IPv6           *string  `json:"ipv6"`
 }
 
 type domainView struct {
-	ID             int64     `json:"id"`
-	LoadBalancerID int64     `json:"loadBalancerId"`
+	ID             model.ID  `json:"id"`
+	LoadBalancerID model.ID  `json:"loadBalancerId"`
 	Name           string    `json:"name"`
 	ChallengeName  string    `json:"challengeName"`
-	AliasID        int64     `json:"aliasId"`
+	AliasID        model.ID  `json:"aliasId"`
 	AliasLabel     string    `json:"aliasLabel"`
 	CreatedAt      time.Time `json:"createdAt"`
 }
@@ -65,10 +65,10 @@ type domainView struct {
 // own — they appear and disappear with domains — so this type exists only so
 // the alias entries carry something more useful than an id.
 type aliasView struct {
-	ID             int64  `json:"id"`
-	LoadBalancerID int64  `json:"loadBalancerId"`
-	Label          string `json:"label"`
-	ChallengeFQDN  string `json:"challengeFqdn"`
+	ID             model.ID `json:"id"`
+	LoadBalancerID model.ID `json:"loadBalancerId"`
+	Label          string   `json:"label"`
+	ChallengeFQDN  string   `json:"challengeFqdn"`
 }
 
 func toAlias(a model.Alias) aliasView {
@@ -85,7 +85,7 @@ func toProject(p model.Project) projectView {
 
 // toLoadBalancer renders a load balancer. aliases may be nil, in which case domains carry no
 // alias label — the listing views that do not need it skip the extra query.
-func toLoadBalancer(p model.LoadBalancer, aliases map[int64]model.Alias) loadBalancerView {
+func toLoadBalancer(p model.LoadBalancer, aliases map[model.ID]model.Alias) loadBalancerView {
 	v := loadBalancerView{ID: p.ID, ProjectID: p.ProjectID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt, Nodes: []nodeView{}}
 	for _, n := range p.Nodes {
 		v.Nodes = append(v.Nodes, toNode(n))
@@ -100,7 +100,7 @@ func toNode(n model.LBNode) nodeView {
 	return nodeView{ID: n.ID, LoadBalancerID: n.LoadBalancerID, Label: n.Label, IPv4: n.IPv4, IPv6: n.IPv6}
 }
 
-func toDomain(d model.Domain, aliases map[int64]model.Alias) domainView {
+func toDomain(d model.Domain, aliases map[model.ID]model.Alias) domainView {
 	return domainView{
 		ID: d.ID, LoadBalancerID: d.LoadBalancerID, Name: d.Name,
 		ChallengeName: dnsname.ChallengeName(d.Name),
@@ -118,11 +118,15 @@ func toDomain(d model.Domain, aliases map[int64]model.Alias) domainView {
 // remember "the shop one" without remembering whether the word is in the slug
 // or the display name, and two separate parameters would only make them guess.
 func (a *admin) listProjects(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	page, err := readPage(c, 50, 500)
 	if err != nil {
 		return err
 	}
-	ps, total, err := inventory.ListProjectsPage(c.Request().Context(), a.db(),
+	ps, total, err := inventory.ListProjectsPage(c.Request().Context(), a.db(), sc,
 		c.QueryParam("q"), page.Limit, page.Offset)
 	if err != nil {
 		return err
@@ -136,6 +140,10 @@ func (a *admin) listProjects(c echo.Context) error {
 }
 
 func (a *admin) createProject(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	var body struct{ Slug, Name string }
 	if err := bind(c, &body); err != nil {
 		return err
@@ -143,7 +151,7 @@ func (a *admin) createProject(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out projectView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		p, err := inventory.CreateProject(ctx, tx, body.Slug, body.Name)
+		p, err := inventory.CreateProject(ctx, tx, sc, body.Slug, body.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -165,11 +173,15 @@ func (a *admin) createProject(c echo.Context) error {
 // first page of the list" the moment a limit existed. A screen addressed by id
 // has to be able to fetch by id.
 func (a *admin) getProject(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
-	p, err := store.GetProject(c.Request().Context(), a.db(), id)
+	p, err := store.GetProject(c.Request().Context(), a.db(), sc, id)
 	if err != nil {
 		return err
 	}
@@ -179,6 +191,10 @@ func (a *admin) getProject(c echo.Context) error {
 // updateProject renames a project. The slug is not editable: it appears in
 // URLs, CLI arguments and log lines, so it is identity rather than a label.
 func (a *admin) updateProject(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -193,7 +209,7 @@ func (a *admin) updateProject(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out projectView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		p, err := store.GetProject(ctx, tx, id)
+		p, err := store.GetProject(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
@@ -214,17 +230,21 @@ func (a *admin) updateProject(c echo.Context) error {
 }
 
 func (a *admin) deleteProject(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		p, err := store.GetProject(ctx, tx, id)
+		p, err := store.GetProject(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
-		if err := inventory.DeleteProject(ctx, tx, id); err != nil {
+		if err := inventory.DeleteProject(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -240,15 +260,19 @@ func (a *admin) deleteProject(c echo.Context) error {
 // --- load balancers --------------------------------------------------------------
 
 func (a *admin) listLoadBalancers(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
-	if _, err := store.GetProject(ctx, a.db(), id); err != nil {
+	if _, err := store.GetProject(ctx, a.db(), sc, id); err != nil {
 		return err
 	}
-	lbs, err := store.ListLoadBalancersForProject(ctx, a.db(), id)
+	lbs, err := store.ListLoadBalancersForProject(ctx, a.db(), sc, id)
 	if err != nil {
 		return err
 	}
@@ -260,12 +284,16 @@ func (a *admin) listLoadBalancers(c echo.Context) error {
 }
 
 func (a *admin) getLoadBalancer(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
-	lb, err := store.GetLoadBalancer(ctx, a.db(), id)
+	lb, err := store.GetLoadBalancer(ctx, a.db(), sc, id)
 	if err != nil {
 		return err
 	}
@@ -278,6 +306,10 @@ func (a *admin) getLoadBalancer(c echo.Context) error {
 }
 
 func (a *admin) createLoadBalancer(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	projectID, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -289,7 +321,7 @@ func (a *admin) createLoadBalancer(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out loadBalancerView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		lb, err := inventory.CreateLoadBalancer(ctx, tx, projectID, body.Slug, body.Name)
+		lb, err := inventory.CreateLoadBalancer(ctx, tx, sc, projectID, body.Slug, body.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -305,6 +337,10 @@ func (a *admin) createLoadBalancer(c echo.Context) error {
 }
 
 func (a *admin) updateLoadBalancer(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -319,7 +355,7 @@ func (a *admin) updateLoadBalancer(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out loadBalancerView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		lb, err := store.GetLoadBalancer(ctx, tx, id)
+		lb, err := store.GetLoadBalancer(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
@@ -340,6 +376,10 @@ func (a *admin) updateLoadBalancer(c echo.Context) error {
 }
 
 func (a *admin) deleteLoadBalancer(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -350,11 +390,11 @@ func (a *admin) deleteLoadBalancer(c echo.Context) error {
 	// (inventory.DeleteLoadBalancer refuses it), so nothing can disappear from
 	// the served zone by this route.
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		lb, err := store.GetLoadBalancer(ctx, tx, id)
+		lb, err := store.GetLoadBalancer(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
-		if err := inventory.DeleteLoadBalancer(ctx, tx, id); err != nil {
+		if err := inventory.DeleteLoadBalancer(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -370,6 +410,10 @@ func (a *admin) deleteLoadBalancer(c echo.Context) error {
 // --- nodes -----------------------------------------------------------------
 
 func (a *admin) createNode(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	loadBalancerID, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -385,7 +429,7 @@ func (a *admin) createNode(c echo.Context) error {
 	ctx := c.Request().Context()
 	var v nodeView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		n, err := inventory.AddNode(ctx, tx, loadBalancerID, body.Label, body.IPv4, body.IPv6)
+		n, err := inventory.AddNode(ctx, tx, sc, loadBalancerID, body.Label, body.IPv4, body.IPv6)
 		if err != nil {
 			return nil, err
 		}
@@ -393,7 +437,7 @@ func (a *admin) createNode(c echo.Context) error {
 		return []authz.Event{{
 			Action: authz.ActionNodeCreate, ObjectType: authz.ObjectNode,
 			ObjectID: &n.ID, ObjectLabel: n.Label,
-			ProjectID: projectOf(ctx, tx, loadBalancerID), After: v,
+			ProjectID: projectOf(ctx, tx, sc, loadBalancerID), After: v,
 		}}, nil
 	}); err != nil {
 		return err
@@ -402,6 +446,10 @@ func (a *admin) createNode(c echo.Context) error {
 }
 
 func (a *admin) updateNode(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -416,11 +464,11 @@ func (a *admin) updateNode(c echo.Context) error {
 	ctx := c.Request().Context()
 	var v nodeView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		before, err := node(ctx, tx, id)
+		before, err := node(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
-		n, err := inventory.UpdateNodeAddresses(ctx, tx, id, body.IPv4, body.IPv6)
+		n, err := inventory.UpdateNodeAddresses(ctx, tx, sc, id, body.IPv4, body.IPv6)
 		if err != nil {
 			return nil, err
 		}
@@ -428,7 +476,7 @@ func (a *admin) updateNode(c echo.Context) error {
 		return []authz.Event{{
 			Action: authz.ActionNodeUpdate, ObjectType: authz.ObjectNode,
 			ObjectID: &n.ID, ObjectLabel: n.Label,
-			ProjectID: projectOf(ctx, tx, n.LoadBalancerID),
+			ProjectID: projectOf(ctx, tx, sc, n.LoadBalancerID),
 			Before:    toNode(*before), After: v,
 		}}, nil
 	}); err != nil {
@@ -438,23 +486,27 @@ func (a *admin) updateNode(c echo.Context) error {
 }
 
 func (a *admin) deleteNode(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		n, err := node(ctx, tx, id)
+		n, err := node(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
-		if err := inventory.DeleteNode(ctx, tx, id); err != nil {
+		if err := inventory.DeleteNode(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
 			Action: authz.ActionNodeDelete, ObjectType: authz.ObjectNode,
 			ObjectID: &id, ObjectLabel: n.Label,
-			ProjectID: projectOf(ctx, tx, n.LoadBalancerID), Before: toNode(*n),
+			ProjectID: projectOf(ctx, tx, sc, n.LoadBalancerID), Before: toNode(*n),
 		}}, nil
 	}); err != nil {
 		return err
@@ -465,11 +517,15 @@ func (a *admin) deleteNode(c echo.Context) error {
 // --- domains ---------------------------------------------------------------
 
 func (a *admin) listDomains(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
-	if _, err := store.GetLoadBalancer(c.Request().Context(), a.db(), id); err != nil {
+	if _, err := store.GetLoadBalancer(c.Request().Context(), a.db(), sc, id); err != nil {
 		return err
 	}
 	domains, aliases, err := a.domainsOf(c, id)
@@ -499,6 +555,10 @@ type domainCreated struct {
 }
 
 func (a *admin) createDomain(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	loadBalancerID, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -524,12 +584,12 @@ func (a *admin) createDomain(c echo.Context) error {
 	var out domainCreated
 	var aliasCreated bool
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		res, err := inventory.CreateDomain(ctx, tx, loadBalancerID, body.Name, a.opts.Config.AliasUseDomain, body.IncludeWildcard)
+		res, err := inventory.CreateDomain(ctx, tx, sc, loadBalancerID, body.Name, a.opts.Config.AliasUseDomain, body.IncludeWildcard)
 		if err != nil {
 			return nil, err
 		}
 		aliasCreated = res.AliasCreated
-		aliases := map[int64]model.Alias{res.Alias.ID: *res.Alias}
+		aliases := map[model.ID]model.Alias{res.Alias.ID: *res.Alias}
 		out = domainCreated{
 			domainView:   toDomain(*res.Domain, aliases),
 			Domains:      make([]domainView, 0, len(res.Domains)),
@@ -545,7 +605,7 @@ func (a *admin) createDomain(c echo.Context) error {
 		// The trail records objects, and a pair is two of them: one entry per
 		// created domain, emitted from the transaction that writes the rows, so
 		// the trail can never show one half of a pair (design B1).
-		projectID := projectOf(ctx, tx, loadBalancerID)
+		projectID := projectOf(ctx, tx, sc, loadBalancerID)
 		events := make([]authz.Event, 0, len(res.Domains)+1)
 		for i, d := range res.Domains {
 			events = append(events, authz.Event{
@@ -570,6 +630,10 @@ func (a *admin) createDomain(c echo.Context) error {
 }
 
 func (a *admin) deleteDomain(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
@@ -577,21 +641,21 @@ func (a *admin) deleteDomain(c echo.Context) error {
 	ctx := c.Request().Context()
 	var aliasRemoved bool
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		d, err := store.GetDomain(ctx, tx, id)
+		d, err := store.GetDomain(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
 		// Read the alias before the deletion cascades it away — the entry has
 		// to name the label the customer published a CNAME to.
-		alias, err := store.GetAlias(ctx, tx, d.AliasID)
+		alias, err := store.GetAlias(ctx, tx, sc, d.AliasID)
 		if err != nil {
 			return nil, err
 		}
-		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, id)
+		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
-		projectID := projectOf(ctx, tx, d.LoadBalancerID)
+		projectID := projectOf(ctx, tx, sc, d.LoadBalancerID)
 		events := []authz.Event{{
 			Action: authz.ActionDomainDelete, ObjectType: authz.ObjectDomain,
 			ObjectID: &id, ObjectLabel: d.Name, ProjectID: projectID,
@@ -618,27 +682,31 @@ func (a *admin) deleteDomain(c echo.Context) error {
 
 // domainsOf returns a load balancer's domains together with its aliases keyed by id, so
 // a domain view can carry the alias label the console shows next to it.
-func (a *admin) domainsOf(c echo.Context, loadBalancerID int64) ([]model.Domain, map[int64]model.Alias, error) {
+func (a *admin) domainsOf(c echo.Context, loadBalancerID model.ID) ([]model.Domain, map[model.ID]model.Alias, error) {
 	ctx := c.Request().Context()
-	domains, err := store.ListDomainsForLoadBalancer(ctx, a.db(), loadBalancerID)
+	sc, err := a.scope(c)
 	if err != nil {
 		return nil, nil, err
 	}
-	aliases, err := store.ListAliasesForLoadBalancer(ctx, a.db(), loadBalancerID)
+	domains, err := store.ListDomainsForLoadBalancer(ctx, a.db(), sc, loadBalancerID)
 	if err != nil {
 		return nil, nil, err
 	}
-	byID := make(map[int64]model.Alias, len(aliases))
+	aliases, err := store.ListAliasesForLoadBalancer(ctx, a.db(), sc, loadBalancerID)
+	if err != nil {
+		return nil, nil, err
+	}
+	byID := make(map[model.ID]model.Alias, len(aliases))
 	for _, al := range aliases {
 		byID[al.ID] = al
 	}
 	return domains, byID, nil
 }
 
-func node(ctx context.Context, db *gorm.DB, id int64) (*model.LBNode, error) {
+func node(ctx context.Context, db *gorm.DB, sc store.Scope, id model.ID) (*model.LBNode, error) {
 	var n model.LBNode
-	if err := db.WithContext(ctx).First(&n, id).Error; err != nil {
-		return nil, fmt.Errorf("get lb node %d: %w", id, err)
+	if err := sc.Where(db.WithContext(ctx)).First(&n, "id = ?", id).Error; err != nil {
+		return nil, fmt.Errorf("get lb node %s: %w", id, err)
 	}
 	return &n, nil
 }
@@ -650,8 +718,8 @@ func node(ctx context.Context, db *gorm.DB, id int64) (*model.LBNode, error) {
 //
 // db is the mutation's own transaction, so a load balancer created moments ago
 // in that transaction still resolves.
-func projectOf(ctx context.Context, db *gorm.DB, loadBalancerID int64) *int64 {
-	lb, err := store.GetLoadBalancer(ctx, db, loadBalancerID)
+func projectOf(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID) *model.ID {
+	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
 		return nil
 	}
@@ -659,7 +727,7 @@ func projectOf(ctx context.Context, db *gorm.DB, loadBalancerID int64) *int64 {
 }
 
 // aliasEvent builds the entry for an alias appearing or disappearing.
-func aliasEvent(action string, al model.Alias, projectID *int64) authz.Event {
+func aliasEvent(action string, al model.Alias, projectID *model.ID) authz.Event {
 	e := authz.Event{
 		Action: action, ObjectType: authz.ObjectAlias,
 		ObjectID: &al.ID, ObjectLabel: al.Label, ProjectID: projectID,

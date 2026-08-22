@@ -10,42 +10,63 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
 
-// CreateProject inserts a new project.
-func CreateProject(ctx context.Context, db *gorm.DB, p *model.Project) error {
-	if err := db.WithContext(ctx).Create(p).Error; err != nil {
-		return fmt.Errorf("store: create project: %w", err)
-	}
-	return nil
+// CreateProject inserts a new project into the scope's account.
+//
+// The account is taken from the scope and not from the struct: a caller that
+// filled in AccountID itself would be choosing which tenant to write into, which
+// is exactly the decision Scope exists to take away from callers.
+func CreateProject(ctx context.Context, db *gorm.DB, sc Scope, p *model.Project) error {
+	return sc.Run(ctx, db, func(tx *gorm.DB) error {
+		p.AccountID = sc.AccountID()
+		if p.ID == model.NilID {
+			p.ID = model.NewID()
+		}
+		if err := tx.Create(p).Error; err != nil {
+			return fmt.Errorf("store: create project: %w", err)
+		}
+		return nil
+	})
 }
 
-// GetProject loads a project by id. Returns gorm.ErrRecordNotFound if absent.
-func GetProject(ctx context.Context, db *gorm.DB, id int64) (*model.Project, error) {
+// GetProject loads a project by id, within the scope's account. Returns
+// gorm.ErrRecordNotFound both when the project does not exist and when it belongs
+// to another account: the two must be indistinguishable, or the endpoint becomes
+// an oracle for what other tenants hold.
+func GetProject(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) (*model.Project, error) {
 	var p model.Project
-	if err := db.WithContext(ctx).First(&p, id).Error; err != nil {
-		return nil, fmt.Errorf("store: get project %d: %w", id, err)
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return sc.Where(tx).First(&p, "id = ?", id).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: get project %s: %w", id, err)
 	}
 	return &p, nil
 }
 
-// ListProjects returns every project, ordered by slug.
-func ListProjects(ctx context.Context, db *gorm.DB) ([]model.Project, error) {
+// ListProjects returns the scope's projects, ordered by slug.
+func ListProjects(ctx context.Context, db *gorm.DB, sc Scope) ([]model.Project, error) {
 	var ps []model.Project
-	if err := db.WithContext(ctx).Order("slug").Find(&ps).Error; err != nil {
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return sc.Where(tx).Order("slug").Find(&ps).Error
+	})
+	if err != nil {
 		return nil, fmt.Errorf("store: list projects: %w", err)
 	}
 	return ps, nil
 }
 
-// ListProjectsWithLoadBalancers returns every project with its load balancers, each load balancer's
-// nodes and each load balancer's domains preloaded — the object graph the console's
-// inventory view renders.
-func ListProjectsWithLoadBalancers(ctx context.Context, db *gorm.DB) ([]model.Project, error) {
+// ListProjectsWithLoadBalancers returns the scope's projects with their load
+// balancers, each load balancer's nodes and each load balancer's domains preloaded
+// — the object graph the console's inventory view renders.
+func ListProjectsWithLoadBalancers(ctx context.Context, db *gorm.DB, sc Scope) ([]model.Project, error) {
 	var ps []model.Project
-	err := db.WithContext(ctx).
-		Preload("LoadBalancers.Nodes").
-		Preload("LoadBalancers.Domains").
-		Order("slug").
-		Find(&ps).Error
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return sc.Where(tx).
+			Preload("LoadBalancers.Nodes").
+			Preload("LoadBalancers.Domains").
+			Order("slug").
+			Find(&ps).Error
+	})
 	if err != nil {
 		return nil, fmt.Errorf("store: list projects with load balancers: %w", err)
 	}
@@ -58,31 +79,34 @@ func ListProjectsWithLoadBalancers(ctx context.Context, db *gorm.DB) ([]model.Pr
 //
 // `base` is called twice on purpose — see the note in ListActivePage: GORM
 // builds onto the statement it is handed, so a count and a select must not
-// share one query object.
-func ListProjectsWithLoadBalancersPage(ctx context.Context, db *gorm.DB, query string, limit, offset int) ([]model.Project, int64, error) {
-	base := func() *gorm.DB {
-		q := db.WithContext(ctx).Model(&model.Project{})
-		if s := strings.TrimSpace(query); s != "" {
-			// ILIKE, not LIKE: an operator typing "Shop" expects "shop".
-			pattern := likeEscape(s)
-			q = q.Where(`slug ILIKE ? ESCAPE '\' OR name ILIKE ? ESCAPE '\'`, pattern, pattern)
+// share one query object. Both calls carry the scope, so the count cannot
+// disagree with the page about which rows exist.
+func ListProjectsWithLoadBalancersPage(ctx context.Context, db *gorm.DB, sc Scope, query string, limit, offset int) ([]model.Project, int64, error) {
+	var (
+		total int64
+		ps    []model.Project
+	)
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		base := func() *gorm.DB {
+			q := sc.Where(tx.Model(&model.Project{}))
+			if s := strings.TrimSpace(query); s != "" {
+				// ILIKE, not LIKE: an operator typing "Shop" expects "shop".
+				pattern := likeEscape(s)
+				q = q.Where(`slug ILIKE ? ESCAPE '\' OR name ILIKE ? ESCAPE '\'`, pattern, pattern)
+			}
+			return q
 		}
-		return q
-	}
-
-	var total int64
-	if err := base().Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("store: count projects: %w", err)
-	}
-
-	var ps []model.Project
-	err := base().
-		Preload("LoadBalancers.Nodes").
-		Preload("LoadBalancers.Domains").
-		Order("slug").
-		Limit(limit).
-		Offset(offset).
-		Find(&ps).Error
+		if err := base().Count(&total).Error; err != nil {
+			return fmt.Errorf("count projects: %w", err)
+		}
+		return base().
+			Preload("LoadBalancers.Nodes").
+			Preload("LoadBalancers.Domains").
+			Order("slug").
+			Limit(limit).
+			Offset(offset).
+			Find(&ps).Error
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("store: list projects with load balancers: %w", err)
 	}
@@ -97,17 +121,20 @@ func likeEscape(s string) string {
 	return "%" + r.Replace(s) + "%"
 }
 
-// DeleteProject deletes a project by id. The load_balancers foreign key is
-// ON DELETE RESTRICT, so this fails with a foreign-key-violation error when
-// the project still has load balancers — refusing deletion of a non-empty parent is
-// enforced by the database, not by an application-level check.
-func DeleteProject(ctx context.Context, db *gorm.DB, id int64) error {
-	res := db.WithContext(ctx).Delete(&model.Project{}, id)
-	if res.Error != nil {
-		return fmt.Errorf("store: delete project %d: %w", id, res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return fmt.Errorf("store: delete project %d: %w", id, gorm.ErrRecordNotFound)
-	}
-	return nil
+// DeleteProject deletes a project by id, within the scope's account. The
+// load_balancers foreign key is ON DELETE RESTRICT, so this fails with a
+// foreign-key-violation error when the project still has load balancers —
+// refusing deletion of a non-empty parent is enforced by the database, not by an
+// application-level check.
+func DeleteProject(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) error {
+	return sc.Run(ctx, db, func(tx *gorm.DB) error {
+		res := sc.Where(tx).Delete(&model.Project{}, "id = ?", id)
+		if res.Error != nil {
+			return fmt.Errorf("store: delete project %s: %w", id, res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("store: delete project %s: %w", id, gorm.ErrRecordNotFound)
+		}
+		return nil
+	})
 }

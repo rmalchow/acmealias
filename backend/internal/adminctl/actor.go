@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
 // cliActor identifies the operator running this process, as "user@host" — the
@@ -36,7 +37,7 @@ func cliActor() authz.Actor {
 // operator, who sees a non-zero exit and no change. That is the console's
 // policy, and the reason it applies here too is that the CLI is the surface
 // with the *most* authority, not the least.
-func mutate(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
+func mutate(ctx context.Context, db *gorm.DB, sc store.Scope, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
 	actor := cliActor()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		events, err := fn(tx)

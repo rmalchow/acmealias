@@ -61,7 +61,7 @@ func (a *admin) me(c echo.Context) error {
 // --- live challenges -------------------------------------------------------
 
 type challengeView struct {
-	ID            int64     `json:"id"`
+	ID            model.ID  `json:"id"`
 	AliasLabel    string    `json:"aliasLabel"`
 	ChallengeName string    `json:"challengeName"`
 	Value         string    `json:"value"`
@@ -76,11 +76,15 @@ type challengeView struct {
 // an operator has in hand when they are chasing one renewal through a busy
 // window.
 func (a *admin) listChallenges(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	page, err := readPage(c, 50, 500)
 	if err != nil {
 		return err
 	}
-	cs, total, err := store.ListActivePage(c.Request().Context(), a.db(),
+	cs, total, err := store.ListActivePage(c.Request().Context(), a.db(), sc,
 		c.QueryParam("q"), page.Limit, page.Offset)
 	if err != nil {
 		return err
@@ -105,7 +109,7 @@ func (a *admin) listChallenges(c echo.Context) error {
 // --- audit trail -----------------------------------------------------------
 
 type auditView struct {
-	ID           int64           `json:"id"`
+	ID           model.ID        `json:"id"`
 	OccurredAt   time.Time       `json:"occurredAt"`
 	ActorSubject *string         `json:"actorSubject"`
 	ActorName    *string         `json:"actorName"`
@@ -116,9 +120,9 @@ type auditView struct {
 	ClientIP     *string         `json:"clientIp"`
 	Action       string          `json:"action"`
 	ObjectType   string          `json:"objectType"`
-	ObjectID     *int64          `json:"objectId"`
+	ObjectID     *model.ID       `json:"objectId"`
 	ObjectLabel  string          `json:"objectLabel"`
-	ProjectID    *int64          `json:"projectId"`
+	ProjectID    *model.ID       `json:"projectId"`
 	Before       json.RawMessage `json:"before,omitempty"`
 	After        json.RawMessage `json:"after,omitempty"`
 }

@@ -51,9 +51,13 @@ type ChallengeValue struct {
 // publishedBy is the API key identifier (e.g. "k_7f3a91c4") as plain text, not a
 // foreign key: revoking or deleting the key must not delete or invalidate the
 // records it published (design D6). An empty string stores NULL.
-func Present(ctx context.Context, db *gorm.DB, aliasID int64, value, publishedBy string, lifetime time.Duration) (*model.Challenge, error) {
-	if aliasID <= 0 {
-		return nil, fmt.Errorf("store: present: alias id must be positive, got %d", aliasID)
+// No Scope: challenges carry no account_id and no row-level security policy
+// (design P20). A challenge row is only ever reached through an alias that was
+// itself resolved under a scope, so the fence sits one level up — and this is the
+// certificate-issuance critical path, which the change promises not to slow down.
+func Present(ctx context.Context, db *gorm.DB, aliasID model.ID, value, publishedBy string, lifetime time.Duration) (*model.Challenge, error) {
+	if aliasID == model.NilID {
+		return nil, fmt.Errorf("store: present: alias id is empty")
 	}
 	if value == "" {
 		return nil, fmt.Errorf("store: present: value is empty")
@@ -81,7 +85,7 @@ func Present(ctx context.Context, db *gorm.DB, aliasID int64, value, publishedBy
 		DoUpdates: clause.AssignmentColumns([]string{"expires_at", "published_by"}),
 	}).Create(&c).Error
 	if err != nil {
-		return nil, fmt.Errorf("store: present value at alias %d: %w", aliasID, err)
+		return nil, fmt.Errorf("store: present value at alias %s: %w", aliasID, err)
 	}
 	return &c, nil
 }
@@ -89,12 +93,12 @@ func Present(ctx context.Context, db *gorm.DB, aliasID int64, value, publishedBy
 // Cleanup withdraws exactly the one value at aliasID — never the alias's other
 // values. Withdrawing a value that is not there is not an error: ACME clients
 // retry cleanups, and the record may already have expired and been swept.
-func Cleanup(ctx context.Context, db *gorm.DB, aliasID int64, value string) error {
+func Cleanup(ctx context.Context, db *gorm.DB, aliasID model.ID, value string) error {
 	err := db.WithContext(ctx).
 		Where("alias_id = ? AND value = ?", aliasID, value).
 		Delete(&model.Challenge{}).Error
 	if err != nil {
-		return fmt.Errorf("store: cleanup value at alias %d: %w", aliasID, err)
+		return fmt.Errorf("store: cleanup value at alias %s: %w", aliasID, err)
 	}
 	return nil
 }
@@ -107,18 +111,22 @@ func Cleanup(ctx context.Context, db *gorm.DB, aliasID int64, value string) erro
 // from the map does not exist and answers NXDOMAIN (design D7). Expired rows are
 // filtered here rather than waited on, so a value stops being answerable the
 // instant it expires, whenever the sweep next happens to run.
+// This is a cross-account read by construction: one nameserver answers for every
+// account, so the view it serves cannot be confined to one (design P20).
 func ActiveByAlias(ctx context.Context, db *gorm.DB) (map[string][]ChallengeValue, error) {
 	var rows []struct {
 		Label     string
 		Value     *string
 		ExpiresAt *time.Time
 	}
-	err := db.WithContext(ctx).
-		Table("aliases").
-		Select("aliases.label, challenges.value, challenges.expires_at").
-		Joins("left join challenges on challenges.alias_id = aliases.id and challenges.expires_at > ?", time.Now()).
-		Order("aliases.label, challenges.value").
-		Scan(&rows).Error
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.
+			Table("aliases").
+			Select("aliases.label, challenges.value, challenges.expires_at").
+			Joins("left join challenges on challenges.alias_id = aliases.id and challenges.expires_at > ?", time.Now()).
+			Order("aliases.label, challenges.value").
+			Scan(&rows).Error
+	})
 	if err != nil {
 		return nil, fmt.Errorf("store: active challenges by alias: %w", err)
 	}
@@ -164,47 +172,76 @@ func DeleteExpired(ctx context.Context, db *gorm.DB) (int64, error) {
 // count's clauses into the select. That is not hypothetical — it produced
 // "for SELECT DISTINCT, ORDER BY expressions must appear in select list"
 // here before this was two calls.
-func ListActivePage(ctx context.Context, db *gorm.DB, query string, limit, offset int) ([]model.Challenge, int64, error) {
-	base := func() *gorm.DB {
-		q := db.WithContext(ctx).
-			Model(&model.Challenge{}).
-			Where("challenges.expires_at > ?", time.Now())
-		if s := strings.TrimSpace(query); s != "" {
-			pattern := likeEscape(s)
-			q = q.Joins("LEFT JOIN aliases ON aliases.id = challenges.alias_id").
-				Where(`aliases.label ILIKE ? ESCAPE '\' OR aliases.challenge_fqdn ILIKE ? ESCAPE '\' OR challenges.published_by ILIKE ? ESCAPE '\'`,
+// The console's view of live challenges IS scoped, even though the challenges
+// table is not: it joins to aliases, which carries account_id and a policy, and
+// filters on it. The join is mandatory rather than conditional for exactly that
+// reason — an unjoined listing would show every tenant's live values.
+func ListActivePage(ctx context.Context, db *gorm.DB, sc Scope, query string, limit, offset int) ([]model.Challenge, int64, error) {
+	var (
+		total int64
+		cs    []model.Challenge
+	)
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		base := func() *gorm.DB {
+			q := tx.
+				Model(&model.Challenge{}).
+				Joins("JOIN aliases ON aliases.id = challenges.alias_id").
+				Where("aliases.account_id = ?", sc.AccountID()).
+				Where("challenges.expires_at > ?", time.Now())
+			if s := strings.TrimSpace(query); s != "" {
+				pattern := likeEscape(s)
+				q = q.Where(`aliases.label ILIKE ? ESCAPE '\' OR aliases.challenge_fqdn ILIKE ? ESCAPE '\' OR challenges.published_by ILIKE ? ESCAPE '\'`,
 					pattern, pattern, pattern)
+			}
+			return q
 		}
-		return q
-	}
-
-	var total int64
-	if err := base().Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("store: count active challenges: %w", err)
-	}
-
-	var cs []model.Challenge
-	err := base().
-		Preload("Alias").
-		Order("challenges.created_at desc, challenges.id desc").
-		Limit(limit).
-		Offset(offset).
-		Find(&cs).Error
+		if err := base().Count(&total).Error; err != nil {
+			return fmt.Errorf("count active challenges: %w", err)
+		}
+		return base().
+			Preload("Alias").
+			Order("challenges.created_at desc, challenges.id desc").
+			Limit(limit).
+			Offset(offset).
+			Find(&cs).Error
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("store: list active challenges: %w", err)
 	}
 	return cs, total, nil
 }
 
-func ListActive(ctx context.Context, db *gorm.DB) ([]model.Challenge, error) {
+// ListActive is ListActivePage without paging or filtering, scoped the same way.
+func ListActive(ctx context.Context, db *gorm.DB, sc Scope) ([]model.Challenge, error) {
 	var cs []model.Challenge
-	err := db.WithContext(ctx).
-		Preload("Alias").
-		Where("expires_at > ?", time.Now()).
-		Order("created_at desc, id desc").
-		Find(&cs).Error
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return tx.
+			Model(&model.Challenge{}).
+			Joins("JOIN aliases ON aliases.id = challenges.alias_id").
+			Where("aliases.account_id = ?", sc.AccountID()).
+			Where("challenges.expires_at > ?", time.Now()).
+			Preload("Alias").
+			Order("challenges.created_at desc, challenges.id desc").
+			Find(&cs).Error
+	})
 	if err != nil {
 		return nil, fmt.Errorf("store: list active challenges: %w", err)
 	}
 	return cs, nil
+}
+
+// CountActive reports how many challenge values are answerable right now, across
+// every account. It backs a process-level gauge rather than any tenant-facing
+// screen, which is why it is deliberately unscoped: the number describes what
+// this nameserver is holding, not what any one customer has.
+func CountActive(ctx context.Context, db *gorm.DB) (int64, error) {
+	var n int64
+	err := db.WithContext(ctx).
+		Model(&model.Challenge{}).
+		Where("expires_at > ?", time.Now()).
+		Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("store: count active challenges: %w", err)
+	}
+	return n, nil
 }

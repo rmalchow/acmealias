@@ -231,6 +231,10 @@ type resolved struct {
 	form  string // formAlias or formChallenge — which spelling the client sent
 	value string
 	alias *model.Alias
+	// scope confines every subsequent read of this request to the key's own
+	// account. It is built from the key row rather than from anything the
+	// request said, which is what makes it unforgeable by a caller.
+	scope store.Scope
 }
 
 // The two forms a submitted name can take. Two values, fixed forever, which is
@@ -281,11 +285,31 @@ func (h *challenge) resolve(c echo.Context) (*resolved, error) {
 		return nil, errStorage
 	}
 	// Identical for both forms of the name: the alias must be ours to write to.
+	//
+	// Two checks, in this order, because they answer different questions and only
+	// one of them is recoverable.
+	//
+	// The account check is tenant isolation (design P1). A key anchored to one
+	// account may never touch another account's alias, whatever grants it holds —
+	// there is no grant that can name an object outside its anchor, so this is not
+	// a permission question and is not asked of the permission evaluator.
+	if alias.AccountID != key.AccountID {
+		h.refuse(ctx, key, name, form, "alias belongs to another account")
+		return nil, errRefused
+	}
+	// The load-balancer check is authority within the account. It stays a direct
+	// comparison for now and becomes a grant check when API keys become subjects
+	// carrying grants; the ordering above is what makes that later change safe,
+	// because a bug in the permission evaluator can then over-permit inside one
+	// tenant and cannot cross between them.
 	if alias.LoadBalancerID != key.LoadBalancerID {
 		h.refuse(ctx, key, name, form, "alias belongs to another load balancer")
 		return nil, errRefused
 	}
-	return &resolved{key: key, fqdn: name, form: form, value: value, alias: alias}, nil
+	return &resolved{
+		key: key, fqdn: name, form: form, value: value, alias: alias,
+		scope: store.ScopeForKey(key),
+	}, nil
 }
 
 // findAlias resolves either form of the submitted name, and reports which one it
@@ -376,7 +400,7 @@ func (h *challenge) openInteraction(c echo.Context, r *resolved) {
 	// The domains this alias served AT PUBLICATION TIME, copied in rather than
 	// joined later: the whole point of the history is to still make sense after
 	// someone deletes the domain.
-	names, err := store.DomainNamesForAlias(ctx, h.opts.DB, r.alias.ID)
+	names, err := store.DomainNamesForAlias(ctx, h.opts.DB, r.scope, r.alias.ID)
 	if err != nil {
 		h.opts.Log.WarnContext(ctx, "interaction domains not read",
 			slog.String("alias", r.alias.Label), slog.Any("error", err))
@@ -385,13 +409,11 @@ func (h *challenge) openInteraction(c echo.Context, r *resolved) {
 	// The project, copied in for the same reason as the domain names: this row
 	// keeps no foreign keys, and a load balancer that is later deleted would otherwise
 	// leave its history attributable to nothing.
-	var projectID *int64
-	if pid, err := store.ProjectIDForLoadBalancer(ctx, h.opts.DB, r.alias.LoadBalancerID); err != nil {
-		h.opts.Log.WarnContext(ctx, "interaction project not read",
-			slog.String("alias", r.alias.Label), slog.Any("error", err))
-	} else {
-		projectID = &pid
-	}
+	//
+	// Since design P3 the alias carries every ancestor a grant may name, so this
+	// is a field read rather than the query it used to be — one fewer datastore
+	// round trip on the publish path.
+	projectID := &r.alias.ProjectID
 
 	ip := c.RealIP()
 	in := &model.ChallengeInteraction{

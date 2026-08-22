@@ -58,8 +58,8 @@ type DomainCreation struct {
 // The alias belongs to exactly one load balancer: if the challenge name is already
 // claimed by a different load balancer, the creation is refused and the error names
 // that load balancer.
-func CreateDomain(ctx context.Context, db *gorm.DB, loadBalancerID int64, name string, useDomainLabel bool, includeCounterpart bool) (*DomainCreation, error) {
-	if _, err := store.GetLoadBalancer(ctx, db, loadBalancerID); err != nil {
+func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID, name string, useDomainLabel bool, includeCounterpart bool) (*DomainCreation, error) {
+	if _, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID); err != nil {
 		return nil, err
 	}
 
@@ -69,19 +69,19 @@ func CreateDomain(ctx context.Context, db *gorm.DB, loadBalancerID int64, name s
 	// load balancer's domains as they are *before* this request, which is also why a pair
 	// never warns about itself: a member is not in the list, and in any case a counterpart
 	// differs only by the `*.` prefix, which coverageWarnings never treats as coverage.
-	siblings, err := store.ListDomainsForLoadBalancer(ctx, db, loadBalancerID)
+	siblings, err := store.ListDomainsForLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
 		return nil, err
 	}
 
-	primary, warnings, err := checkDomainName(ctx, db, name, siblings)
+	primary, warnings, err := checkDomainName(ctx, db, sc, name, siblings)
 	if err != nil {
 		return nil, err
 	}
 	names := []string{primary}
 	if includeCounterpart {
 		counterpart := dnsname.Counterpart(primary)
-		checked, w, err := checkDomainName(ctx, db, counterpart, siblings)
+		checked, w, err := checkDomainName(ctx, db, sc, counterpart, siblings)
 		if err != nil {
 			// The operator typed `primary`; say which derived name was refused
 			// and why, rather than leaving them to work out where `*.co.uk`
@@ -99,7 +99,7 @@ func CreateDomain(ctx context.Context, db *gorm.DB, loadBalancerID int64, name s
 	switch {
 	case err == nil:
 		if alias.LoadBalancerID != loadBalancerID {
-			owner := describeLoadBalancer(ctx, db, alias.LoadBalancerID)
+			owner := describeLoadBalancer(ctx, db, sc, alias.LoadBalancerID)
 			return nil, fmt.Errorf("%w: the challenge name %q for %q is already owned by %s; "+
 				"an alias belongs to exactly one load balancer", ErrConflict, challenge, primary, owner)
 		}
@@ -111,7 +111,7 @@ func CreateDomain(ctx context.Context, db *gorm.DB, loadBalancerID int64, name s
 
 	created := alias == nil
 	if created {
-		label, err := resolveLabel(ctx, db, challenge, useDomainLabel)
+		label, err := resolveLabel(ctx, db, sc, challenge, useDomainLabel)
 		if err != nil {
 			return nil, err
 		}
@@ -124,13 +124,13 @@ func CreateDomain(ctx context.Context, db *gorm.DB, loadBalancerID int64, name s
 
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if created {
-			if err := store.CreateAlias(ctx, tx, alias); err != nil {
+			if err := store.CreateAlias(ctx, tx, sc, alias); err != nil {
 				return err
 			}
 		}
 		for _, d := range domains {
 			d.AliasID = alias.ID
-			if err := store.CreateDomain(ctx, tx, d); err != nil {
+			if err := store.CreateDomain(ctx, tx, sc, d); err != nil {
 				return err
 			}
 		}
@@ -148,15 +148,15 @@ func CreateDomain(ctx context.Context, db *gorm.DB, loadBalancerID int64, name s
 // the load balancer's existing domains — and returns the normalized name. It
 // writes nothing, so it can be run for both names of a pair before either row
 // exists (design B3).
-func checkDomainName(ctx context.Context, db *gorm.DB, name string, siblings []model.Domain) (string, []dnsname.Warning, error) {
+func checkDomainName(ctx context.Context, db *gorm.DB, sc store.Scope, name string, siblings []model.Domain) (string, []dnsname.Warning, error) {
 	normalized, warnings, err := dnsname.ValidateDomain(name)
 	if err != nil {
 		return "", nil, err
 	}
 	domainName := normalized.String()
 
-	if existing, err := store.FindDomainByName(ctx, db, domainName); err == nil {
-		owner := describeLoadBalancer(ctx, db, existing.LoadBalancerID)
+	if existing, err := store.FindDomainByName(ctx, db, sc, domainName); err == nil {
+		owner := describeLoadBalancer(ctx, db, sc, existing.LoadBalancerID)
 		return "", nil, fmt.Errorf("%w: domain %q already exists on %s", ErrConflict, domainName, owner)
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil, err
@@ -190,11 +190,11 @@ func coverageWarnings(name string, siblings []model.Domain) []dnsname.Warning {
 // resolveLabel picks the label of a new alias: a fresh random one, or — with
 // ACME_ALIAS_USE_DOMAIN — the one derived from the challenge name, with
 // today's numeric suffix if that is taken (design A4).
-func resolveLabel(ctx context.Context, db *gorm.DB, challenge string, useDomainLabel bool) (string, error) {
+func resolveLabel(ctx context.Context, db *gorm.DB, sc store.Scope, challenge string, useDomainLabel bool) (string, error) {
 	// ponytail: every alias is loaded to test the label for collisions.
 	// Ceiling: O(aliases) per domain creation, fine for the low thousands this
 	// service holds; upgrade path is a FindAliasByLabel query in store.
-	aliases, err := store.ListAliases(ctx, db)
+	aliases, err := store.ListAllAliases(ctx, db)
 	if err != nil {
 		return "", err
 	}
@@ -237,23 +237,23 @@ func resolveLabel(ctx context.Context, db *gorm.DB, challenge string, useDomainL
 // is what stops further challenge writes for the name. The returned bool is
 // true when a label disappeared from the served zone, so the caller knows to
 // refresh the zone view.
-func DeleteDomain(ctx context.Context, db *gorm.DB, domainID int64) (aliasRemoved bool, err error) {
-	d, err := store.GetDomain(ctx, db, domainID)
+func DeleteDomain(ctx context.Context, db *gorm.DB, sc store.Scope, domainID model.ID) (aliasRemoved bool, err error) {
+	d, err := store.GetDomain(ctx, db, sc, domainID)
 	if err != nil {
 		return false, err
 	}
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := store.DeleteDomain(ctx, tx, domainID); err != nil {
+		if err := store.DeleteDomain(ctx, tx, sc, domainID); err != nil {
 			return err
 		}
-		remaining, err := store.ListDomainsForAlias(ctx, tx, d.AliasID)
+		remaining, err := store.ListDomainsForAlias(ctx, tx, sc, d.AliasID)
 		if err != nil {
 			return err
 		}
 		if len(remaining) > 0 {
 			return nil
 		}
-		if err := store.DeleteAlias(ctx, tx, d.AliasID); err != nil {
+		if err := store.DeleteAlias(ctx, tx, sc, d.AliasID); err != nil {
 			return err
 		}
 		aliasRemoved = true
@@ -268,12 +268,12 @@ func DeleteDomain(ctx context.Context, db *gorm.DB, domainID int64) (aliasRemove
 // describeLoadBalancer renders "project-slug/loadbalancer-slug" for an error message, falling
 // back to the bare id if the load balancer cannot be loaded — an error about a
 // conflict must never be replaced by an error about rendering the conflict.
-func describeLoadBalancer(ctx context.Context, db *gorm.DB, loadBalancerID int64) string {
-	lb, err := store.GetLoadBalancer(ctx, db, loadBalancerID)
+func describeLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID) string {
+	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
 		return fmt.Sprintf("load balancer %d", loadBalancerID)
 	}
-	project, err := store.GetProject(ctx, db, lb.ProjectID)
+	project, err := store.GetProject(ctx, db, sc, lb.ProjectID)
 	if err != nil {
 		return fmt.Sprintf("load balancer %q", lb.Slug)
 	}

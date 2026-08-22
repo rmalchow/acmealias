@@ -10,6 +10,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/adminctl"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 	"gorm.io/gorm"
 )
@@ -125,14 +126,24 @@ func cmdAdminctl(args []string) int {
 	}
 
 	ctx := context.Background()
-	if err := dispatchAdminctl(ctx, db, cfg, noun, verb, rest); err != nil {
+	// The CLI operates inside the deployment's single account (design P19, task
+	// 11.3). It is the break-glass path and its authority is "had the connection
+	// string", but that is a reason to record what it did, not a reason to let it
+	// write across tenants by accident: a scope it did not choose is one fewer way
+	// to touch the wrong account at three in the morning.
+	sc, err := store.ScopeForBootstrap(ctx, db)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := dispatchAdminctl(ctx, db, sc, cfg, noun, verb, rest); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
 	}
 	return 0
 }
 
-func dispatchAdminctl(ctx context.Context, db *gorm.DB, cfg config.Config, noun, verb string, args []string) error {
+func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg config.Config, noun, verb string, args []string) error {
 	out := os.Stdout
 	switch noun + " " + verb {
 	case "project create":
@@ -140,14 +151,14 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, cfg config.Config, noun,
 		slug := fs.String("slug", "", "project slug")
 		name := fs.String("name", "", "project name")
 		fs.Parse(args)
-		return adminctl.ProjectCreate(ctx, db, out, *slug, *name)
+		return adminctl.ProjectCreate(ctx, db, sc, out, *slug, *name)
 	case "project list":
-		return adminctl.ProjectList(ctx, db, out)
+		return adminctl.ProjectList(ctx, db, sc, out)
 	case "project delete":
 		fs := flag.NewFlagSet("project delete", flag.ExitOnError)
 		slug := fs.String("slug", "", "project slug")
 		fs.Parse(args)
-		return adminctl.ProjectDelete(ctx, db, out, *slug)
+		return adminctl.ProjectDelete(ctx, db, sc, out, *slug)
 
 	case "loadbalancer create":
 		fs := flag.NewFlagSet("loadbalancer create", flag.ExitOnError)
@@ -155,18 +166,18 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, cfg config.Config, noun,
 		slug := fs.String("slug", "", "load balancer slug")
 		name := fs.String("name", "", "load balancer name")
 		fs.Parse(args)
-		return adminctl.LoadBalancerCreate(ctx, db, out, *project, *slug, *name)
+		return adminctl.LoadBalancerCreate(ctx, db, sc, out, *project, *slug, *name)
 	case "loadbalancer delete":
 		fs := flag.NewFlagSet("loadbalancer delete", flag.ExitOnError)
 		loadbalancer := fs.String("loadbalancer", "", "load balancer reference (project-slug/loadbalancer-slug or id)")
 		fs.Parse(args)
-		return adminctl.LoadBalancerDelete(ctx, db, out, *loadbalancer)
+		return adminctl.LoadBalancerDelete(ctx, db, sc, out, *loadbalancer)
 	case "loadbalancer dns":
 		if len(args) != 1 {
 			return fmt.Errorf("usage: acmeservice adminctl loadbalancer dns REF")
 		}
 		opts := inventory.PlanOptions{Zone: cfg.Zone, CAAIssuers: cfg.CAAIssuers}
-		return adminctl.LoadBalancerDNS(ctx, db, out, opts, args[0])
+		return adminctl.LoadBalancerDNS(ctx, db, sc, out, opts, args[0])
 
 	case "node add":
 		fs := flag.NewFlagSet("node add", flag.ExitOnError)
@@ -175,12 +186,16 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, cfg config.Config, noun,
 		ipv4 := fs.String("ipv4", "", "node IPv4 address")
 		ipv6 := fs.String("ipv6", "", "node IPv6 address")
 		fs.Parse(args)
-		return adminctl.NodeAdd(ctx, db, out, *loadbalancer, *label, *ipv4, *ipv6)
+		return adminctl.NodeAdd(ctx, db, sc, out, *loadbalancer, *label, *ipv4, *ipv6)
 	case "node delete":
 		fs := flag.NewFlagSet("node delete", flag.ExitOnError)
-		id := fs.Int64("id", 0, "node id")
+		id := fs.String("id", "", "node id")
 		fs.Parse(args)
-		return adminctl.NodeDelete(ctx, db, out, *id)
+		parsed, err := model.ParseID(*id)
+		if err != nil {
+			return fmt.Errorf("--id must be an identifier: %w", err)
+		}
+		return adminctl.NodeDelete(ctx, db, sc, out, parsed)
 
 	case "domain create":
 		fs := flag.NewFlagSet("domain create", flag.ExitOnError)
@@ -189,17 +204,21 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, cfg config.Config, noun,
 		includeWildcard := fs.Bool("include-wildcard", false,
 			"also create the name's counterpart: the wildcard of a plain name, the base name of a wildcard")
 		fs.Parse(args)
-		return adminctl.DomainCreate(ctx, db, out, cfg.Zone, cfg.AliasUseDomain, *loadbalancer, *name, *includeWildcard)
+		return adminctl.DomainCreate(ctx, db, sc, out, cfg.Zone, cfg.AliasUseDomain, *loadbalancer, *name, *includeWildcard)
 	case "domain list":
 		fs := flag.NewFlagSet("domain list", flag.ExitOnError)
 		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
 		fs.Parse(args)
-		return adminctl.DomainList(ctx, db, out, *loadbalancer)
+		return adminctl.DomainList(ctx, db, sc, out, *loadbalancer)
 	case "domain delete":
 		fs := flag.NewFlagSet("domain delete", flag.ExitOnError)
-		id := fs.Int64("id", 0, "domain id")
+		id := fs.String("id", "", "domain id")
 		fs.Parse(args)
-		return adminctl.DomainDelete(ctx, db, out, *id)
+		parsed, err := model.ParseID(*id)
+		if err != nil {
+			return fmt.Errorf("--id must be an identifier: %w", err)
+		}
+		return adminctl.DomainDelete(ctx, db, sc, out, parsed)
 
 	case "key create":
 		fs := flag.NewFlagSet("key create", flag.ExitOnError)
@@ -215,17 +234,21 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, cfg config.Config, noun,
 				return fmt.Errorf("--expires: %w", err)
 			}
 		}
-		return adminctl.KeyCreate(ctx, db, out, *loadbalancer, *name, d)
+		return adminctl.KeyCreate(ctx, db, sc, out, *loadbalancer, *name, d)
 	case "key list":
 		fs := flag.NewFlagSet("key list", flag.ExitOnError)
 		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
 		fs.Parse(args)
-		return adminctl.KeyList(ctx, db, out, *loadbalancer)
+		return adminctl.KeyList(ctx, db, sc, out, *loadbalancer)
 	case "key revoke":
 		fs := flag.NewFlagSet("key revoke", flag.ExitOnError)
-		id := fs.Int64("id", 0, "key id")
+		id := fs.String("id", "", "key id")
 		fs.Parse(args)
-		return adminctl.KeyRevoke(ctx, db, out, *id)
+		parsed, err := model.ParseID(*id)
+		if err != nil {
+			return fmt.Errorf("--id must be an identifier: %w", err)
+		}
+		return adminctl.KeyRevoke(ctx, db, sc, out, parsed)
 
 	default:
 		usage()

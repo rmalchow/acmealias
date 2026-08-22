@@ -66,7 +66,7 @@ func OpenInteraction(ctx context.Context, db *gorm.DB, in *model.ChallengeIntera
 // "Every" rather than "the": a cleanup for a value that somehow opened twice
 // should leave nothing live behind, and closing rows that are already closed is
 // not an error — clients retry cleanups.
-func CloseInteraction(ctx context.Context, db *gorm.DB, aliasID int64, value string) (validated, unqueried int, err error) {
+func CloseInteraction(ctx context.Context, db *gorm.DB, aliasID model.ID, value string) (validated, unqueried int, err error) {
 	var closed []model.ChallengeInteraction
 	res := db.WithContext(ctx).
 		Model(&closed).
@@ -112,7 +112,7 @@ func CloseInteraction(ctx context.Context, db *gorm.DB, aliasID int64, value str
 // interaction closed. unmatched counts those cases so the caller can report
 // them separately from a genuinely unresolved label — the two mean different
 // things (see obs.AttributedFalseNoInteraction).
-func ApplyQueryObservations(ctx context.Context, db *gorm.DB, obs map[int64]queryobs.Observation, from, to time.Time) (unmatched int, err error) {
+func ApplyQueryObservations(ctx context.Context, db *gorm.DB, obs map[model.ID]queryobs.Observation, from, to time.Time) (unmatched int, err error) {
 	for aliasID, o := range obs {
 		if o.Count <= 0 {
 			continue
@@ -152,7 +152,7 @@ func ApplyQueryObservations(ctx context.Context, db *gorm.DB, obs map[int64]quer
 // The number dropped is returned so the caller can count it: silently discarding
 // observations would hide a label-resolution bug as "the CA never queried
 // anything", which is the same symptom as the failure this history reports.
-func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.Observation) (map[int64]queryobs.Observation, int, error) {
+func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.Observation) (map[model.ID]queryobs.Observation, int, error) {
 	if len(obs) == 0 {
 		return nil, 0, nil
 	}
@@ -162,7 +162,7 @@ func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.O
 	}
 
 	var rows []struct {
-		ID    int64
+		ID    model.ID
 		Label string
 	}
 	err := db.WithContext(ctx).
@@ -174,7 +174,7 @@ func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.O
 		return nil, 0, fmt.Errorf("store: resolve alias labels: %w", err)
 	}
 
-	out := make(map[int64]queryobs.Observation, len(rows))
+	out := make(map[model.ID]queryobs.Observation, len(rows))
 	for _, r := range rows {
 		out[r.ID] = obs[r.Label]
 	}
@@ -240,8 +240,26 @@ func DeleteOldClosedInteractions(ctx context.Context, db *gorm.DB, olderThan tim
 // being able to list exactly those turns a vague "renewals are failing" into a
 // list of domains to go and fix.
 func ListInteractionsForLoadBalancer(
-	ctx context.Context, db *gorm.DB, loadBalancerID int64, query string, onlyUnqueried bool, limit, offset int,
+	ctx context.Context, db *gorm.DB, sc Scope, loadBalancerID model.ID, query string, onlyUnqueried bool, limit, offset int,
 ) ([]model.ChallengeInteraction, int64, error) {
+	// The interaction history carries no account_id and no foreign keys, on
+	// purpose (000002): a history that disappears when its subject is deleted
+	// cannot answer the question it exists for. Confinement therefore happens one
+	// level up — the load balancer named here must belong to the scope, and the
+	// listing is refused as not-found when it does not.
+	//
+	// The consequence, stated rather than discovered: history for a load balancer
+	// that has since been deleted is not reachable through this listing, because
+	// there is no row left to prove which account it belonged to. It is still in
+	// the table, and reaching it is a staff-plane question rather than a tenant
+	// one.
+	if err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		var lb model.LoadBalancer
+		return sc.Where(tx).First(&lb, "id = ?", loadBalancerID).Error
+	}); err != nil {
+		return nil, 0, fmt.Errorf("store: list interactions for load balancer %s: %w", loadBalancerID, err)
+	}
+
 	base := func() *gorm.DB {
 		q := db.WithContext(ctx).
 			Model(&model.ChallengeInteraction{}).

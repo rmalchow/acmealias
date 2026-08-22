@@ -37,7 +37,11 @@ func (a *admin) plan(c echo.Context) (*inventory.DNSPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return inventory.Plan(c.Request().Context(), a.db(), id, a.planOptions())
+	sc, err := a.scope(c)
+	if err != nil {
+		return nil, err
+	}
+	return inventory.Plan(c.Request().Context(), a.db(), sc, id, a.planOptions())
 }
 
 func (a *admin) getPlan(c echo.Context) error {

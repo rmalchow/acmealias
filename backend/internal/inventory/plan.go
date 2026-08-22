@@ -49,20 +49,20 @@ type DNSPlan struct {
 }
 
 // Plan generates the DNS plan for a load balancer (design D5).
-func Plan(ctx context.Context, db *gorm.DB, loadBalancerID int64, opts PlanOptions) (*DNSPlan, error) {
-	lb, err := store.GetLoadBalancer(ctx, db, loadBalancerID)
+func Plan(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID, opts PlanOptions) (*DNSPlan, error) {
+	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
 		return nil, err
 	}
-	project, err := store.GetProject(ctx, db, lb.ProjectID)
+	project, err := store.GetProject(ctx, db, sc, lb.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	domains, err := store.ListDomainsForLoadBalancer(ctx, db, loadBalancerID)
+	domains, err := store.ListDomainsForLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
 		return nil, err
 	}
-	aliases, err := store.ListAliasesForLoadBalancer(ctx, db, loadBalancerID)
+	aliases, err := store.ListAliasesForLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,11 +105,11 @@ func buildPlan(project *model.Project, lb *model.LoadBalancer, nodes []model.LBN
 	// One CNAME per *distinct* challenge name. Aliases are already keyed by
 	// challenge name, so iterating them — rather than the domains — is what
 	// collapses `example.com` and `*.example.com` into one row.
-	byID := make(map[int64]model.Alias, len(aliases))
+	byID := make(map[model.ID]model.Alias, len(aliases))
 	for _, a := range aliases {
 		byID[a.ID] = a
 	}
-	seen := make(map[int64]bool, len(aliases))
+	seen := make(map[model.ID]bool, len(aliases))
 	for _, d := range domains {
 		a, ok := byID[d.AliasID]
 		if !ok || seen[a.ID] {

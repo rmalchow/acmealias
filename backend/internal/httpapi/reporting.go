@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/reporting"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
@@ -47,7 +48,7 @@ type usageBucketView struct {
 }
 
 type usageResponse struct {
-	ProjectID int64             `json:"projectId"`
+	ProjectID model.ID          `json:"projectId"`
 	From      time.Time         `json:"from"`
 	To        time.Time         `json:"to"`
 	Bucket    string            `json:"bucket"`
@@ -69,11 +70,15 @@ type usageResponse struct {
 // appearing in a report somebody quotes — "attempts: 41" means nothing without
 // the period, and the caller is the only one who knows which period they mean.
 func (a *admin) getProjectUsage(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
-	if _, err := store.GetProject(c.Request().Context(), a.db(), id); err != nil {
+	if _, err := store.GetProject(c.Request().Context(), a.db(), sc, id); err != nil {
 		return err
 	}
 
@@ -97,7 +102,7 @@ func (a *admin) getProjectUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	usage, err := reporting.ProjectAttempts(c.Request().Context(), a.db(), id, *from, *to, size)
+	usage, err := reporting.ProjectAttempts(c.Request().Context(), a.db(), sc, id, *from, *to, size)
 	if err != nil {
 		return err
 	}
@@ -124,9 +129,9 @@ type inventoryPointView struct {
 }
 
 type inventoryHistoryResponse struct {
-	ProjectID int64  `json:"projectId"`
-	From      string `json:"from"`
-	To        string `json:"to"`
+	ProjectID model.ID `json:"projectId"`
+	From      string   `json:"from"`
+	To        string   `json:"to"`
 	// Recorded is false when no daily snapshot has ever been written for this
 	// project — the service has been up for less than an hour, or the snapshot
 	// job is not running. Same rule as usage: not a zero.
@@ -143,12 +148,16 @@ type inventoryHistoryResponse struct {
 // nobody measured, and this table exists precisely because inventory size cannot
 // be reconstructed after the fact.
 func (a *admin) getProjectInventoryHistory(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
 	id, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
-	if _, err := store.GetProject(ctx, a.db(), id); err != nil {
+	if _, err := store.GetProject(ctx, a.db(), sc, id); err != nil {
 		return err
 	}
 
@@ -160,7 +169,7 @@ func (a *admin) getProjectInventoryHistory(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "from and to are required")
 	}
 
-	hist, err := reporting.ProjectInventoryHistory(ctx, a.db(), id, *from, *to)
+	hist, err := reporting.ProjectInventoryHistory(ctx, a.db(), sc, id, *from, *to)
 	if err != nil {
 		return err
 	}
@@ -175,7 +184,7 @@ func (a *admin) getProjectInventoryHistory(c echo.Context) error {
 	// Today's counts read live rather than from the snapshot: the console shows
 	// "current" beside "historical", and an operator who just added a domain
 	// should see it without waiting for the next snapshot tick.
-	cur, err := reporting.CurrentInventory(ctx, a.db(), id)
+	cur, err := reporting.CurrentInventory(ctx, a.db(), sc, id)
 	if err != nil {
 		return err
 	}

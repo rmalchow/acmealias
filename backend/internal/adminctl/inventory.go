@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -19,8 +18,8 @@ import (
 // rather than in internal/inventory: store has no BySlug query, and the CLI
 // is the only caller that ever needs to turn an operator-typed slug into an
 // id.
-func findProjectBySlug(ctx context.Context, db *gorm.DB, slug string) (*model.Project, error) {
-	ps, err := store.ListProjects(ctx, db)
+func findProjectBySlug(ctx context.Context, db *gorm.DB, sc store.Scope, slug string) (*model.Project, error) {
+	ps, err := store.ListProjects(ctx, db, sc)
 	if err != nil {
 		return nil, err
 	}
@@ -35,19 +34,19 @@ func findProjectBySlug(ctx context.Context, db *gorm.DB, slug string) (*model.Pr
 // resolveLoadBalancerRef resolves the --loadbalancer value the CLI accepts everywhere: a
 // bare numeric id, or "project-slug/loadbalancer-slug" the way the operator sees it
 // in `loadbalancer list` output.
-func resolveLoadBalancerRef(ctx context.Context, db *gorm.DB, ref string) (*model.LoadBalancer, error) {
-	if id, err := strconv.ParseInt(ref, 10, 64); err == nil {
-		return store.GetLoadBalancer(ctx, db, id)
+func resolveLoadBalancerRef(ctx context.Context, db *gorm.DB, sc store.Scope, ref string) (*model.LoadBalancer, error) {
+	if id, err := model.ParseID(ref); err == nil {
+		return store.GetLoadBalancer(ctx, db, sc, id)
 	}
 	projectSlug, lbSlug, ok := strings.Cut(ref, "/")
 	if !ok {
 		return nil, fmt.Errorf("--loadbalancer %q: expected a numeric id or \"project-slug/loadbalancer-slug\"", ref)
 	}
-	project, err := findProjectBySlug(ctx, db, projectSlug)
+	project, err := findProjectBySlug(ctx, db, sc, projectSlug)
 	if err != nil {
 		return nil, err
 	}
-	lbs, err := store.ListLoadBalancersForProject(ctx, db, project.ID)
+	lbs, err := store.ListLoadBalancersForProject(ctx, db, sc, project.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -60,11 +59,11 @@ func resolveLoadBalancerRef(ctx context.Context, db *gorm.DB, ref string) (*mode
 }
 
 // ProjectCreate creates a project and prints the result.
-func ProjectCreate(ctx context.Context, db *gorm.DB, out io.Writer, slug, name string) error {
+func ProjectCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, slug, name string) error {
 	var p *model.Project
-	err := mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
+	err := mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		p, err = inventory.CreateProject(ctx, tx, slug, name)
+		p, err = inventory.CreateProject(ctx, tx, sc, slug, name)
 		if err != nil {
 			return nil, err
 		}
@@ -82,8 +81,8 @@ func ProjectCreate(ctx context.Context, db *gorm.DB, out io.Writer, slug, name s
 
 // ProjectList prints every project, its load balancers, and each load balancer's nodes and
 // domains.
-func ProjectList(ctx context.Context, db *gorm.DB, out io.Writer) error {
-	ps, err := inventory.ListProjects(ctx, db)
+func ProjectList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer) error {
+	ps, err := inventory.ListProjects(ctx, db, sc)
 	if err != nil {
 		return err
 	}
@@ -118,13 +117,13 @@ func formatAddrs(n model.LBNode) string {
 }
 
 // ProjectDelete deletes a project by slug.
-func ProjectDelete(ctx context.Context, db *gorm.DB, out io.Writer, slug string) error {
-	p, err := findProjectBySlug(ctx, db, slug)
+func ProjectDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, slug string) error {
+	p, err := findProjectBySlug(ctx, db, sc, slug)
 	if err != nil {
 		return err
 	}
-	err = mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := inventory.DeleteProject(ctx, tx, p.ID); err != nil {
+	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
+		if err := inventory.DeleteProject(ctx, tx, sc, p.ID); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -140,15 +139,15 @@ func ProjectDelete(ctx context.Context, db *gorm.DB, out io.Writer, slug string)
 }
 
 // LoadBalancerCreate creates a load balancer under a project.
-func LoadBalancerCreate(ctx context.Context, db *gorm.DB, out io.Writer, projectSlug, slug, name string) error {
-	project, err := findProjectBySlug(ctx, db, projectSlug)
+func LoadBalancerCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, projectSlug, slug, name string) error {
+	project, err := findProjectBySlug(ctx, db, sc, projectSlug)
 	if err != nil {
 		return err
 	}
 	var p *model.LoadBalancer
-	err = mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
+	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		p, err = inventory.CreateLoadBalancer(ctx, tx, project.ID, slug, name)
+		p, err = inventory.CreateLoadBalancer(ctx, tx, sc, project.ID, slug, name)
 		if err != nil {
 			return nil, err
 		}
@@ -165,13 +164,13 @@ func LoadBalancerCreate(ctx context.Context, db *gorm.DB, out io.Writer, project
 }
 
 // LoadBalancerDelete deletes a load balancer.
-func LoadBalancerDelete(ctx context.Context, db *gorm.DB, out io.Writer, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, ref)
+func LoadBalancerDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref string) error {
+	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
-	err = mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := inventory.DeleteLoadBalancer(ctx, tx, lb.ID); err != nil {
+	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
+		if err := inventory.DeleteLoadBalancer(ctx, tx, sc, lb.ID); err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
@@ -187,15 +186,15 @@ func LoadBalancerDelete(ctx context.Context, db *gorm.DB, out io.Writer, ref str
 }
 
 // NodeAdd adds a node to a load balancer.
-func NodeAdd(ctx context.Context, db *gorm.DB, out io.Writer, ref, label, ipv4, ipv6 string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, ref)
+func NodeAdd(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref, label, ipv4, ipv6 string) error {
+	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
 	var n *model.LBNode
-	err = mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
+	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		n, err = inventory.AddNode(ctx, tx, lb.ID, label, ipv4, ipv6)
+		n, err = inventory.AddNode(ctx, tx, sc, lb.ID, label, ipv4, ipv6)
 		if err != nil {
 			return nil, err
 		}
@@ -212,21 +211,18 @@ func NodeAdd(ctx context.Context, db *gorm.DB, out io.Writer, ref, label, ipv4, 
 }
 
 // NodeDelete removes a node by id.
-func NodeDelete(ctx context.Context, db *gorm.DB, out io.Writer, id int64) error {
-	err := mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
+func NodeDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, id model.ID) error {
+	err := mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		// Read the node first: an entry that names only an id is unreadable
 		// the moment the row it points at is gone.
 		var n model.LBNode
-		if err := tx.WithContext(ctx).First(&n, id).Error; err != nil {
-			return nil, fmt.Errorf("get lb node %d: %w", id, err)
+		if err := tx.WithContext(ctx).First(&n, "id = ?", id).Error; err != nil {
+			return nil, fmt.Errorf("get lb node %s: %w", id, err)
 		}
-		if err := inventory.DeleteNode(ctx, tx, id); err != nil {
+		if err := inventory.DeleteNode(ctx, tx, sc, id); err != nil {
 			return nil, err
 		}
-		projectID, err := store.ProjectIDForLoadBalancer(ctx, tx, n.LoadBalancerID)
-		if err != nil {
-			return nil, err
-		}
+		projectID := n.ProjectID
 		return []authz.Event{{
 			Action: authz.ActionNodeDelete, ObjectType: authz.ObjectNode,
 			ObjectID: &id, ObjectLabel: n.Label, ProjectID: &projectID, Before: n,
@@ -244,15 +240,15 @@ func NodeDelete(ctx context.Context, db *gorm.DB, out io.Writer, id int64) error
 // publish. This is the output an operator copies verbatim into an email, so it
 // is formatted exactly as it should be pasted. A pair prints two domain lines
 // and still one CNAME, because the two names share one alias.
-func DomainCreate(ctx context.Context, db *gorm.DB, out io.Writer, zone string, useDomainLabel bool, ref, name string, includeWildcard bool) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, ref)
+func DomainCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, zone string, useDomainLabel bool, ref, name string, includeWildcard bool) error {
+	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
 	var result *inventory.DomainCreation
-	err = mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
+	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		result, err = inventory.CreateDomain(ctx, tx, lb.ID, name, useDomainLabel, includeWildcard)
+		result, err = inventory.CreateDomain(ctx, tx, sc, lb.ID, name, useDomainLabel, includeWildcard)
 		if err != nil {
 			return nil, err
 		}
@@ -300,12 +296,12 @@ func cnameLine(challengeFQDN, label, zone string) string {
 }
 
 // DomainList prints every domain on a load balancer.
-func DomainList(ctx context.Context, db *gorm.DB, out io.Writer, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, ref)
+func DomainList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref string) error {
+	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
-	domains, err := store.ListDomainsForLoadBalancer(ctx, db, lb.ID)
+	domains, err := store.ListDomainsForLoadBalancer(ctx, db, sc, lb.ID)
 	if err != nil {
 		return err
 	}
@@ -320,25 +316,22 @@ func DomainList(ctx context.Context, db *gorm.DB, out io.Writer, ref string) err
 }
 
 // DomainDelete removes a domain by id.
-func DomainDelete(ctx context.Context, db *gorm.DB, out io.Writer, id int64) error {
-	d, err := store.GetDomain(ctx, db, id)
+func DomainDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, id model.ID) error {
+	d, err := store.GetDomain(ctx, db, sc, id)
 	if err != nil {
 		return err
 	}
 	var aliasRemoved bool
-	err = mutate(ctx, db, func(tx *gorm.DB) ([]authz.Event, error) {
-		alias, err := store.GetAlias(ctx, tx, d.AliasID)
+	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
+		alias, err := store.GetAlias(ctx, tx, sc, d.AliasID)
 		if err != nil {
 			return nil, err
 		}
-		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, id)
+		aliasRemoved, err = inventory.DeleteDomain(ctx, tx, sc, id)
 		if err != nil {
 			return nil, err
 		}
-		projectID, err := store.ProjectIDForLoadBalancer(ctx, tx, d.LoadBalancerID)
-		if err != nil {
-			return nil, err
-		}
+		projectID := d.ProjectID
 		events := []authz.Event{{
 			Action: authz.ActionDomainDelete, ObjectType: authz.ObjectDomain,
 			ObjectID: &id, ObjectLabel: d.Name, ProjectID: &projectID, Before: d,

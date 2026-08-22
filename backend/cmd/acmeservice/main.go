@@ -336,11 +336,11 @@ func sampleActiveChallenges(ctx context.Context, db *gorm.DB, m *obs.Metrics, in
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		rows, err := store.ListActive(ctx, db)
+		n, err := store.CountActive(ctx, db)
 		if err != nil {
 			log.Warn("active challenge count not sampled", "error", err)
 		} else {
-			m.ActiveChallenges.Set(float64(len(rows)))
+			m.ActiveChallenges.Set(float64(n))
 		}
 		select {
 		case <-ctx.Done():
