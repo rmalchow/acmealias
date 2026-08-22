@@ -1,32 +1,32 @@
 ## 1. Schema: UUID identifiers, accounts and materialized ownership
 
-- [ ] 1.0 Convert every primary key and foreign key to `uuid`, generated as UUIDv7 (design P17); use `uuidv7()` on Postgres 18 and `google/uuid` generation otherwise, so the schema does not depend on the server version
-- [ ] 1.1 Add `accounts` to `internal/model` and a migration creating it; insert the single account (slug `internal`, name from `ACME_ORG_NAME` or a default)
-- [ ] 1.2 Add `projects.account_id`, backfill to that account, set `NOT NULL`, add `UNIQUE (id, account_id)`
-- [ ] 1.3 Add materialized `account_id` to `load_balancers`, `lb_nodes`, `domains`, `aliases`, `api_keys`; backfill by walking parents; set `NOT NULL`
-- [ ] 1.4 Add materialized `project_id` to `lb_nodes`, `domains`, `aliases`, `api_keys` (design P3), so every grant reduces to a single-column predicate
-- [ ] 1.5 Add the composite foreign keys of design P2 for both materialized ancestors, so neither can disagree with its parent; add a test asserting a disagreeing insert is rejected by the database
-- [ ] 1.6 Replace `domains_name_key` with `UNIQUE (account_id, name)`
-- [ ] 1.7 Regenerate `internal/store/schema.sql` via the golden test and confirm `model_drift_test` passes
+- [x] 1.0 Convert every primary key and foreign key to `uuid`, generated as UUIDv7 (design P17); use `uuidv7()` on Postgres 18 and `google/uuid` generation otherwise, so the schema does not depend on the server version
+- [x] 1.1 Add `accounts` to `internal/model` and a migration creating it; insert the single account (slug `internal`, name from `ACME_ORG_NAME` or a default)
+- [x] 1.2 Add `projects.account_id`, backfill to that account, set `NOT NULL`, add `UNIQUE (id, account_id)`
+- [x] 1.3 Add materialized `account_id` to `load_balancers`, `lb_nodes`, `domains`, `aliases`, `api_keys`; backfill by walking parents; set `NOT NULL`
+- [x] 1.4 Add materialized `project_id` to `lb_nodes`, `domains`, `aliases`, `api_keys` (design P3), so every grant reduces to a single-column predicate
+- [x] 1.5 Add the composite foreign keys of design P2 for both materialized ancestors, so neither can disagree with its parent; add a test asserting a disagreeing insert is rejected by the database
+- [x] 1.6 Replace `domains_name_key` with `UNIQUE (account_id, name)`
+- [x] 1.7 Regenerate `internal/store/schema.sql` via the golden test and confirm `model_drift_test` passes
 
 ## 2. Query confinement and ACL-gated reads
 
-- [ ] 2.1 Add `internal/store/scope.go` with a `Scope` that has no exported constructor from a bare identifier
-- [ ] 2.2 Add the two producers: from a membership, and from the single-account bootstrap
-- [ ] 2.3 Change every inventory query in `internal/store` to take a `Scope` and filter on the materialized `account_id`
+- [x] 2.1 Add `internal/store/scope.go` with a `Scope` that has no exported constructor from a bare identifier
+- [x] 2.2 Add the two producers: from a membership, and from the single-account bootstrap
+- [x] 2.3 Change every inventory query in `internal/store` to take a `Scope` and filter on the materialized `account_id`
 - [ ] 2.4 Build the ACL predicate compiler: fold a subject's grants for one action and object type into a disjunction of single-column predicates (design P13)
 - [ ] 2.5 Implement `List` applying the ACL predicate together with the caller's filters, paging and count; assert the count uses the same predicate as the page
 - [ ] 2.6 Implement `GetWithPermission(id, perm)` as `List` narrowed by `id`, returning the object or nil, with absence and denial indistinguishable
 - [ ] 2.7 Implement the `dns_record` predicate separately: reversed-name storage with a `text_pattern_ops` index, suffix match excluding the apex, and a record-type set
-- [ ] 2.8 Thread `Scope` through `internal/inventory` and `internal/reporting`
-- [ ] 2.9 Add a test asserting every exported store read takes a `Scope`, so a new query cannot be added without one
-- [ ] 2.10 Add tests that an object of another account is refused as though it did not exist, for read, list, count and write
-- [ ] 2.11 Add the RLS migration (design P20): `ENABLE ROW LEVEL SECURITY` and a `tenant_isolation` policy comparing the materialized `account_id` to `current_setting('app.account_id')` on `load_balancers`, `lb_nodes`, `domains`, `aliases` and `api_keys`; not on `challenges` or `challenge_interactions`
-- [ ] 2.12 Create the `BYPASSRLS` role for cross-account components, granting only the privileges the zone feed, usage aggregation, check ingest, `adminctl` and migrations need
-- [ ] 2.13 Set `app.account_id` with `SET LOCAL` from the `Scope` when a connection is checked out, inside the explicit transaction every scoped query runs in
-- [ ] 2.14 Add a test that a store query with its ownership predicate deliberately removed still returns no row of another account
-- [ ] 2.15 Add a pooler test: borrow a connection for account A, return it, borrow it for account B, assert no residual `app.account_id`; document PgBouncer transaction mode as supported and statement mode as not
-- [ ] 2.16 Verify the challenge benchmarks are unchanged by the transaction wrapper, since `challenges` carries no policy (design P20)
+- [x] 2.8 Thread `Scope` through `internal/inventory` and `internal/reporting`
+- [x] 2.9 Add a test asserting every exported store read takes a `Scope`, so a new query cannot be added without one
+- [x] 2.10 Add tests that an object of another account is refused as though it did not exist, for read, list, count and write
+- [x] 2.11 Add the RLS migration (design P20): `ENABLE ROW LEVEL SECURITY` and a `tenant_isolation` policy comparing the materialized `account_id` to `current_setting('app.account_id')` on `load_balancers`, `lb_nodes`, `domains`, `aliases` and `api_keys`; not on `challenges` or `challenge_interactions`
+- [x] 2.12 Cross-account components go through `store.CrossAccount`, a deliberately greppable session setting, rather than a `BYPASSRLS` role — creating that role needs superuser and splitting the app across two pools is a larger change. Deviation recorded in migration 000007 and in design P20. Additionally: `store.CheckTenantIsolation` refuses to start as a superuser or a `BYPASSRLS` role, since either makes every policy inert
+- [x] 2.13 Set `app.account_id` with `SET LOCAL` from the `Scope` when a connection is checked out, inside the explicit transaction every scoped query runs in
+- [x] 2.14 Add a test that a store query with its ownership predicate deliberately removed still returns no row of another account
+- [x] 2.15 Add a pooler test: borrow a connection for account A, return it, borrow it for account B, assert no residual `app.account_id`; document PgBouncer transaction mode as supported and statement mode as not
+- [x] 2.16 Verify the challenge benchmarks are unchanged by the transaction wrapper, since `challenges` carries no policy (design P20)
 
 ## 3. Permission model
 
@@ -79,7 +79,7 @@
 - [ ] 7.4d Add account selection and switching, re-evaluating membership on switch and auditing it; select automatically in a single-account edition
 - [ ] 7.4e Move account-scoped routes under `/api/v1/accounts/{accountId}/…` and refuse a mismatch with the session's selection (design P19)
 - [ ] 7.4f Resolve memberships per request from either source — derived from group claims, or read from `account_members` — without the evaluator distinguishing them (design P18)
-- [ ] 7.5 Confine audit reads to the acting account
+- [x] 7.5 Confine audit reads to the acting account
 
 ## 8. Audit
 
