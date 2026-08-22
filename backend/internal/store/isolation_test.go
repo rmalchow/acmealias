@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -39,8 +40,6 @@ var crossAccountReaders = map[string]string{
 	"DeleteOldClosedInteractions": "retention over the whole history",
 	"OpenInteraction":             "written on the publish path from an alias already resolved under a scope",
 	"CloseInteraction":            "written on the withdraw path from an alias already resolved under a scope",
-	"Present":                     "challenges carry no policy; the alias was resolved under a scope",
-	"Cleanup":                     "challenges carry no policy; the alias was resolved under a scope",
 	"AppendAuditEntry":            "the entry carries its own account and is written inside the caller's transaction",
 	"CrossAccount":                "the escape itself",
 	"MembershipsFor":              "resolves which account a person may act in, before any scope exists",
@@ -318,5 +317,72 @@ func TestIntegrationScopeDoesNotSurviveAPooledConnection(t *testing.T) {
 	if len(leaked) != 0 {
 		t.Fatalf("a connection outside any scope returned %d load balancers, want 0 — "+
 			"the tenant setting survived its transaction", len(leaked))
+	}
+}
+
+// TestIntegrationChallengesInheritIsolationFromTheirAlias is the policy added in
+// migration 000010, which is the one your recursion question turned out to be
+// right about.
+//
+// challenges carries no account_id and cannot: it is written on the certificate
+// hot path and its parent is what identifies the tenant. So its policy asks "is
+// my alias visible", and the ANSWER to that runs under the caller's own
+// policies — which means the aliases policy applies inside it and the tenant
+// filter propagates down. A chain, not a cycle, so nothing recurses.
+//
+// What this asserts is that the propagation is real: a query with a valid scope
+// and no predicate of its own sees only its own account's challenge values.
+func TestIntegrationChallengesInheritIsolationFromTheirAlias(t *testing.T) {
+	db, mine, theirs, _, _ := twoAccounts(t)
+	ctx := context.Background()
+
+	// One published value in each account, against that account's own alias.
+	publish := func(sc Scope, value string) {
+		t.Helper()
+		var a model.Alias
+		if err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+			return sc.Where(tx).First(&a).Error
+		}); err != nil {
+			t.Fatalf("read alias: %v", err)
+		}
+		if _, err := Present(ctx, db, sc, a.ID, value, "k_test", time.Minute); err != nil {
+			t.Fatalf("present %q: %v", value, err)
+		}
+	}
+	publish(mine, "mine")
+	publish(theirs, "theirs")
+
+	// Deliberately no predicate: the policy is the whole of the filtering.
+	var got []model.Challenge
+	if err := mine.Run(ctx, db, func(tx *gorm.DB) error {
+		return tx.Find(&got).Error
+	}); err != nil {
+		t.Fatalf("read challenges: %v", err)
+	}
+	if len(got) != 1 || got[0].Value != "mine" {
+		values := make([]string, 0, len(got))
+		for _, c := range got {
+			values = append(values, c.Value)
+		}
+		t.Fatalf("an unfiltered read inside one scope saw %v, want only [mine].\n"+
+			"The policy on challenges is inherited through aliases; check that both are forced.", values)
+	}
+}
+
+// A publish into another account's alias is refused by the policy, not merely by
+// the caller remembering to check.
+func TestIntegrationPublishIntoAnotherAccountsAliasIsRefused(t *testing.T) {
+	db, mine, theirs, _, _ := twoAccounts(t)
+	ctx := context.Background()
+
+	var theirAlias model.Alias
+	if err := theirs.Run(ctx, db, func(tx *gorm.DB) error {
+		return theirs.Where(tx).First(&theirAlias).Error
+	}); err != nil {
+		t.Fatalf("read their alias: %v", err)
+	}
+
+	if _, err := Present(ctx, db, mine, theirAlias.ID, "smuggled", "k_test", time.Minute); err == nil {
+		t.Fatal("a value was published into another account's alias")
 	}
 }

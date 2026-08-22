@@ -392,7 +392,7 @@ func (h *challenge) present(c echo.Context) error {
 	// authorizations at ONE challenge name and the CA expects to find both TXT
 	// values there at once. Repeating a value is an upsert on (alias_id, value),
 	// so idempotency comes from the unique constraint, not a read-then-write.
-	if _, err := store.Present(ctx, h.opts.DB, r.alias.ID, r.value, r.key.Identifier, h.opts.Lifetime); err != nil {
+	if _, err := store.Present(ctx, h.opts.DB, r.scope, r.alias.ID, r.value, r.key.Identifier, h.opts.Lifetime); err != nil {
 		h.opts.Log.ErrorContext(ctx, "challenge value not stored",
 			slog.String("key_id", r.key.Identifier), slog.String("fqdn", r.fqdn), slog.Any("error", err))
 		return errStorage
@@ -462,7 +462,7 @@ func (h *challenge) cleanup(c echo.Context) error {
 	// wildcard authorization may still be in flight. Removing a value that is
 	// not there is not an error — clients retry cleanups, and the record may
 	// already have expired and been swept.
-	if err := store.Cleanup(ctx, h.opts.DB, r.alias.ID, r.value); err != nil {
+	if err := store.Cleanup(ctx, h.opts.DB, r.scope, r.alias.ID, r.value); err != nil {
 		h.opts.Log.ErrorContext(ctx, "challenge value not withdrawn",
 			slog.String("key_id", r.key.Identifier), slog.String("fqdn", r.fqdn), slog.Any("error", err))
 		return errStorage

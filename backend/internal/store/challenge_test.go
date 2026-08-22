@@ -63,11 +63,11 @@ func TestIntegrationPresentIsAnIdempotentUpsert(t *testing.T) {
 	ctx := context.Background()
 	alias := challengeFixture(t, db, sc, 1)[0]
 
-	first, err := Present(ctx, db, alias, "tok-1", "k_aaa", time.Minute)
+	first, err := Present(ctx, db, sc, alias, "tok-1", "k_aaa", time.Minute)
 	if err != nil {
 		t.Fatalf("first present: %v", err)
 	}
-	second, err := Present(ctx, db, alias, "tok-1", "k_bbb", time.Hour)
+	second, err := Present(ctx, db, sc, alias, "tok-1", "k_bbb", time.Hour)
 	if err != nil {
 		t.Fatalf("second present: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestIntegrationPresentAddsRatherThanReplaces(t *testing.T) {
 	alias := challengeFixture(t, db, sc, 1)[0]
 
 	for _, v := range []string{"tok-a", "tok-b"} {
-		if _, err := Present(ctx, db, alias, v, "k_aaa", time.Minute); err != nil {
+		if _, err := Present(ctx, db, sc, alias, v, "k_aaa", time.Minute); err != nil {
 			t.Fatalf("present %s: %v", v, err)
 		}
 	}
@@ -122,21 +122,21 @@ func TestIntegrationCleanupIsExact(t *testing.T) {
 	alias, other := ids[0], ids[1]
 
 	for _, v := range []string{"tok-a", "tok-b"} {
-		if _, err := Present(ctx, db, alias, v, "k_aaa", time.Minute); err != nil {
+		if _, err := Present(ctx, db, sc, alias, v, "k_aaa", time.Minute); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := Present(ctx, db, other, "tok-a", "k_aaa", time.Minute); err != nil {
+	if _, err := Present(ctx, db, sc, other, "tok-a", "k_aaa", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := Cleanup(ctx, db, alias, "tok-a"); err != nil {
+	if err := Cleanup(ctx, db, sc, alias, "tok-a"); err != nil {
 		t.Fatalf("cleanup: %v", err)
 	}
-	if err := Cleanup(ctx, db, alias, "tok-a"); err != nil {
+	if err := Cleanup(ctx, db, sc, alias, "tok-a"); err != nil {
 		t.Fatalf("cleanup of an absent value must succeed, got %v", err)
 	}
-	if err := Cleanup(ctx, db, alias, "never-published"); err != nil {
+	if err := Cleanup(ctx, db, sc, alias, "never-published"); err != nil {
 		t.Fatalf("cleanup of a value never published must succeed, got %v", err)
 	}
 
@@ -159,10 +159,10 @@ func TestIntegrationExpiryIsReadTime(t *testing.T) {
 	ctx := context.Background()
 	alias := challengeFixture(t, db, sc, 1)[0]
 
-	if _, err := Present(ctx, db, alias, "live", "k_aaa", time.Hour); err != nil {
+	if _, err := Present(ctx, db, sc, alias, "live", "k_aaa", time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Present(ctx, db, alias, "dead", "k_aaa", time.Hour); err != nil {
+	if _, err := Present(ctx, db, sc, alias, "dead", "k_aaa", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	// Backdate one row rather than sleeping.
@@ -211,7 +211,7 @@ func TestIntegrationActiveByAliasIncludesEmptyAliases(t *testing.T) {
 	ctx := context.Background()
 	ids := challengeFixture(t, db, sc, 2)
 
-	if _, err := Present(ctx, db, ids[0], "tok", "k_aaa", time.Minute); err != nil {
+	if _, err := Present(ctx, db, sc, ids[0], "tok", "k_aaa", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 
@@ -242,7 +242,7 @@ func TestIntegrationPublisherSurvivesKeyRevocation(t *testing.T) {
 	if err := CreateAPIKey(ctx, db, sc, &key); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
-	if _, err := Present(ctx, db, alias, "tok", key.Identifier, time.Minute); err != nil {
+	if _, err := Present(ctx, db, sc, alias, "tok", key.Identifier, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Delete(&model.APIKey{}, key.ID).Error; err != nil {
@@ -278,7 +278,7 @@ func TestIntegrationConcurrentIdenticalPresents(t *testing.T) {
 		go func() {
 			defer done.Done()
 			start.Wait()
-			_, errs[i] = Present(context.Background(), db, alias, "same-token", "k_aaa", time.Minute)
+			_, errs[i] = Present(context.Background(), db, sc, alias, "same-token", "k_aaa", time.Minute)
 		}()
 	}
 	start.Done()
@@ -310,7 +310,7 @@ func TestIntegrationConcurrentDistinctPresents(t *testing.T) {
 		go func() {
 			defer done.Done()
 			start.Wait()
-			_, errs[i] = Present(context.Background(), db, alias, fmt.Sprintf("tok-%d", i), "k_aaa", time.Minute)
+			_, errs[i] = Present(context.Background(), db, sc, alias, fmt.Sprintf("tok-%d", i), "k_aaa", time.Minute)
 		}()
 	}
 	start.Done()
@@ -342,17 +342,17 @@ func TestIntegrationCleanupRacingPresent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range rounds {
-			_, presentErrs[i] = Present(ctx, db, alias, "keep-me", "k_aaa", time.Minute)
+			_, presentErrs[i] = Present(ctx, db, sc, alias, "keep-me", "k_aaa", time.Minute)
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for i := range rounds {
-			if _, err := Present(ctx, db, alias, "drop-me", "k_bbb", time.Minute); err != nil {
+			if _, err := Present(ctx, db, sc, alias, "drop-me", "k_bbb", time.Minute); err != nil {
 				cleanupErrs[i] = err
 				continue
 			}
-			cleanupErrs[i] = Cleanup(ctx, db, alias, "drop-me")
+			cleanupErrs[i] = Cleanup(ctx, db, sc, alias, "drop-me")
 		}
 	}()
 	wg.Wait()
@@ -389,7 +389,7 @@ func TestPresentRejectsBadInput(t *testing.T) {
 		{"zero lifetime", model.NewID(), "tok", 0},
 		{"negative lifetime", model.NewID(), "tok", -time.Minute},
 	} {
-		if _, err := Present(ctx, nil, tc.aliasID, tc.value, "k_aaa", tc.lifetime); err == nil {
+		if _, err := Present(ctx, nil, Scope{}, tc.aliasID, tc.value, "k_aaa", tc.lifetime); err == nil {
 			t.Errorf("%s: want an error", tc.name)
 		}
 	}

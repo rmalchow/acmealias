@@ -62,8 +62,10 @@ Components that must read across accounts — zone distribution, usage aggregati
 command-line administration and migrations — SHALL connect as a distinct database role exempt from
 the policy, and no other component SHALL use that role.
 
-Records of challenge activity SHALL be exempt from the policy, being reachable only through an alias
-that is itself confined.
+A table that carries no owning account SHALL still be confined where it references one that does, by
+a policy requiring its parent row to be visible. Records of challenge activity that deliberately hold
+no reference to their subject SHALL be exempt, and SHALL be confined by the operation that lists
+them.
 
 #### Scenario: A query missing its ownership predicate still returns nothing
 
@@ -74,6 +76,16 @@ that is itself confined.
 
 - **WHEN** a connection used for one account's request is returned to the pool and re-used for another account's request
 - **THEN** the second request observes only its own account
+
+#### Scenario: A child table without an owning account is confined through its parent
+
+- **WHEN** a read is executed for one account against a table whose rows reference a table carrying an owning account
+- **THEN** only rows whose referenced row belongs to that account are returned
+
+#### Scenario: A write into another account's parent is refused
+
+- **WHEN** a row is inserted referencing a parent belonging to another account
+- **THEN** the write is refused
 
 #### Scenario: A cross-account component uses a named exempt role
 

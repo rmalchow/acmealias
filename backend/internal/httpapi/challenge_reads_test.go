@@ -62,13 +62,19 @@ func TestIntegrationPresentIssuesNoExtraDatastoreReads(t *testing.T) {
 	//   3. upsert the challenge value
 	//   4. read the alias's domain names for the interaction history
 	//   5. open the interaction row
-	//   6-8. the transaction wrapper's set_config for each scoped statement
+	//   6-9. the transaction wrapper's set_config for each scoped statement
 	//
-	// The ceiling is generous because the interaction history is written
-	// best-effort and its exact statement count is not the thing under test.
-	// What matters is that adding the grant evaluation added NONE, which a
-	// lazily-loaded grant set would have.
-	const ceiling = 12
+	// Migration 000010 added one to this, and it is worth naming: challenges now
+	// inherits a policy from aliases, so the upsert runs inside a scope
+	// transaction and pays one set_config. The POLICY itself costs no statement —
+	// it is a subquery inside the upsert, one index lookup on the aliases primary
+	// key — which is the whole reason a joined policy is affordable on this table
+	// and would not have been on a listing.
+	//
+	// The grant evaluation added NONE, which is what this test exists to hold:
+	// the key's grants are preloaded with the key, and the alias carries its own
+	// ancestors. A lazily loaded grant set would show up here immediately.
+	const ceiling = 13
 	if n := statements.Load(); n > ceiling {
 		t.Fatalf("one publish issued %d datastore statements, want at most %d.\n"+
 			"The permission check on this path must read nothing: grants are preloaded "+

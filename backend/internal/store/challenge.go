@@ -51,11 +51,12 @@ type ChallengeValue struct {
 // publishedBy is the API key identifier (e.g. "k_7f3a91c4") as plain text, not a
 // foreign key: revoking or deleting the key must not delete or invalidate the
 // records it published (design D6). An empty string stores NULL.
-// No Scope: challenges carry no account_id and no row-level security policy
-// (design P20). A challenge row is only ever reached through an alias that was
-// itself resolved under a scope, so the fence sits one level up — and this is the
-// certificate-issuance critical path, which the change promises not to slow down.
-func Present(ctx context.Context, db *gorm.DB, aliasID model.ID, value, publishedBy string, lifetime time.Duration) (*model.Challenge, error) {
+// Scoped, since migration 000010: challenges inherits a policy from aliases
+// rather than carrying account_id of its own. The scope is what sets the tenant
+// the policy reads, so the insert must run inside it — without one the policy
+// finds no visible alias and refuses the row, which is the failure direction to
+// want.
+func Present(ctx context.Context, db *gorm.DB, sc Scope, aliasID model.ID, value, publishedBy string, lifetime time.Duration) (*model.Challenge, error) {
 	if aliasID == model.NilID {
 		return nil, fmt.Errorf("store: present: alias id is empty")
 	}
@@ -82,12 +83,14 @@ func Present(ctx context.Context, db *gorm.DB, aliasID model.ID, value, publishe
 	// stored. Without it an upsert that resolved to an UPDATE would hand back the
 	// identifier this call generated for its INSERT attempt — a value no row has,
 	// which reads as "a new record was created" to every caller.
-	err := db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "alias_id"}, {Name: "value"}},
-		// created_at is deliberately not refreshed: the record keeps reporting
-		// when it was first published.
-		DoUpdates: clause.AssignmentColumns([]string{"expires_at", "published_by"}),
-	}, clause.Returning{}).Create(&c).Error
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "alias_id"}, {Name: "value"}},
+			// created_at is deliberately not refreshed: the record keeps
+			// reporting when it was first published.
+			DoUpdates: clause.AssignmentColumns([]string{"expires_at", "published_by"}),
+		}, clause.Returning{}).Create(&c).Error
+	})
 	if err != nil {
 		return nil, fmt.Errorf("store: present value at alias %s: %w", aliasID, err)
 	}
@@ -97,10 +100,12 @@ func Present(ctx context.Context, db *gorm.DB, aliasID model.ID, value, publishe
 // Cleanup withdraws exactly the one value at aliasID — never the alias's other
 // values. Withdrawing a value that is not there is not an error: ACME clients
 // retry cleanups, and the record may already have expired and been swept.
-func Cleanup(ctx context.Context, db *gorm.DB, aliasID model.ID, value string) error {
-	err := db.WithContext(ctx).
-		Where("alias_id = ? AND value = ?", aliasID, value).
-		Delete(&model.Challenge{}).Error
+func Cleanup(ctx context.Context, db *gorm.DB, sc Scope, aliasID model.ID, value string) error {
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return tx.
+			Where("alias_id = ? AND value = ?", aliasID, value).
+			Delete(&model.Challenge{}).Error
+	})
 	if err != nil {
 		return fmt.Errorf("store: cleanup value at alias %s: %w", aliasID, err)
 	}
@@ -152,13 +157,16 @@ func ActiveByAlias(ctx context.Context, db *gorm.DB) (map[string][]ChallengeValu
 // for the periodic sweep and its metric. Expired rows are already unanswerable
 // before this runs; the sweep only reclaims the space.
 func DeleteExpired(ctx context.Context, db *gorm.DB) (int64, error) {
-	res := db.WithContext(ctx).
-		Where("expires_at <= ?", time.Now()).
-		Delete(&model.Challenge{})
-	if res.Error != nil {
-		return 0, fmt.Errorf("store: delete expired challenges: %w", res.Error)
+	var n int64
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		res := tx.Where("expires_at <= ?", time.Now()).Delete(&model.Challenge{})
+		n = res.RowsAffected
+		return res.Error
+	})
+	if err != nil {
+		return 0, fmt.Errorf("store: delete expired challenges: %w", err)
 	}
-	return res.RowsAffected, nil
+	return n, nil
 }
 
 // ListActive returns the non-expired records with their alias preloaded, newest
@@ -240,10 +248,12 @@ func ListActive(ctx context.Context, db *gorm.DB, sc Scope) ([]model.Challenge, 
 // this nameserver is holding, not what any one customer has.
 func CountActive(ctx context.Context, db *gorm.DB) (int64, error) {
 	var n int64
-	err := db.WithContext(ctx).
-		Model(&model.Challenge{}).
-		Where("expires_at > ?", time.Now()).
-		Count(&n).Error
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.
+			Model(&model.Challenge{}).
+			Where("expires_at > ?", time.Now()).
+			Count(&n).Error
+	})
 	if err != nil {
 		return 0, fmt.Errorf("store: count active challenges: %w", err)
 	}

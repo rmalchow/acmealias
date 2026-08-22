@@ -249,15 +249,34 @@ is a plain column comparison against the same tenant-leading index the design al
 denormalization that made `Scope` cheap makes RLS cheap. That is not a coincidence — both mechanisms
 want the same thing, the tenant on the row.
 
-**`challenges` and `challenge_interactions` are a deliberate exception.** P2 leaves them without an
-`account_id`, because they reach the account through the alias and load balancer they already
-reference. They therefore get no policy, and the join form is not used for them. Three reasons, in
-order of weight: a challenge row is only ever reached through an alias that was itself fetched under
-a `Scope`, so the fence sits one level up rather than absent; `POST /present` is on a certificate
-issuance critical path and constraint 2 forbids making it slower; and the alternative is exactly the
-`SECURITY DEFINER` helper described above, which is the one construction that pays both costs at
-once. This exception is written down here so that a later reader finds a decision rather than an
-oversight.
+**`challenges` inherits a policy instead of carrying a column; `challenge_interactions` gets none.**
+
+An earlier version of this decision exempted both, on the grounds that neither carries an
+`account_id` and a joined policy costs too much. That was half right, and the half that was wrong is
+worth correcting rather than quietly editing.
+
+A policy does not need a column on the row. It needs a way to decide, and *"is my parent visible"* is
+one — because the subquery inside a policy is evaluated under the **caller's** policies, so the
+`aliases` policy applies within it and the tenant filter propagates down. That is the same mechanism
+described above as a trap, and the difference is the shape of the reference graph: `lb_nodes` →
+`load_balancers` → `projects` is a chain and so is `challenges` → `aliases`; what Postgres refuses is
+a *cycle*, where a policy's subquery leads back to the table it is defending. Neither of these does.
+
+So the cost argument decides it, and it points opposite ways for the two kinds of table:
+
+- **Inventory tables keep the column.** A joined policy there costs a probe per row on every listing
+  and stops any index leading with the tenant, which is precisely what P2 materialized `account_id`
+  to avoid.
+- **`challenges` takes the joined policy** (migration 000010). The hot path touches exactly one row,
+  so the policy is one index lookup on the `aliases` primary key per publish. `POST /present` gains a
+  single statement — the `SET LOCAL` for the transaction the write now runs in, not the policy — and
+  the read-count test on that path is what will notice if that ever stops being true.
+- **`challenge_interactions` stays exempt, and now for a reason of its own** rather than by
+  association with `challenges`. It deliberately holds no foreign key at all, because a history that
+  disappears when its subject is deleted cannot answer the question it exists for. A policy of this
+  shape would make every interaction whose alias has since been deleted invisible — destroying
+  exactly the property that table was built for. Its confinement stays one level up, in the store
+  method that checks the load balancer is in scope before listing.
 
 **Cross-account jobs connect as a role with `BYPASSRLS`.** With policies in place they would
 otherwise see nothing, which is the point: the set of code that can read across tenants stops being

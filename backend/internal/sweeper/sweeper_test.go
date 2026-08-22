@@ -124,7 +124,7 @@ func TestIntegrationExpiredValueIsUnansweredThenSwept(t *testing.T) {
 
 	// Publish with a lifetime so short it has already expired by the time we
 	// look, rather than sleeping: no real clock dependency in the test.
-	if _, err := store.Present(ctx, db, alias.ID, "tok-1", "k_aaa", time.Nanosecond); err != nil {
+	if _, err := store.Present(ctx, db, sc, alias.ID, "tok-1", "k_aaa", time.Nanosecond); err != nil {
 		t.Fatalf("present: %v", err)
 	}
 	time.Sleep(time.Millisecond)
