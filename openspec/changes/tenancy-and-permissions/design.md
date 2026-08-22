@@ -390,10 +390,18 @@ users                        ← global, no owner
 sits after their last membership is removed. They may sign in, create an account, and accept invitations.
 Nothing else. The console needs a real empty state for it rather than a broken shell.
 
-**Memberships have two sources, and the evaluator does not distinguish them.** In an identity-provider
-edition they are *derived* per request from the group claim, exactly as today, and stored nowhere. In a
-local-authentication edition they are rows in `account_members`. The evaluator asks for "the memberships
-for this request" and receives either.
+**Memberships have two sources, and the evaluator does not distinguish them.** In the internal edition
+they are *derived* per request from the group claim, exactly as today, and stored nowhere. In the
+public edition they are rows in `account_members`. The evaluator asks for "the memberships for this
+request" and receives either.
+
+Both editions authenticate against an identity provider, so the distinction is not *which
+authentication* but *who decides membership*. In the internal edition the provider's groups are the
+authority, because the operators being administered are the same people the provider already governs.
+In the public edition they are emphatically not: membership of a customer's account is decided by that
+account's own administrators through `account-invitations`, and no identity-provider group may place
+someone inside a tenant. Deriving public memberships from claims would hand tenant composition to
+whoever can edit a group.
 
 Materializing the derived ones into rows at sign-in would be simpler, and is rejected: the existing
 `identity-and-roles` spec makes a group-to-role configuration change take effect when the service is

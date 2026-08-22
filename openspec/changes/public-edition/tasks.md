@@ -5,23 +5,25 @@
 - [ ] 1.3 Assert by test that session storage, idle and absolute expiry, revocation and CSRF are properties of the session layer and not of any implementation
 - [ ] 1.4 Confirm the internal edition's observable behavior is unchanged by running the existing acceptance suite
 
-## 2. Local authentication
+## 2. Delegated authentication
 
-- [ ] 2.1 Add `internal/localauth` implementing the seam: registration, sign-in, sign-out
-- [ ] 2.2 Store passwords with argon2id; assert the stored form is unusable for authentication
-- [ ] 2.3 Add email confirmation: expiring, single-use, unguessable token; grant nothing but sign-in until confirmed
-- [ ] 2.4 Add password reset: expiring, single-use, and ending every existing session of that user on use
-- [ ] 2.5 Make registration and reset responses indistinguishable between an address that has a user and one that does not
-- [ ] 2.6 Rate limit authentication attempts per user and per source, separately from the protective limits of group 4
-- [ ] 2.7 Create a registered user belonging to no account, and confirm `tenancy-and-permissions` treats that state as normal
-- [ ] 2.8 Confirm registration reached through an invitation link needs no separate confirmation, per `account-invitations`, without duplicating that rule here
+- [ ] 2.1 Point both editions at the identity provider at `auth.edgedns.eu`, differing only in the tenant they authenticate against (design U3)
+- [ ] 2.2 Configure separate tenants for staff and for customers; assert a customer-tenant identity is not authenticated on the staff surface
+- [ ] 2.3 Configure the customer enrolment flow with an email-verification stage, and assert no usable session is issued without it
+- [ ] 2.4 Configure the recovery flow with email verification, and assert enrolment and recovery responses do not reveal whether an address has a user
+- [ ] 2.5 Configure a reputation policy limiting repeated failed attempts by username and by client address, and exercise it in acceptance rather than assuming it (design U4)
+- [ ] 2.6 Make a credential reset or revocation at the provider end the service's own sessions for that person — back-channel logout, revocation check, or a documented short idle expiry
+- [ ] 2.7 Assert no route or screen accepts a password and no credential material is stored
+- [ ] 2.8 Create a user belonging to no account on first sign-in, and confirm `tenancy-and-permissions` treats that state as normal
+- [ ] 2.9 Confirm enrolment reached through an invitation needs no separate address confirmation, per `account-invitations`, without duplicating that rule here
+- [ ] 2.10 Document operating the provider: backup, tested restore, patching commitment, and `internal/adminctl` as the path when the provider is unavailable
 
 ## 3. Editions
 
 - [ ] 3.1 Add `ACME_EDITION` to `internal/config` with validation; refuse startup on an unknown value naming the setting and accepted values
 - [ ] 3.2 Validate at startup that the configured edition has every setting it requires, and refuse naming what is missing
 - [ ] 3.3 Report the edition in the startup log and on the readiness endpoint
-- [ ] 3.4 Select the authentication implementation by edition in the composition root
+- [ ] 3.4 Select the identity provider tenant by edition in the composition root
 - [ ] 3.5 Document the operational rule that editions share neither datastore nor zone, and add the deployment manifests for a second zone
 
 ## 4. Protective limits
@@ -44,9 +46,9 @@
 
 ## 6. Console
 
-- [ ] 6.1 Build registration, confirmation and password reset screens, reachable without a session
-- [ ] 6.2 Offer to resend confirmation, and report identically whether or not an address already has a user
-- [ ] 6.3 Show an unconfirmed user only confirmation and resend
+- [ ] 6.1 Hand off to the provider for enrolment, sign-in and recovery; build no credential screens of our own
+- [ ] 6.2 Build the account-creation screen for a signed-in person who belongs to no account, subject to the switch in group 9
+- [ ] 6.3 Show a signed-in person with no account only account creation, or the invitation they can accept
 - [ ] 6.4 Build the onboarding path to a first verified domain over the existing plan and verification endpoints
 - [ ] 6.5 Report what was found against what was expected when a delegation is missing or wrong
 - [ ] 6.6 Build the billing screen: balance, purchase history, payment state, confined to the account, with no control that sets a balance
@@ -67,15 +69,15 @@
 ## 8. Acceptance and closing out
 
 - [ ] 8.1 Extend the acceptance harness to run both editions and fail if either is broken
-- [ ] 8.2 Cover registration, address confirmation, a domain reaching verification, a credit purchase and a protective limit refusal in the locally authenticated edition
+- [ ] 8.2 Cover enrolment, address verification, a domain reaching verification, a credit purchase and a protective limit refusal in the public edition
 - [ ] 8.3 Add an operational runbook for email delivery failure, since a bounced confirmation locks a customer out
 - [x] 8.4 `add-accounts-and-public-edition` is archived unimplemented; confirm before closing that every requirement of it is either here or named in this change's supersession table
 - [ ] 8.5 Decide where the unhoused rule "an unverified domain is not charged for" belongs, or record that the credit model makes it moot
 
 ## 9. Registration and payment switches
 
-- [ ] 9.1 Add the self-registration configuration switch; refuse the registration and account-creation handlers with a stated reason when it is off (design U9)
-- [ ] 9.2 Add a test calling the registration endpoint directly, bypassing the console, asserting refusal when the switch is off and success when it is on
+- [ ] 9.1 Add the self-service account-creation switch; refuse the account-creation handler with a stated reason when it is off (design U9)
+- [ ] 9.2 Add a test calling the account-creation endpoint directly, bypassing the console, asserting refusal when the switch is off and success when it is on; assert a person enrolled at the provider still reaches nothing
 - [ ] 9.3 Follow the switch in the console's links and the marketing site's call to action, as presentation only
 - [ ] 9.4 Add the payment configuration switch; refuse the purchase endpoints when it is off, leaving the staff credit grant as the only source of balance
 - [ ] 9.5 Confirm invitation acceptance is unaffected by either switch

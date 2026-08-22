@@ -58,11 +58,11 @@ follows is only the seam table, updated because two of its rows now name other c
 
 | Seam | `internal` | `public` | Owned by |
 | --- | --- | --- | --- |
-| Authentication | `oidcauth` | `localauth` | **this change** (U3, U4) |
+| Authentication | `oidcauth`, staff tenant | `oidcauth`, customer tenant | **this change** (U3, U4) |
 | Account resolution | the single seeded account | the user's memberships and session selection | `tenancy-and-permissions` |
 | Metering and credits | unmetered, unbilled | the credit ledger | `metering-and-credits`; the internal exemption is **U6** |
 | Payment | none | a provider adapter funding credit purchases | **this change** (U5) |
-| Console shell | today's screens | plus registration and purchase | **this change** (U8) |
+| Console shell | today's screens | plus account creation and purchase | **this change** (U8) |
 
 The edition in force is reported in the startup log and on the readiness endpoint, so an operator
 looking at a running process can see which policy it holds. An unrecognized value fails startup
@@ -95,52 +95,88 @@ set of `NS` records. The original left this as an open question; this change set
 *separate*, on the grounds that a public incident that poisons a zone view must not be able to touch
 internal aliases, and the cost is a second delegation rather than a second design.
 
-### U3. Authentication is a seam, and the session is the thing both implementations produce
+### U3. Authentication is delegated to the identity provider in both editions, and the seam stays for one reason
 
-`internal/oidcauth` moves behind an interface with no change to its behaviour. `internal/localauth`
-implements the same interface for the public edition. The interface's contract is that both produce
-a server-side session, and that everything downstream of a session — its storage, its idle and
-absolute expiry, its revocation, the cross-site request forgery token bound to it — is identical
-whichever produced it.
+`internal/oidcauth` is the only authentication implementation. Both editions authenticate against
+the same self-hosted identity provider at `auth.edgedns.eu`, differing in which of its tenants — its
+brand, its enrollment flow, its user directory — they point at. There is no `internal/localauth`.
 
-That last clause is what makes the seam cheap. Session handling is already the part of
-`internal/oidcauth` that is not OIDC-specific: sessions are rows with an opaque identifier in a
-cookie, and nothing about that is a property of how the person proved who they were.
+The contract is unchanged in substance: authentication produces a server-side session, and everything
+downstream of a session — its storage, its idle and absolute expiry, its revocation, the cross-site
+request forgery token bound to it — is a property of the session layer rather than of how the person
+proved who they were. Sessions are rows with an opaque identifier in a cookie, and nothing about that
+is OIDC-specific.
 
-What a session *carries* once established is deliberately not specified here.
-`tenancy-and-permissions` owns it: a subject, and a selected account which may be null. A newly
-registered user has no memberships and therefore no selectable account, and that change already
-specifies that state as normal rather than as an error.
+**The seam is kept even with one implementation behind it**, which needs justifying rather than
+assuming. It is kept because it is the boundary at which the identity provider's vocabulary stops:
+downstream code sees a subject and a session, never a token, a claim or a flow. That boundary is what
+makes the provider replaceable, and it costs one interface. It is not kept in the expectation of a
+second implementation — if one is ever wanted, it will be for a reason nobody has yet.
 
-**Rejected: making `localauth` a wrapper around a self-hosted identity provider.** Running Keycloak
-for public customers would reuse `oidcauth` unchanged and own no password code. It was rejected as
-the worst of both: we would own the operational burden of an identity provider *and* a registration
-experience mediated by someone else's screens, which is the part of onboarding least worth ceding.
-Delegating to a *hosted* provider remains genuinely open — see Open Questions.
+What a session *carries* is `tenancy-and-permissions`' business: a subject, and a selected account
+which may be null. Someone who has just authenticated for the first time has no memberships and
+therefore no selectable account, and that change already specifies that state as normal.
 
-### U4. What local authentication must own, stated as obligations rather than features
+**This reverses the earlier decision, and the reversal is recorded rather than tidied away.** The
+previous version of this design rejected exactly this arrangement — "the worst of both: we would own
+the operational burden of an identity provider *and* a registration experience mediated by someone
+else's screens" — and it was wrong on both halves. The operational burden is not marginal, because
+the identity provider is being run regardless for staff and for the internal edition; adding
+customers to it is a tenant, not a system. And the registration experience is not meaningfully ceded:
+the provider's screens can be themed, and the part of onboarding that actually matters — publishing a
+`CNAME`, adding a domain, watching it verify — is entirely ours and happens after sign-in.
 
-The public edition needs password authentication, and the honest framing is that each item below is
-a liability accepted, not a capability gained. Today the service owns none of them.
+### U4. The obligations do not disappear; they move, and they must be configured deliberately
 
-- **Storage.** Passwords are stored only as a memory-hard hash — argon2id — and are never
-  recoverable. This is not negotiable and not parameterizable downward.
-- **Confirmation.** Registration grants nothing beyond signing in until the address has been
-  confirmed by following a token sent to it. The token expires, is usable once, and is not
-  guessable.
-- **Reset.** Initiated by email, expiring, single-use, and it ends every existing session of that
-  user on use — because the common reason for a reset is that the previous credential is believed
-  compromised, and leaving its sessions alive defeats the purpose.
-- **Non-disclosure.** Registering with an address that already has a user, and requesting a reset
-  for an address that has none, must both produce responses indistinguishable from the opposite
-  case. Otherwise the endpoints are a membership oracle.
-- **Rate limiting.** Repeated authentication attempts against one user or from one source are
-  limited. Note this is a *different* limiter from U6's: this one protects credentials, that one
-  protects shared capacity, and conflating them produces a limiter that is wrong for both.
+Delegating authentication removes a great deal of code and none of the responsibility. What was a
+list of things to *build* becomes a list of things to *configure and verify*, and configuration that
+nobody checked is the more dangerous of the two, because it looks finished.
 
-`account-invitations` establishes one useful interaction: an invitation link is itself proof of
-control of the address it was sent to, so registration reached through one needs no separate
-confirmation step. That change owns the rule; this one must not duplicate it.
+Each obligation, and where it now lives:
+
+- **Credential storage.** The provider's, not ours. The service holds no password, no hash, and no
+  reset token — which is the single largest reduction in liability in this change. What remains ours
+  is never accepting a credential: no field anywhere in the console takes a password.
+- **Address confirmation.** An enrollment flow with an email-verification stage, so that a person who
+  has not proved control of the address gets no session. This is a stage in the provider's flow that
+  can be omitted, so it is verified rather than assumed.
+- **Reset.** A recovery flow with email verification. The provider ends its own sessions; **our**
+  session store does not know a reset happened, so the service subscribes to the provider's logout
+  or revocation signal, or falls back to a short idle expiry. This is the one obligation that
+  delegation genuinely complicates rather than simplifies, and it is called out because the failure —
+  a compromised credential reset while the attacker's session in *our* console stays alive — is
+  silent.
+- **Non-disclosure.** The provider's enrollment and recovery responses must not differ between an
+  address that has a user and one that does not. Default flows generally get this right; it is on the
+  verification list because it is a membership oracle when wrong.
+- **Attempt limiting.** A reputation policy on failed attempts by username and by client address.
+  Note this is a *different* limiter from U6's: this one protects credentials, that one protects
+  shared capacity, and conflating them produces a limiter that is wrong for both. It is also the
+  provider feature most often found misconfigured, so it is exercised as part of acceptance rather
+  than trusted.
+- **Operating it.** The provider becomes a hard dependency of every sign-in, including staff sign-in
+  during an incident. That means backups of its database, a tested restore, a patching commitment
+  (it is an internet-facing authentication service with a CVE history like any other), and an answer
+  to "the identity provider is down and I need to reach the console". `internal/adminctl` is that
+  answer — it authenticates with a database connection string and no provider at all, which is
+  exactly why `staff-plane` S8 keeps it.
+
+`account-invitations` establishes one useful interaction that survives delegation intact: an
+invitation link is proof of control of the address it was sent to, so enrollment reached through one
+needs no separate confirmation step. That change owns the rule; this one must not duplicate it. What
+does change is the mechanism — the invitation hands off to the provider's enrollment flow rather than
+to a registration form of ours.
+
+**Rejected: a hosted identity provider.** Auth0, Entra, Cognito. Removes the operating obligation
+above entirely and adds a per-user cost, a dependency on a company whose pricing changes, and
+customer identity data held by a third party in a product whose selling point is not handing your
+credentials to a third party. Since the provider is being self-hosted for staff regardless, the
+marginal cost of one more tenant is close to zero and this trade is not worth making.
+
+**Rejected: keeping `localauth` for the public edition anyway**, to avoid a hard dependency on the
+provider at sign-in. It trades a dependency for an obligation — argon2id, tokens, reset semantics,
+attempt limiting, and the breach consequences of holding password hashes for strangers — and the
+dependency is the cheaper of the two, especially when it already exists for staff.
 
 ### U5. Payment funds credit purchases, and a balance is never typed in
 
@@ -184,10 +220,21 @@ The first customers are people we know, invited by name. Self-service registrati
 product needs when strangers arrive, and that is later. The question is what to do with the
 registration routes in the meantime.
 
-**They exist, and they are inert.** `POST /api/v1/register` and the account-creation route are
-present in the running binary and answer a single refusal — "registration is not open" — whenever
-their configuration switch is off. They are not compiled out, not hidden behind a feature-flagged
-router, not merely absent from the console's navigation.
+**The switch has two halves now that identity is delegated**, and separating them is what makes it
+enforceable:
+
+- **Enrolment** — becoming a *user* — is the identity provider's enrollment flow, and closing it
+  means disabling that flow for the customer tenant. Invitation-driven enrolment continues to work,
+  because it enters through a different flow.
+- **Account creation** — becoming a *tenant* — stays ours, and it is the half that matters. A person
+  who has somehow enrolled but cannot create an account has a session and nothing to do with it: no
+  inventory, no zones, no spend. So even if the provider's enrollment flow is opened by accident, the
+  service is not open for business.
+
+**Our half exists and is inert.** The account-creation route is present in the running binary and
+answers a single refusal — "registration is not open" — whenever its configuration switch is off. It
+is not compiled out, not hidden behind a feature-flagged router, not merely absent from the console's
+navigation.
 
 The reasoning is about where the enforcement lives. A route removed from the user interface is not
 removed from the internet: it is discoverable by anyone reading the JavaScript bundle, and it works.
@@ -379,8 +426,9 @@ change's plan, whose steps 1 and 2 that change subsumes.
 
 1. **The identity seam.** `oidcauth` moves behind an interface with no behavioural change.
    Observable behaviour in the internal edition: none. This step is safe to take on its own.
-2. **`localauth`.** Registration, confirmation, reset, attempt limiting. Wired only in the public
-   edition, so the internal edition is unaffected whatever its state.
+2. **The customer tenant.** A second tenant in the identity provider with its own enrolment and
+   recovery flows, verified against the obligations in U4. Nothing in the internal edition points at
+   it, so the internal edition is unaffected whatever its state.
 3. **Edition selection.** `ACME_EDITION`, startup validation, reporting on the readiness endpoint.
 4. **Protective limits.** U6, in both editions — the one step with an observable internal effect, and
    deliberately so.
@@ -395,10 +443,14 @@ an internal deployment.
 
 ## Open Questions
 
-- **Should we own local authentication at all?** Delegating public identity to a hosted provider
-  keeps the number of authentication implementations we own at one and deletes every obligation in
-  U4. What it costs, and whether it constrains registration in ways the marketing site would object
-  to, is not known. This is worth answering *before* building `localauth`, not after.
+- **How does our session store learn that a credential was reset?** U4 names this as the one
+  obligation delegation complicates. A back-channel logout, a token-revocation check, or simply a
+  short idle expiry are all viable and they differ in how long a stolen session outlives the reset
+  that was supposed to kill it.
+- **One tenant or two in the identity provider?** Staff and customers must not share a directory —
+  a customer must never be able to enrol into the staff tenant — but whether that is two tenants, two
+  brands, or two flows within one is a configuration question with security consequences worth
+  settling explicitly.
 - **When does self-registration open?** The switch of U9 exists; the trigger for turning it on — a
   number of invited customers, a working payment integration, or a date — is a commercial decision
   and is not made here.

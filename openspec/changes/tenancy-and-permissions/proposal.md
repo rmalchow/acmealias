@@ -385,8 +385,8 @@ fixed, that roles are held account-wide, and that *"within an account there SHAL
 scoping."* All three statements are now wrong. Its proposal's non-goal *"per-project or per-domain
 roles inside an account"* is likewise reversed.
 
-**Left alone** — everything about the public edition as a product: the authentication seam and
-`localauth`, plans and entitlements, the billing adapter, edition selection, and the marketing site.
+**Left alone** — everything about the public edition as a product: the authentication seam, plans
+and entitlements, the billing adapter, edition selection, and the marketing site.
 Those are untouched by this change and should remain in that one, which after this lands is a
 smaller and more coherent proposal about *selling* the service rather than about *structuring* it.
 

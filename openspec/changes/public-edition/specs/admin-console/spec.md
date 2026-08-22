@@ -1,27 +1,27 @@
 ## ADDED Requirements
 
-### Requirement: The console carries registration, confirmation and password reset
+### Requirement: The console carries account creation, not credentials
 
-The console SHALL, in an edition that authenticates locally, present registration, address confirmation
-and password reset, and SHALL reach them without an existing session.
+The console SHALL hand off enrolment, sign-in and credential recovery to the identity provider, and
+SHALL present no screen that accepts a password.
 
-The console SHALL offer to send a confirmation message again, and SHALL NOT report whether an address
-already has a user.
+The console SHALL present account creation to a signed-in person who belongs to no account, subject to
+the configuration governing self-service account creation.
 
-#### Scenario: Registration is reachable without a session
+#### Scenario: Sign-in is handed off
 
 - **WHEN** a person with no session opens the console
-- **THEN** registration and password reset are reachable
+- **THEN** they are sent to the identity provider, and no credential is entered in the console
 
-#### Scenario: An unconfirmed user is offered only confirmation
+#### Scenario: A person with no account is offered account creation
 
-- **WHEN** a person signs in before confirming their address
-- **THEN** the console offers confirmation or another confirmation message, and nothing else
+- **WHEN** a signed-in person who belongs to no account opens the console
+- **THEN** they are offered account creation, or an invitation to accept, and nothing else
 
-#### Scenario: The console does not disclose whether an address is registered
+#### Scenario: The provider's screens do not disclose whether an address is known
 
-- **WHEN** registration or reset is requested for an address that already has a user
-- **THEN** the console reports the same outcome as for an address that does not
+- **WHEN** enrolment or recovery is requested for an address that already has a user
+- **THEN** the outcome presented is the same as for an address that does not
 
 ### Requirement: A new customer reaches a verified domain without help
 

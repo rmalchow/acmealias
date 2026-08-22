@@ -46,11 +46,14 @@ there. This change is everything else a stranger needs before and around it.
 Because every item in it is a genuine commitment we do not currently carry, and each one is
 individually decidable:
 
-- **Local passwords** mean owning argon2id, credential-stuffing resistance, and a reset flow that
-  cannot itself be an account-takeover vector. Today the service owns none of that: `oidcauth`
-  delegates every one of those problems to Keycloak.
-- **Email becomes load-bearing.** A confirmation message that bounces is a customer who cannot get
-  in. Deliverability is an operational commitment, not a library dependency.
+- **Identity for strangers.** Somebody has to hold customer credentials, verify addresses and
+  survive credential-stuffing. This proposal originally answered "we do, in a new package"; it now
+  answers "the identity provider does, in a second tenant" — see below, because the reversal is the
+  largest single change to this proposal.
+- **Email becomes load-bearing.** A verification message that bounces is a customer who cannot get
+  in. Deliverability is an operational commitment, not a library dependency, and it is now split
+  across two senders: the identity provider sends verification and recovery, we send invitations and
+  balance warnings.
 - **Taking money** means a payment provider in the request path of something, webhook
   verification, and an auditable trail from a card charge to a credit balance.
 - **Strangers on shared infrastructure** need limits that exist regardless of what they have paid,
@@ -70,19 +73,50 @@ This is decision E1 of `add-accounts-and-public-edition`, adopted unchanged.
 Two editions never share a datastore or a DNS zone. Two deployments, two databases, two zones —
 never one deployment serving both audiences.
 
-### Authentication becomes a seam with a second implementation
+### Customers authenticate through the same identity provider we already run
 
-`internal/oidcauth` becomes one implementation of an interface. A second, `internal/localauth`,
-adds what a public edition needs: email and password with argon2id hashing, an email-confirmation
-token, password reset, and rate limiting on authentication attempts.
+This proposal originally specified a second authentication implementation — `internal/localauth`,
+with email and password, argon2id hashing, confirmation tokens, reset tokens and attempt limiting —
+and explicitly rejected running an identity provider for public customers as "the worst of both".
+**That is reversed**, and it is worth saying why plainly, because it deletes the largest piece of
+new security-sensitive code in the change.
 
-Both produce the same thing — a server-side session — and the session machinery, its expiry and
-revocation, and the cross-site request forgery protection are identical whichever authenticated
-it. That was true in the original proposal and remains true; what has changed is only what a
-session carries once established, which `tenancy-and-permissions` now specifies.
+The rejection assumed the identity provider would be *additional*. It is not: one is being run
+anyway, at `auth.edgedns.eu`, for staff and for the internal edition. Adding customers to it is a
+second tenant, not a second system. The second half of the rejection — that registration through
+someone else's screens cedes the part of onboarding worth owning — was also wrong, because the
+screens can be themed, and the part of onboarding that actually matters happens *after* sign-in:
+publishing a `CNAME`, adding a domain, watching it verify.
 
-A vocabulary note that matters more than it looks: **registering creates a *user*, not an
-account.** In the model these changes now share, a user is a person and exists outside every
+What this buys is not convenience, it is liability. The service ends up holding **no password, no
+password hash and no reset token for anybody.** A database compromise discloses email addresses and
+zone contents, not credentials. For a product whose entire pitch is "you do not hand us credentials",
+holding a table of strangers' password hashes was always slightly against the grain.
+
+What it costs is worth being exact about, because "delegate it" is not the same as "it is handled":
+
+- **Every sign-in now depends on the provider being up**, staff sign-in during an incident included.
+  The answer is `internal/adminctl`, which authenticates with a database connection string and no
+  provider at all — which is precisely why `staff-plane` keeps it.
+- **The obligations become configuration rather than code**, and configuration nobody verified is
+  more dangerous than code nobody wrote, because it looks finished. Address verification, recovery
+  verification, non-disclosure on enrolment and recovery, and failed-attempt limiting are each a flow
+  or policy that can be silently absent. They are on the acceptance list rather than assumed.
+- **One thing genuinely gets harder.** When a customer resets a compromised credential, the provider
+  ends *its* sessions — but the service's own session store knows nothing about it, so an attacker's
+  session in our console can outlive the reset that was meant to kill it. That needs a back-channel
+  logout, a revocation check, or a deliberately short idle expiry. It is the one place delegation
+  adds a problem instead of removing one, and it is called out because the failure is silent.
+- **We now operate an internet-facing authentication service**: backups, a tested restore, and a
+  patching commitment.
+
+The seam itself survives with one implementation behind it, for a reason worth stating: it is the
+boundary at which the provider's vocabulary stops. Nothing downstream of a session sees a token, a
+claim or a flow, which is what keeps the provider replaceable.
+
+A vocabulary note that matters more than it looks: **enrolling creates a *user*, not an account.**
+
+A vocabulary note that matters more than it looks: In the model these changes now share, a user is a person and exists outside every
 account; an account is the billing entity that holds credits and owns projects. A newly registered
 user belongs to no account at all, and `tenancy-and-permissions` specifies that state as a normal
 one. The original spec text called registration "creating an account", which is now ambiguous
@@ -219,29 +253,35 @@ considerably more depth. A reader of the old change needs to be told where its c
 
 ### Modified Capabilities
 
-- `identity-and-roles`: authentication becomes a seam with one implementation per edition; local
-  registration with a confirmed email address, memory-hard password storage, single-use expiring
-  reset, and rate-limited authentication attempts are added.
+- `identity-and-roles`: authentication is delegated to an external identity provider in both
+  editions, which hold no credential of their own; editions differ only in the tenant they
+  authenticate against; the obligations that come with delegation — verified enrolment, verified
+  recovery, non-disclosure, attempt limiting, and a reset that ends the service's own sessions — are
+  stated as requirements on the deployment.
 - `service-operations`: one artifact serves both editions with the edition selected at startup and
   reported at runtime; editions never share a datastore or a zone; public-facing content is
   released separately from the service; the acceptance environment exercises both editions.
-- `admin-console`: the console gains registration, confirmation and reset screens, the onboarding
-  path to a first verified domain, and the account's credit balance and payment state.
+- `admin-console`: the console gains the account-creation screen for a signed-in person who belongs
+  to no account, the onboarding path to a first verified domain, and the account's credit balance and
+  payment state. It gains no credential screens.
 
 ## Impact
 
 - **`internal/oidcauth`.** Moves behind an interface with no behavioural change. The interface is
   the whole of the work; the existing flow is not rewritten.
-- **`internal/localauth`.** New: argon2id, confirmation tokens, reset tokens, attempt rate
-  limiting. This is the largest single piece of new security-sensitive code in the change, and the
-  open question below asks whether we should own it at all.
+- **`internal/localauth`.** Not built. The reversal above deletes it; what remains in its place is
+  identity-provider configuration and the acceptance tests that prove the configuration is real.
+- **The identity provider.** Becomes a hard dependency of every sign-in and an operational
+  responsibility: a customer tenant separate from the staff one, backups, a tested restore, and a
+  patching commitment.
 - **Email delivery.** New operational dependency, and the first one whose failure locks a customer
   out rather than degrading a feature. `account-invitations` depends on the same delivery path.
 - **Payment provider.** New external dependency and a webhook endpoint whose verification is
   security-critical. The endpoint is unauthenticated by nature and must be verified by signature.
 - **`internal/config`.** `ACME_EDITION` and the settings each edition requires, validated at
   startup so a public deployment cannot start without the things a public deployment needs.
-- **The console.** Registration, confirmation, reset and purchase screens; the onboarding path.
+- **The console.** Account creation and purchase screens, and the onboarding path. No credential
+  screens: enrolment, sign-in and recovery are handed off.
 - **The acceptance harness.** Must run both editions, or the edition that is not used daily will be
   broken exactly when it matters.
 - **Marketing site.** A separate deployment with its own pipeline and release cadence.

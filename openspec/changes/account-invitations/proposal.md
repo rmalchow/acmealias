@@ -52,8 +52,8 @@ session with no selection may do exactly four things, one of which is **accept a
 This change does not re-specify the roster or the selection rule. It specifies only what an invitation
 contributes to the roster, and where its operations sit relative to the selection.
 
-**`add-accounts-and-public-edition`** — assumed to supply local authentication (email and password,
-argon2id), email delivery, and the token language this change reuses verbatim rather than paraphrasing:
+**`public-edition`** — supplies the identity provider a person enrols with, email delivery, and the
+token language this change reuses verbatim rather than paraphrasing:
 a token that *"SHALL expire, SHALL be usable once, and SHALL NOT be guessable"*, and the rule that a
 response *"does not differ from one for an address that does not"* have a user.
 

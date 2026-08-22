@@ -1,33 +1,43 @@
 ## ADDED Requirements
 
-### Requirement: Authentication is a seam with one implementation per edition
+### Requirement: Authentication is delegated, and the session is the boundary
 
-The service SHALL support more than one way of authenticating a person, selected by edition, and SHALL
-produce the same session from each.
+The service SHALL authenticate every person through an external identity provider in every edition,
+and SHALL hold no credential of its own: no password, no password hash, and no credential reset
+token.
 
-Session storage, idle and absolute expiry, revocation, and cross-site request forgery protection SHALL
-NOT differ between implementations.
+Authentication SHALL produce a server-side session, and session storage, idle and absolute expiry,
+revocation and cross-site request forgery protection SHALL be properties of the session layer rather
+than of the provider. No component downstream of the session SHALL depend on the provider's tokens,
+claims or flows.
 
-#### Scenario: The session is the same shape whatever authenticated it
+Editions SHALL differ only in which of the provider's tenants they authenticate against, and a person
+enrolled in one tenant SHALL NOT thereby be authenticated in another.
 
-- **WHEN** a person is authenticated by any supported means
-- **THEN** the resulting session is stored, expires and is revocable exactly as any other
+#### Scenario: No credential is stored
 
-#### Scenario: One implementation is in force at a time
+- **WHEN** the datastore is inspected for a user
+- **THEN** it contains no password, password hash or reset token
 
-- **WHEN** a deployment is running
-- **THEN** exactly one authentication implementation is wired, determined by the edition
+#### Scenario: No interface accepts a password
 
-#### Scenario: Cross-site request forgery protection is not edition-specific
+- **WHEN** the management interface and API are enumerated
+- **THEN** no route or screen accepts a password
+
+#### Scenario: Cross-site request forgery protection does not depend on the provider
 
 - **WHEN** a state-changing management request is made with a valid session and no matching token header
-- **THEN** it is refused, whichever implementation established the session
+- **THEN** it is refused
 
-### Requirement: A person can register as a user with an email address they control
+#### Scenario: Tenants do not authenticate each other's people
 
-The service SHALL allow a person, in an edition that authenticates locally, to register as a user with
-an email address and a password, and SHALL grant no capability beyond signing in until that address has
-been confirmed by following a token sent to it.
+- **WHEN** a person enrolled in the customer tenant reaches the staff surface
+- **THEN** they are not authenticated there
+
+### Requirement: A person becomes a user by enrolling with an address they control
+
+The service SHALL allow a person to become a user through the identity provider's enrolment, and SHALL
+grant no capability beyond signing in until the provider has verified control of the address.
 
 The token SHALL expire, SHALL be usable once, and SHALL NOT be guessable.
 
@@ -53,54 +63,61 @@ Registration SHALL create a user that belongs to no account.
 - **WHEN** a person completes registration and confirmation
 - **THEN** they hold no membership, and may create an account or accept an invitation
 
-### Requirement: Passwords are stored and reset safely
+### Requirement: Credential handling is verified in the provider, and a reset ends the service's sessions
 
-Passwords SHALL be stored only as a memory-hard hash and SHALL NOT be recoverable.
+The deployment SHALL verify that the identity provider's enrolment verifies address control, that its
+recovery flow verifies address control, that neither enrolment nor recovery discloses whether an
+address already has a user, and that repeated failed attempts against one user or from one source are
+limited.
 
-A reset SHALL be initiated by email, SHALL expire, SHALL be usable once, and SHALL end every existing
-session of that user when used.
+When a person's credential is reset or their access is revoked at the provider, sessions the service
+established for them SHALL cease to be usable.
 
-Repeated authentication attempts against one user or from one source SHALL be rate limited.
+#### Scenario: Recovery does not disclose whether an address is known
 
-#### Scenario: A reset ends existing sessions
-
-- **WHEN** a person completes a password reset
-- **THEN** sessions established before the reset are no longer usable
-
-#### Scenario: Reset does not disclose whether an address is registered
-
-- **WHEN** a reset is requested for an address with no user
+- **WHEN** recovery is requested for an address with no user
 - **THEN** the response is indistinguishable from one for an address that has one
-
-#### Scenario: The stored form is not the password
-
-- **WHEN** the stored representation of a password is read directly from the datastore
-- **THEN** it does not contain the password in a form usable for authentication
 
 #### Scenario: Repeated attempts are slowed
 
 - **WHEN** authentication is attempted repeatedly against one user or from one source
 - **THEN** further attempts are refused until the limit clears
 
+#### Scenario: A reset does not leave a session alive
+
+- **WHEN** a person's credential is reset at the provider
+- **THEN** sessions the service established before the reset are no longer usable
+
+#### Scenario: Unverified enrolment grants nothing
+
+- **WHEN** a person enrols without completing address verification
+- **THEN** no session usable against the management interface is established
+
 ### Requirement: Self-registration is governed by configuration and refused by the server when closed
 
-The service SHALL expose its registration and account-creation endpoints in every deployment, and
-SHALL refuse them with a stated reason whenever self-registration is not enabled by configuration.
+The service SHALL expose its account-creation endpoint in every deployment, and SHALL refuse it with
+a stated reason whenever self-service account creation is not enabled by configuration.
 
-The refusal SHALL be applied by the endpoint itself, and SHALL NOT depend on the interface omitting
-a link. Accepting an invitation SHALL remain possible while self-registration is closed.
+The refusal SHALL be applied by the endpoint itself, and SHALL NOT depend on the interface omitting a
+link, and SHALL NOT depend on the identity provider's enrolment being closed. Accepting an invitation
+SHALL remain possible while account creation is closed.
 
 #### Scenario: A closed deployment refuses the endpoint directly
 
-- **WHEN** the registration endpoint is called directly while self-registration is disabled
-- **THEN** it refuses with a reason, and no user or account is created
+- **WHEN** the account-creation endpoint is called directly while self-service account creation is disabled
+- **THEN** it refuses with a reason and no account is created
+
+#### Scenario: An enrolled person without an account can do nothing
+
+- **WHEN** a person who has enrolled at the provider signs in while account creation is disabled
+- **THEN** they hold a session, belong to no account, and no inventory or spend is reachable
 
 #### Scenario: Invitation acceptance is unaffected
 
-- **WHEN** an invited person completes registration through an invitation while self-registration is disabled
-- **THEN** registration succeeds
+- **WHEN** an invited person enrols through an invitation while self-service account creation is disabled
+- **THEN** enrolment succeeds and they join the inviting account
 
-#### Scenario: Enabling registration requires no code change
+#### Scenario: Enabling account creation requires no code change
 
-- **WHEN** the configuration enabling self-registration is set
-- **THEN** the same endpoint accepts registrations
+- **WHEN** the configuration enabling self-service account creation is set
+- **THEN** the same endpoint accepts account creation
