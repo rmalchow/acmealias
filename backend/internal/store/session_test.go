@@ -9,7 +9,7 @@ import (
 )
 
 func TestIntegrationSessionRoundTrip(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, _ := scopedDB(t)
 	ctx := context.Background()
 
 	s := &model.Session{
@@ -58,7 +58,7 @@ func TestIntegrationSessionRoundTrip(t *testing.T) {
 }
 
 func TestIntegrationDeleteExpiredSessions(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, _ := scopedDB(t)
 	ctx := context.Background()
 
 	live := &model.Session{ID: "sess_live", Subject: "u1", DisplayName: "U1", Groups: model.StringArray{}, ExpiresAt: time.Now().Add(time.Hour).UTC()}

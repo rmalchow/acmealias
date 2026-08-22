@@ -8,11 +8,11 @@ import (
 )
 
 func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, _ := scopedDB(t)
 	ctx := context.Background()
 
-	projectID := int64(1)
-	otherProjectID := int64(2)
+	projectID := model.NewID()
+	otherProjectID := model.NewID()
 
 	entries := []model.AuditEntry{
 		{Action: "create", ObjectType: "domain", ObjectLabel: "example.com", ProjectID: &projectID, ActorSource: "console"},
@@ -63,7 +63,7 @@ func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
 // update path is necessary but not sufficient, because the next person to add
 // one gets no warning from it. This one fails.
 func TestIntegrationAuditEntriesRefuseUpdateAndDelete(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, _ := scopedDB(t)
 	ctx := context.Background()
 
 	e := model.AuditEntry{Action: "project.create", ObjectType: "project", ObjectLabel: "acme", ActorSource: "cli"}

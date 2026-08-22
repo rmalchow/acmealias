@@ -16,7 +16,7 @@ import (
 // AutoMigrate is deliberately not called here or anywhere else (design D8); the
 // schema under test is the one the migrations produced.
 func TestIntegrationModelDrift(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, _ := scopedDB(t)
 	mig := db.Migrator()
 
 	for _, m := range model.Models() {

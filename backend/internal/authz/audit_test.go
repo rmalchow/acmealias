@@ -20,6 +20,8 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
+
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
@@ -121,7 +123,7 @@ func TestIntegrationRecordWritesAnAttributableRow(t *testing.T) {
 		RequestID:   "req-42",
 		ClientIP:    "192.0.2.9",
 	}
-	keyID := int64(7)
+	keyID := model.NewID()
 	err := Record(ctx, db, nil, actor, Event{
 		Action:      "create",
 		ObjectType:  "api_key",

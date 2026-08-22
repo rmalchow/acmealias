@@ -91,23 +91,28 @@ type adminEnv struct {
 	db     *gorm.DB
 	e      *echo.Echo
 	lb     *model.LoadBalancer
-	projID int64
+	projID model.ID
+	sc     store.Scope
 }
 
 func newAdminEnv(t *testing.T) *adminEnv {
 	t.Helper()
 	db := migratedDB(t)
 	ctx := t.Context()
+	sc, err := store.ScopeForBootstrap(ctx, db)
+	if err != nil {
+		t.Fatalf("bootstrap scope: %v", err)
+	}
 
-	p, err := inventory.CreateProject(ctx, db, "acme", "Acme")
+	p, err := inventory.CreateProject(ctx, db, sc, "acme", "Acme")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb, err := inventory.CreateLoadBalancer(ctx, db, p.ID, "eu-prod", "EU production")
+	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, p.ID, "eu-prod", "EU production")
 	if err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
-	if _, err := inventory.AddNode(ctx, db, lb.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
+	if _, err := inventory.AddNode(ctx, db, sc, lb.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
 		t.Fatalf("add node: %v", err)
 	}
 
@@ -670,7 +675,7 @@ func TestStateChangingRequestWithoutTheTokenIsRejected(t *testing.T) {
 type wantEntry struct {
 	action    string
 	label     string
-	projectID *int64
+	projectID *model.ID
 }
 
 // anything stands in for a value the test cannot know before the request:
@@ -678,15 +683,22 @@ type wantEntry struct {
 // the project has been inserted. Both are asserted separately, right after.
 const anything = "\x00any"
 
-var anyProject = &[]int64{-1}[0]
+// anyProject is a sentinel pointer, never a real identifier: the assertion
+// compares against the pointer itself, so the value behind it is irrelevant and
+// deliberately not a value any row could hold.
+var anyProject = &[]model.ID{model.NewID()}[0]
 
 // auditRecorder drives one mutating route at a time and asserts exactly which
 // entries it produced. It reads through GET /api/v1/audit — the surface an
 // operator actually has — rather than the table, so a mutation that writes a
 // row nobody can find still fails here.
 type auditRecorder struct {
-	cl     *client
-	lastID int64
+	cl *client
+	// seen is every entry this recorder has already accounted for. Identifiers
+	// are UUIDs now, so "newer than the last one" is no longer a comparison —
+	// v7 values do sort by time, but as a [16]byte they are not ordered in Go,
+	// and a set says what is meant without relying on that.
+	seen map[model.ID]bool
 }
 
 // step issues one mutating request and asserts that it produced exactly want,
@@ -706,12 +718,15 @@ func (r *auditRecorder) step(t *testing.T, method, path, body string, wantStatus
 	// written, and keep only what this request added.
 	var got []auditView
 	for i := len(all) - 1; i >= 0; i-- {
-		if all[i].ID > r.lastID {
+		if !r.seen[all[i].ID] {
 			got = append(got, all[i])
 		}
 	}
+	if r.seen == nil {
+		r.seen = map[model.ID]bool{}
+	}
 	for _, e := range got {
-		r.lastID = max(r.lastID, e.ID)
+		r.seen[e.ID] = true
 	}
 
 	if len(got) != len(want) {
@@ -878,7 +893,7 @@ func assertLabel(t *testing.T, cl *client, action, label string) {
 	}
 }
 
-func assertProjectID(t *testing.T, cl *client, action string, projectID int64) {
+func assertProjectID(t *testing.T, cl *client, action string, projectID model.ID) {
 	t.Helper()
 	var es []auditView
 	decode(t, cl.do(http.MethodGet, "/api/v1/audit?action="+action, ""), &es)
@@ -936,7 +951,7 @@ func TestRolledBackChangeLeavesNoAuditEntry(t *testing.T) {
 
 	boom := errors.New("the change failed after its audit entry was written")
 	err := v.db.Transaction(func(tx *gorm.DB) error {
-		p, err := inventory.CreateProject(ctx, tx, "doomed", "Doomed")
+		p, err := inventory.CreateProject(ctx, tx, v.sc, "doomed", "Doomed")
 		if err != nil {
 			return err
 		}
@@ -1130,15 +1145,15 @@ func TestEffectiveConfigurationIsRedactedAndCarriesTheRoleMapping(t *testing.T) 
 	}
 }
 
-func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+func itoa(n model.ID) string { return n.String() }
 
 // --- paging, filtering and the time range ----------------------------------
 
 // seedProjects creates n projects whose slugs sort in creation order, plus
 // returns the ids, so a test can talk about "a row on a later page".
-func (v *adminEnv) seedProjects(cl *client, slugs ...string) []int64 {
+func (v *adminEnv) seedProjects(cl *client, slugs ...string) []model.ID {
 	v.t.Helper()
-	ids := make([]int64, 0, len(slugs))
+	ids := make([]model.ID, 0, len(slugs))
 	for _, slug := range slugs {
 		rec := cl.do(http.MethodPost, "/api/v1/projects", `{"slug":"`+slug+`","name":"`+slug+`"}`)
 		if rec.Code != http.StatusCreated {
@@ -1339,6 +1354,9 @@ func (v *adminEnv) seedInteraction(label string, withdrawn bool, abandoned bool,
 		now := time.Now()
 		in.WithdrawnAt = &now
 	}
+	// challenge_interactions carries no account and no policy, so a direct
+	// insert is still the honest fixture here — unlike every inventory table,
+	// where one would be refused by the database.
 	if err := v.db.Create(in).Error; err != nil {
 		v.t.Fatalf("seed interaction %s: %v", label, err)
 	}

@@ -156,7 +156,7 @@ func TestUnauthenticatedRequestsRevealNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.ID, k.LoadBalancerID = 1, 7
+	k.ID, k.LoadBalancerID = model.NewID(), model.NewID()
 	e := serverWithoutDB(t, k)
 
 	answer := func(name, body string, auth func(*http.Request)) string {
@@ -304,14 +304,18 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	db := migratedDB(t)
 	ctx := t.Context()
+	sc, err := store.ScopeForBootstrap(ctx, db)
+	if err != nil {
+		t.Fatalf("bootstrap scope: %v", err)
+	}
 
 	p := &model.Project{Slug: "acme", Name: "Acme"}
-	if err := store.CreateProject(ctx, db, p); err != nil {
+	if err := store.CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	lb := func(slug string) *model.LoadBalancer {
 		lb := &model.LoadBalancer{ProjectID: p.ID, Slug: slug, Name: slug}
-		if err := store.CreateLoadBalancer(ctx, db, lb); err != nil {
+		if err := store.CreateLoadBalancer(ctx, db, sc, lb); err != nil {
 			t.Fatalf("create load balancer %s: %v", slug, err)
 		}
 		return lb
@@ -319,17 +323,17 @@ func newEnv(t *testing.T) *env {
 	mine, other := lb("a"), lb("b")
 
 	alias := &model.Alias{LoadBalancerID: mine.ID, ChallengeFQDN: testFQDN, Label: testLabel}
-	if err := store.CreateAlias(ctx, db, alias); err != nil {
+	if err := store.CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
 
-	auth := func(loadBalancerID int64) func(*http.Request) {
+	auth := func(loadBalancerID model.ID) func(*http.Request) {
 		k, secret, err := apikey.New()
 		if err != nil {
 			t.Fatalf("new api key: %v", err)
 		}
 		k.LoadBalancerID = loadBalancerID
-		if err := store.CreateAPIKey(ctx, db, k); err != nil {
+		if err := store.CreateAPIKey(ctx, db, sc, k); err != nil {
 			t.Fatalf("create api key: %v", err)
 		}
 		return func(r *http.Request) { r.SetBasicAuth(k.Identifier, secret) }
@@ -339,7 +343,7 @@ func newEnv(t *testing.T) *env {
 	metrics := obs.New()
 	e := echo.New()
 	e.Logger.SetOutput(io.Discard)
-	err := RegisterChallenge(ctx, e, ChallengeOptions{
+	err = RegisterChallenge(ctx, e, ChallengeOptions{
 		DB:       db,
 		Zone:     testZone,
 		View:     view,
@@ -560,13 +564,17 @@ func TestStorageFailureIsReportedAsFailure(t *testing.T) {
 func TestRegisterChallengeRefusesUnprotectedCIDRRestriction(t *testing.T) {
 	db := migratedDB(t)
 	ctx := t.Context()
+	sc, err := store.ScopeForBootstrap(ctx, db)
+	if err != nil {
+		t.Fatalf("bootstrap scope: %v", err)
+	}
 
 	p := &model.Project{Slug: "acme", Name: "Acme"}
-	if err := store.CreateProject(ctx, db, p); err != nil {
+	if err := store.CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "a", Name: "a"}
-	if err := store.CreateLoadBalancer(ctx, db, lb); err != nil {
+	if err := store.CreateLoadBalancer(ctx, db, sc, lb); err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
 	k, _, err := apikey.New()
@@ -575,7 +583,7 @@ func TestRegisterChallengeRefusesUnprotectedCIDRRestriction(t *testing.T) {
 	}
 	k.LoadBalancerID = lb.ID
 	k.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
-	if err := store.CreateAPIKey(ctx, db, k); err != nil {
+	if err := store.CreateAPIKey(ctx, db, sc, k); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
 

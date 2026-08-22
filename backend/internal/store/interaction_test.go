@@ -21,28 +21,29 @@ import (
 type interactionEnv struct {
 	t     *testing.T
 	db    *gorm.DB
-	lbID  int64
+	sc    Scope
+	lbID  model.ID
 	alias *model.Alias
 }
 
 func newInteractionEnv(t *testing.T) *interactionEnv {
 	t.Helper()
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
 
 	p := &model.Project{Slug: "acme", Name: "Acme"}
-	if err := CreateProject(ctx, db, p); err != nil {
+	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu-prod", Name: "EU Prod"}
-	if err := CreateLoadBalancer(ctx, db, lb); err != nil {
+	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
 	alias := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "demo-example-com"}
-	if err := CreateAlias(ctx, db, alias); err != nil {
+	if err := CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
-	return &interactionEnv{t: t, db: db, lbID: lb.ID, alias: alias}
+	return &interactionEnv{t: t, db: db, sc: sc, lbID: lb.ID, alias: alias}
 }
 
 // interaction builds a row for this env's alias, with the fields the filters
@@ -74,7 +75,7 @@ func (v *interactionEnv) insert(in *model.ChallengeInteraction) *model.Challenge
 	return in
 }
 
-func (v *interactionEnv) reload(id int64) model.ChallengeInteraction {
+func (v *interactionEnv) reload(id model.ID) model.ChallengeInteraction {
 	v.t.Helper()
 	var got model.ChallengeInteraction
 	if err := v.db.First(&got, id).Error; err != nil {
@@ -110,7 +111,7 @@ func TestIntegrationQueryObservationsCreditARowThatLivedBetweenTwoFlushes(t *tes
 	in.WithdrawnAt = &withdrawn
 	v.insert(in)
 
-	obs := map[int64]queryobs.Observation{
+	obs := map[model.ID]queryobs.Observation{
 		v.alias.ID: {Count: 2, First: queried, Last: queried.Add(time.Second)},
 	}
 	unmatched, err := ApplyQueryObservations(ctx, v.db, obs, from, to)
@@ -155,14 +156,14 @@ func TestIntegrationQueryObservationsSkipRowsOutsideTheWindow(t *testing.T) {
 	late := v.insert(v.interaction("late", to.Add(10*time.Second)))
 
 	unmatched, err := ApplyQueryObservations(ctx, v.db,
-		map[int64]queryobs.Observation{v.alias.ID: {Count: 1, First: from, Last: to}}, from, to)
+		map[model.ID]queryobs.Observation{v.alias.ID: {Count: 1, First: from, Last: to}}, from, to)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if unmatched != 1 {
 		t.Errorf("unmatched = %d, want 1: no row overlapped the window", unmatched)
 	}
-	for name, id := range map[string]int64{"withdrawn before the window": early.ID, "published after it": late.ID} {
+	for name, id := range map[string]model.ID{"withdrawn before the window": early.ID, "published after it": late.ID} {
 		if got := v.reload(id); got.QueryCount != 0 {
 			t.Errorf("%s: queryCount = %d, want 0", name, got.QueryCount)
 		}
@@ -188,7 +189,7 @@ func TestIntegrationOneQueryCreditsEveryLiveValueAtTheName(t *testing.T) {
 	wildcard := v.insert(v.interaction("wildcard-value", from.Add(3*time.Second)))
 
 	unmatched, err := ApplyQueryObservations(ctx, v.db,
-		map[int64]queryobs.Observation{v.alias.ID: {Count: 1, First: from.Add(4 * time.Second), Last: from.Add(4 * time.Second)}},
+		map[model.ID]queryobs.Observation{v.alias.ID: {Count: 1, First: from.Add(4 * time.Second), Last: from.Add(4 * time.Second)}},
 		from, to)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
@@ -196,7 +197,7 @@ func TestIntegrationOneQueryCreditsEveryLiveValueAtTheName(t *testing.T) {
 	if unmatched != 0 {
 		t.Errorf("unmatched = %d, want 0", unmatched)
 	}
-	for name, id := range map[string]int64{"apex": apex.ID, "wildcard": wildcard.ID} {
+	for name, id := range map[string]model.ID{"apex": apex.ID, "wildcard": wildcard.ID} {
 		got := v.reload(id)
 		if got.QueryCount != 1 {
 			t.Errorf("%s authorization: queryCount = %d, want 1 — one query at a name "+
@@ -217,7 +218,7 @@ func TestIntegrationQueryObservationsFallBackToTheWindowEnd(t *testing.T) {
 	in := v.insert(v.interaction("gfj9Xq", from.Add(time.Second)))
 
 	if _, err := ApplyQueryObservations(ctx, v.db,
-		map[int64]queryobs.Observation{v.alias.ID: {Count: 1}}, from, to); err != nil {
+		map[model.ID]queryobs.Observation{v.alias.ID: {Count: 1}}, from, to); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	got := v.reload(in.ID)
@@ -231,7 +232,7 @@ func TestIntegrationQueryObservationsFallBackToTheWindowEnd(t *testing.T) {
 	firstSeen := *got.FirstQueriedAt
 	later := to.Add(10 * time.Second)
 	if _, err := ApplyQueryObservations(ctx, v.db,
-		map[int64]queryobs.Observation{v.alias.ID: {Count: 3, First: later, Last: later}}, to, later); err != nil {
+		map[model.ID]queryobs.Observation{v.alias.ID: {Count: 3, First: later, Last: later}}, to, later); err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
 	got = v.reload(in.ID)
@@ -316,7 +317,7 @@ func TestIntegrationCloseInteractionWithoutAMatchIsNotAnError(t *testing.T) {
 	if validated != 0 || unqueried != 0 {
 		t.Errorf("closing nothing reported %d validated and %d unqueried, want 0 and 0", validated, unqueried)
 	}
-	if _, _, err := CloseInteraction(ctx, v.db, 999999, "never-published"); err != nil {
+	if _, _, err := CloseInteraction(ctx, v.db, model.NewID(), "never-published"); err != nil {
 		t.Fatalf("close for an unknown alias: %v", err)
 	}
 	if n := v.count(); n != 0 {
@@ -383,7 +384,7 @@ func TestIntegrationListInteractionsFiltersAndPages(t *testing.T) {
 	ctx := context.Background()
 
 	other := &model.Alias{LoadBalancerID: v.lbID, ChallengeFQDN: "_acme-challenge.shop.example.org", Label: "shop-example-org"}
-	if err := CreateAlias(ctx, v.db, other); err != nil {
+	if err := CreateAlias(ctx, v.db, v.sc, other); err != nil {
 		t.Fatalf("create second alias: %v", err)
 	}
 
@@ -407,13 +408,13 @@ func TestIntegrationListInteractionsFiltersAndPages(t *testing.T) {
 
 	// A row belonging to another load balancer must never appear.
 	stranger := v.interaction("stranger", base)
-	strangerLB := v.lbID + 1000
+	strangerLB := model.NewID()
 	stranger.LoadBalancerID = &strangerLB
 	v.insert(stranger)
 
 	list := func(q string, unqueried bool, limit, offset int) ([]model.ChallengeInteraction, int64) {
 		t.Helper()
-		got, total, err := ListInteractionsForLoadBalancer(ctx, v.db, v.lbID, q, unqueried, limit, offset)
+		got, total, err := ListInteractionsForLoadBalancer(ctx, v.db, v.sc, v.lbID, q, unqueried, limit, offset)
 		if err != nil {
 			t.Fatalf("list(%q, %v, %d, %d): %v", q, unqueried, limit, offset, err)
 		}
@@ -478,8 +479,8 @@ func TestIntegrationListInteractionsFiltersAndPages(t *testing.T) {
 	}
 }
 
-func ids(ins []model.ChallengeInteraction) []int64 {
-	out := make([]int64, len(ins))
+func ids(ins []model.ChallengeInteraction) []model.ID {
+	out := make([]model.ID, len(ins))
 	for i, in := range ins {
 		out[i] = in.ID
 	}

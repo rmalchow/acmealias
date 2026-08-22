@@ -21,14 +21,14 @@ import (
 // it is attributed to the service rather than to a person, and running the
 // sweep again does not write a second one.
 func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
-	db := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := t.Context()
 
-	p, err := inventory.CreateProject(ctx, db, "acme", "Acme")
+	p, err := inventory.CreateProject(ctx, db, sc, "acme", "Acme")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb, err := inventory.CreateLoadBalancer(ctx, db, p.ID, "eu", "EU")
+	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, p.ID, "eu", "EU")
 	if err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	past := time.Now().UTC().Add(-time.Hour)
 	lapsed.LoadBalancerID, lapsed.ExpiresAt = lb.ID, &past
 	lapsed.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
-	if err := store.CreateAPIKey(ctx, db, lapsed); err != nil {
+	if err := store.CreateAPIKey(ctx, db, sc, lapsed); err != nil {
 		t.Fatalf("create lapsed key: %v", err)
 	}
 
@@ -51,7 +51,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	}
 	future := time.Now().UTC().Add(time.Hour)
 	live.LoadBalancerID, live.ExpiresAt = lb.ID, &future
-	if err := store.CreateAPIKey(ctx, db, live); err != nil {
+	if err := store.CreateAPIKey(ctx, db, sc, live); err != nil {
 		t.Fatalf("create live key: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 		t.Errorf("objectLabel %q, want %q", e.ObjectLabel, lapsed.Identifier)
 	}
 	if e.ProjectID == nil || *e.ProjectID != p.ID {
-		t.Errorf("projectId %v, want %d", e.ProjectID, p.ID)
+		t.Errorf("projectId %v, want %s", e.ProjectID, p.ID)
 	}
 	// The spec asks every key action to carry the restrictions in effect.
 	if !strings.Contains(string(e.After), "203.0.113.0/24") {

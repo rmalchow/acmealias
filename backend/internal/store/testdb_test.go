@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -11,6 +12,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx", used for schema setup only
 	"gorm.io/gorm"
+
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
 
 // testDatabaseURLEnv names the variable every database-backed test in this package
@@ -83,4 +86,31 @@ func migratedDB(t *testing.T) (*gorm.DB, string) {
 		}
 	})
 	return db, dsn
+}
+
+// scopedDB is migratedDB plus the scope every inventory call now takes. The
+// migration seeds exactly one account, so the bootstrap producer is the honest
+// way for a test to obtain one — a test that could mint a Scope from an
+// identifier would be testing a constructor that does not exist in production.
+func scopedDB(t *testing.T) (*gorm.DB, Scope) {
+	t.Helper()
+	db, _ := migratedDB(t)
+	sc, err := ScopeForBootstrap(context.Background(), db)
+	if err != nil {
+		t.Fatalf("bootstrap scope: %v", err)
+	}
+	return db, sc
+}
+
+// secondAccount creates another account and returns a scope confined to it, for
+// the tests that assert one account cannot reach another's rows.
+func secondAccount(t *testing.T, db *gorm.DB, slug string) Scope {
+	t.Helper()
+	a := &model.Account{ID: model.NewID(), Slug: slug, Name: slug}
+	if err := CrossAccount(context.Background(), db, func(tx *gorm.DB) error {
+		return tx.Create(a).Error
+	}); err != nil {
+		t.Fatalf("create account %q: %v", slug, err)
+	}
+	return Scope{accountID: a.ID}
 }

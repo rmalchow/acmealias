@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"testing"
 	"time"
 )
@@ -50,7 +51,7 @@ func TestIntegrationDeleteOldClosedInteractionsRetentionRules(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("rows deleted at retention=0 = %d, want 0", n)
 	}
-	for _, id := range []int64{young.ID, oldClosed.ID, oldOpen.ID} {
+	for _, id := range []model.ID{young.ID, oldClosed.ID, oldOpen.ID} {
 		v.reload(id)
 	}
 

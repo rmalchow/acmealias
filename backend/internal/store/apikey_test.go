@@ -8,15 +8,15 @@ import (
 )
 
 func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
 
 	p := &model.Project{Slug: "acme-shop", Name: "Acme Shop"}
-	if err := CreateProject(ctx, db, p); err != nil {
+	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu-prod", Name: "EU Prod"}
-	if err := CreateLoadBalancer(ctx, db, lb); err != nil {
+	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
 
@@ -29,11 +29,11 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 			{CIDR: "203.0.113.0/24"},
 		},
 	}
-	if err := CreateAPIKey(ctx, db, key); err != nil {
+	if err := CreateAPIKey(ctx, db, sc, key); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	list, err := ListAPIKeysForLoadBalancer(ctx, db, lb.ID)
+	list, err := ListAPIKeysForLoadBalancer(ctx, db, sc, lb.ID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 	if found.DisabledAt != nil {
 		t.Fatalf("disabled_at = %v, want nil before revoke", found.DisabledAt)
 	}
-	if err := RevokeAPIKey(ctx, db, key.ID); err != nil {
+	if err := RevokeAPIKey(ctx, db, sc, key.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	found, _ = FindAPIKeyByIdentifier(ctx, db, "k_7f3a91c4")
@@ -72,7 +72,7 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 	}
 
 	// Revoking an already-revoked key is refused, not a silent success.
-	if err := RevokeAPIKey(ctx, db, key.ID); err == nil {
+	if err := RevokeAPIKey(ctx, db, sc, key.ID); err == nil {
 		t.Fatal("re-revoke: want an error, got nil")
 	}
 }

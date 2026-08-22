@@ -78,12 +78,16 @@ func Present(ctx context.Context, db *gorm.DB, aliasID model.ID, value, publishe
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(lifetime),
 	}
+	// RETURNING, so the struct carries the identifier of the row that is actually
+	// stored. Without it an upsert that resolved to an UPDATE would hand back the
+	// identifier this call generated for its INSERT attempt — a value no row has,
+	// which reads as "a new record was created" to every caller.
 	err := db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "alias_id"}, {Name: "value"}},
 		// created_at is deliberately not refreshed: the record keeps reporting
 		// when it was first published.
 		DoUpdates: clause.AssignmentColumns([]string{"expires_at", "published_by"}),
-	}).Create(&c).Error
+	}, clause.Returning{}).Create(&c).Error
 	if err != nil {
 		return nil, fmt.Errorf("store: present value at alias %s: %w", aliasID, err)
 	}

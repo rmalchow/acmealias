@@ -29,8 +29,8 @@ func fixture(t *testing.T, opts ...func(*model.APIKey)) (*model.APIKey, string) 
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	k.ID = 1
-	k.LoadBalancerID = 7
+	k.ID = model.NewID()
+	k.LoadBalancerID = model.NewID()
 	for _, o := range opts {
 		o(k)
 	}
@@ -296,47 +296,48 @@ func TestIPExtractorRejectsMalformedTrustedCIDR(t *testing.T) {
 
 func TestLastUsedThrottles(t *testing.T) {
 	var mu sync.Mutex
-	writes := map[int64]int{}
-	count := func(id int64) int {
+	writes := map[model.ID]int{}
+	count := func(id model.ID) int {
 		mu.Lock()
 		defer mu.Unlock()
 		return writes[id]
 	}
-	l := newLastUsed(func(_ context.Context, id int64) error {
+	l := newLastUsed(func(_ context.Context, id model.ID) error {
 		mu.Lock()
 		defer mu.Unlock()
 		writes[id]++
 		return nil
 	}, slog.New(slog.DiscardHandler))
 
+	first, second := model.NewID(), model.NewID()
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			l.Touch(context.Background(), 1)
-			l.Touch(context.Background(), 2)
+			l.Touch(context.Background(), first)
+			l.Touch(context.Background(), second)
 		}()
 	}
 	wg.Wait()
 
-	if count(1) != 1 || count(2) != 1 {
-		t.Fatalf("wrote %d/%d times for keys 1/2, want exactly one each within the interval",
-			count(1), count(2))
+	if count(first) != 1 || count(second) != 1 {
+		t.Fatalf("wrote %d/%d times for two keys, want exactly one each within the interval",
+			count(first), count(second))
 	}
 
 	// Pretending the last write was long ago must let the next one through.
 	l.mu.Lock()
-	l.seen[1] = time.Now().Add(-2 * touchInterval)
+	l.seen[first] = time.Now().Add(-2 * touchInterval)
 	l.mu.Unlock()
-	l.Touch(context.Background(), 1)
-	if count(1) != 2 {
-		t.Fatalf("wrote %d times for key 1 after the interval elapsed, want 2", count(1))
+	l.Touch(context.Background(), first)
+	if count(first) != 2 {
+		t.Fatalf("wrote %d times for the first key after the interval elapsed, want 2", count(first))
 	}
 }
 
 // A failing write must not be fatal: last_used_at is display bookkeeping.
 func TestLastUsedSwallowsWriteErrors(t *testing.T) {
-	l := newLastUsed(func(context.Context, int64) error { return errNotFound }, slog.New(slog.DiscardHandler))
-	l.Touch(context.Background(), 1) // must not panic
+	l := newLastUsed(func(context.Context, model.ID) error { return errNotFound }, slog.New(slog.DiscardHandler))
+	l.Touch(context.Background(), model.NewID()) // must not panic
 }

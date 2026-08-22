@@ -13,16 +13,21 @@ func ptr(s string) *string { return &s }
 // fixture: three domains, two challenge names (the wildcard and the apex
 // share one), one registrable domain — design D5's worked example.
 func fixture(nodes []model.LBNode) (*model.Project, *model.LoadBalancer, []model.Domain, []model.Alias) {
-	project := &model.Project{ID: 1, Slug: "acme-shop", Name: "Acme Shop"}
-	lb := &model.LoadBalancer{ID: 2, ProjectID: 1, Slug: "eu-prod", Name: "EU production"}
+	// Identifiers are minted rather than written as small integers: the plan is
+	// built from the graph these values describe, so what matters is that the
+	// same value appears on both ends of each edge, not what the value is.
+	projectID, lbID := model.NewID(), model.NewID()
+	apexAlias, shopAlias := model.NewID(), model.NewID()
+	project := &model.Project{ID: projectID, Slug: "acme-shop", Name: "Acme Shop"}
+	lb := &model.LoadBalancer{ID: lbID, ProjectID: projectID, Slug: "eu-prod", Name: "EU production"}
 	aliases := []model.Alias{
-		{ID: 10, LoadBalancerID: 2, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"},
-		{ID: 11, LoadBalancerID: 2, ChallengeFQDN: "_acme-challenge.shop.example.com", Label: "shop-example-com"},
+		{ID: apexAlias, LoadBalancerID: lbID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"},
+		{ID: shopAlias, LoadBalancerID: lbID, ChallengeFQDN: "_acme-challenge.shop.example.com", Label: "shop-example-com"},
 	}
 	domains := []model.Domain{
-		{ID: 20, LoadBalancerID: 2, AliasID: 10, Name: "*.example.com"},
-		{ID: 21, LoadBalancerID: 2, AliasID: 10, Name: "example.com"},
-		{ID: 22, LoadBalancerID: 2, AliasID: 11, Name: "shop.example.com"},
+		{ID: model.NewID(), LoadBalancerID: lbID, AliasID: apexAlias, Name: "*.example.com"},
+		{ID: model.NewID(), LoadBalancerID: lbID, AliasID: apexAlias, Name: "example.com"},
+		{ID: model.NewID(), LoadBalancerID: lbID, AliasID: shopAlias, Name: "shop.example.com"},
 	}
 	return project, lb, domains, aliases
 }
@@ -118,7 +123,7 @@ func TestPlanCAAPerRegistrableDomain(t *testing.T) {
 	}
 
 	// Two registrable domains, two sets.
-	domains = append(domains, model.Domain{ID: 23, LoadBalancerID: 2, AliasID: 11, Name: "www.example.org"})
+	domains = append(domains, model.Domain{ID: model.NewID(), LoadBalancerID: lb.ID, AliasID: aliases[1].ID, Name: "www.example.org"})
 	p = buildPlan(project, lb, nodes, domains, aliases, PlanOptions{
 		Zone: "z.example.net", CAAIssuers: []string{"letsencrypt.org"},
 	})

@@ -19,7 +19,7 @@ const goldenPath = "schema.sql"
 // This is a local guard — CI does not set TEST_DATABASE_URL and skips it (design
 // D13). The compensating control is the acceptance run.
 func TestIntegrationSchemaGolden(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, _ := scopedDB(t)
 
 	got := dumpSchema(t, db)
 

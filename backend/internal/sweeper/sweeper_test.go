@@ -29,6 +29,17 @@ const testDatabaseURLEnv = "TEST_DATABASE_URL"
 // unexported helper of the same shape rather than importing it — that helper
 // isn't exported, and this is the only place outside internal/store that
 // needs it.
+// scopedDB is migratedDB plus the scope every inventory call now takes.
+func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
+	t.Helper()
+	db := migratedDB(t)
+	sc, err := store.ScopeForBootstrap(context.Background(), db)
+	if err != nil {
+		t.Fatalf("bootstrap scope: %v", err)
+	}
+	return db, sc
+}
+
 func migratedDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -92,20 +103,22 @@ func migratedDB(t *testing.T) *gorm.DB {
 // time (the value is already unanswerable via store.ActiveByAlias the moment
 // it expires), and the sweep only cleans up the row afterward.
 func TestIntegrationExpiredValueIsUnansweredThenSwept(t *testing.T) {
-	db := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
 
+	// Through the store, not around it: row-level security is forced, so a raw
+	// insert with no account set is refused — which is the policy working.
 	p := model.Project{Slug: "proj", Name: "Project"}
-	if err := db.Create(&p).Error; err != nil {
+	if err := store.CreateProject(ctx, db, sc, &p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	lb := model.LoadBalancer{ProjectID: p.ID, Slug: "lb", Name: "LoadBalancer"}
-	if err := db.Create(&lb).Error; err != nil {
+	if err := store.CreateLoadBalancer(ctx, db, sc, &lb); err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
 	alias := model.Alias{LoadBalancerID: lb.ID, Label: "a0", ChallengeFQDN: "a0.acme.example.net"}
-	if err := db.Create(&alias).Error; err != nil {
+	if err := store.CreateAlias(ctx, db, sc, &alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
 
@@ -156,7 +169,7 @@ func TestIntegrationExpiredValueIsUnansweredThenSwept(t *testing.T) {
 	}
 }
 
-func countChallenges(t *testing.T, db *gorm.DB, aliasID int64) int64 {
+func countChallenges(t *testing.T, db *gorm.DB, aliasID model.ID) int64 {
 	t.Helper()
 	var n int64
 	if err := db.Model(&model.Challenge{}).Where("alias_id = ?", aliasID).Count(&n).Error; err != nil {

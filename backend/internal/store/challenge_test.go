@@ -15,27 +15,31 @@ import (
 // challengeFixture creates one project, one load balancer and n aliases, returning the
 // alias ids in order. Rows are inserted directly rather than through the inventory
 // repositories, so this test only depends on the schema.
-func challengeFixture(t *testing.T, db *gorm.DB, n int) []int64 {
+func challengeFixture(t *testing.T, db *gorm.DB, sc Scope, n int) []model.ID {
 	t.Helper()
 	ctx := context.Background()
 
+	// Fixtures go through the store rather than around it: row-level security is
+	// forced, so a raw insert with no account set is refused by the database —
+	// which is the point of the policy, and makes a test that bypasses the store
+	// a test of nothing.
 	p := model.Project{Slug: "proj", Name: "Project"}
-	if err := db.WithContext(ctx).Create(&p).Error; err != nil {
+	if err := CreateProject(ctx, db, sc, &p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	lb := model.LoadBalancer{ProjectID: p.ID, Slug: "lb", Name: "LoadBalancer"}
-	if err := db.WithContext(ctx).Create(&lb).Error; err != nil {
+	if err := CreateLoadBalancer(ctx, db, sc, &lb); err != nil {
 		t.Fatalf("create load balancer: %v", err)
 	}
 
-	ids := make([]int64, n)
+	ids := make([]model.ID, n)
 	for i := range ids {
 		a := model.Alias{
 			LoadBalancerID: lb.ID,
 			Label:          fmt.Sprintf("a%d", i),
 			ChallengeFQDN:  fmt.Sprintf("a%d.acme.example.net", i),
 		}
-		if err := db.WithContext(ctx).Create(&a).Error; err != nil {
+		if err := CreateAlias(ctx, db, sc, &a); err != nil {
 			t.Fatalf("create alias %d: %v", i, err)
 		}
 		ids[i] = a.ID
@@ -43,7 +47,7 @@ func challengeFixture(t *testing.T, db *gorm.DB, n int) []int64 {
 	return ids
 }
 
-func countChallenges(t *testing.T, db *gorm.DB, aliasID int64) int64 {
+func countChallenges(t *testing.T, db *gorm.DB, aliasID model.ID) int64 {
 	t.Helper()
 	var n int64
 	if err := db.Model(&model.Challenge{}).Where("alias_id = ?", aliasID).Count(&n).Error; err != nil {
@@ -55,9 +59,9 @@ func countChallenges(t *testing.T, db *gorm.DB, aliasID int64) int64 {
 // TestIntegrationPresentIsAnIdempotentUpsert covers "re-storing refreshes rather
 // than duplicates": one row, expiry extended, first publish time kept.
 func TestIntegrationPresentIsAnIdempotentUpsert(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
-	alias := challengeFixture(t, db, 1)[0]
+	alias := challengeFixture(t, db, sc, 1)[0]
 
 	first, err := Present(ctx, db, alias, "tok-1", "k_aaa", time.Minute)
 	if err != nil {
@@ -94,9 +98,9 @@ func TestIntegrationPresentIsAnIdempotentUpsert(t *testing.T) {
 // and *.example.com validate at one challenge name and both values must be
 // answerable at once.
 func TestIntegrationPresentAddsRatherThanReplaces(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
-	alias := challengeFixture(t, db, 1)[0]
+	alias := challengeFixture(t, db, sc, 1)[0]
 
 	for _, v := range []string{"tok-a", "tok-b"} {
 		if _, err := Present(ctx, db, alias, v, "k_aaa", time.Minute); err != nil {
@@ -112,9 +116,9 @@ func TestIntegrationPresentAddsRatherThanReplaces(t *testing.T) {
 // one value must leave the other in place, and cleaning up an absent value must
 // succeed.
 func TestIntegrationCleanupIsExact(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
-	ids := challengeFixture(t, db, 2)
+	ids := challengeFixture(t, db, sc, 2)
 	alias, other := ids[0], ids[1]
 
 	for _, v := range []string{"tok-a", "tok-b"} {
@@ -151,9 +155,9 @@ func TestIntegrationCleanupIsExact(t *testing.T) {
 // TestIntegrationExpiryIsReadTime covers "expired value is not answered, before
 // the sweep has run", then that the sweep deletes it and reports the count.
 func TestIntegrationExpiryIsReadTime(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
-	alias := challengeFixture(t, db, 1)[0]
+	alias := challengeFixture(t, db, sc, 1)[0]
 
 	if _, err := Present(ctx, db, alias, "live", "k_aaa", time.Hour); err != nil {
 		t.Fatal(err)
@@ -176,7 +180,7 @@ func TestIntegrationExpiryIsReadTime(t *testing.T) {
 	if vs := byAlias["a0"]; len(vs) != 1 || vs[0].Value != "live" {
 		t.Fatalf("ActiveByAlias = %v, want only the unexpired value, before any sweep", vs)
 	}
-	active, err := ListActive(ctx, db)
+	active, err := ListActive(ctx, db, sc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,9 +207,9 @@ func TestIntegrationExpiryIsReadTime(t *testing.T) {
 // still be a key in the map (NOERROR-empty), or DNS answers NXDOMAIN after every
 // successful cleanup.
 func TestIntegrationActiveByAliasIncludesEmptyAliases(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
-	ids := challengeFixture(t, db, 2)
+	ids := challengeFixture(t, db, sc, 2)
 
 	if _, err := Present(ctx, db, ids[0], "tok", "k_aaa", time.Minute); err != nil {
 		t.Fatal(err)
@@ -230,16 +234,17 @@ func TestIntegrationActiveByAliasIncludesEmptyAliases(t *testing.T) {
 // TestIntegrationPublisherSurvivesKeyRevocation: published_by is plain text, not a
 // foreign key, so deleting the key leaves the record answerable and attributed.
 func TestIntegrationPublisherSurvivesKeyRevocation(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
-	alias := challengeFixture(t, db, 1)[0]
+	alias := challengeFixture(t, db, sc, 1)[0]
 
-	var loadBalancerID int64
-	if err := db.Model(&model.Alias{}).Where("id = ?", alias).Pluck("load_balancer_id", &loadBalancerID).Error; err != nil {
+	var a model.Alias
+	if err := db.Model(&model.Alias{}).Where("id = ?", alias).First(&a).Error; err != nil {
 		t.Fatal(err)
 	}
+	loadBalancerID := a.LoadBalancerID
 	key := model.APIKey{LoadBalancerID: loadBalancerID, Identifier: "k_7f3a91c4", SecretHash: []byte{1, 2, 3}, DisplayPrefix: "k_7f3a"}
-	if err := db.WithContext(ctx).Create(&key).Error; err != nil {
+	if err := CreateAPIKey(ctx, db, sc, &key); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
 	if _, err := Present(ctx, db, alias, "tok", key.Identifier, time.Minute); err != nil {
@@ -249,7 +254,7 @@ func TestIntegrationPublisherSurvivesKeyRevocation(t *testing.T) {
 		t.Fatalf("delete api key: %v", err)
 	}
 
-	active, err := ListActive(ctx, db)
+	active, err := ListActive(ctx, db, sc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,8 +270,8 @@ func TestIntegrationPublisherSurvivesKeyRevocation(t *testing.T) {
 // read-then-write, is what makes a repeated present idempotent. Exactly one row,
 // and no goroutine may see an error.
 func TestIntegrationConcurrentIdenticalPresents(t *testing.T) {
-	db, _ := migratedDB(t)
-	alias := challengeFixture(t, db, 1)[0]
+	db, sc := scopedDB(t)
+	alias := challengeFixture(t, db, sc, 1)[0]
 
 	const n = 16
 	errs := make([]error, n)
@@ -297,8 +302,8 @@ func TestIntegrationConcurrentIdenticalPresents(t *testing.T) {
 // TestIntegrationConcurrentDistinctPresents: concurrent publishes of different
 // values at one alias must all survive — none may overwrite another.
 func TestIntegrationConcurrentDistinctPresents(t *testing.T) {
-	db, _ := migratedDB(t)
-	alias := challengeFixture(t, db, 1)[0]
+	db, sc := scopedDB(t)
+	alias := challengeFixture(t, db, sc, 1)[0]
 
 	const n = 16
 	errs := make([]error, n)
@@ -329,9 +334,9 @@ func TestIntegrationConcurrentDistinctPresents(t *testing.T) {
 // TestIntegrationCleanupRacingPresent: a withdraw of one value racing publishes of
 // another must not deadlock, error, or take the other value with it.
 func TestIntegrationCleanupRacingPresent(t *testing.T) {
-	db, _ := migratedDB(t)
+	db, sc := scopedDB(t)
 	ctx := context.Background()
-	alias := challengeFixture(t, db, 1)[0]
+	alias := challengeFixture(t, db, sc, 1)[0]
 
 	const rounds = 40
 	var wg sync.WaitGroup
@@ -380,14 +385,14 @@ func TestPresentRejectsBadInput(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name     string
-		aliasID  int64
+		aliasID  model.ID
 		value    string
 		lifetime time.Duration
 	}{
-		{"no alias", 0, "tok", time.Minute},
-		{"empty value", 1, "", time.Minute},
-		{"zero lifetime", 1, "tok", 0},
-		{"negative lifetime", 1, "tok", -time.Minute},
+		{"no alias", model.NilID, "tok", time.Minute},
+		{"empty value", model.NewID(), "", time.Minute},
+		{"zero lifetime", model.NewID(), "tok", 0},
+		{"negative lifetime", model.NewID(), "tok", -time.Minute},
 	} {
 		if _, err := Present(ctx, nil, tc.aliasID, tc.value, "k_aaa", tc.lifetime); err == nil {
 			t.Errorf("%s: want an error", tc.name)

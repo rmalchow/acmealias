@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"gorm.io/gorm"
 )
 
 // ID is the identifier type for every row in this schema (design P17). It is a
@@ -49,6 +50,37 @@ func NewID() ID {
 // ParseID parses the canonical text form, as it arrives in a URL path or a
 // request body.
 func ParseID(s string) (ID, error) { return uuid.Parse(s) }
+
+// ensureID fills in an identifier that the caller left unset.
+//
+// This exists because of how GORM decides whether to send a column. A field it
+// can recognize as empty — a zero int, a nil pointer — is omitted so the
+// database default applies. An ID is a [16]byte array, which GORM sends as-is,
+// so an unset identifier arrives as the all-zero UUID and the SECOND insert
+// collides on the primary key. The failure is loud but its cause is not, so the
+// remedy lives here rather than in every caller.
+//
+// The database still carries a uuidv7() default, for rows created by SQL that
+// never passes through these structs.
+func ensureID(id *ID) {
+	if *id == NilID {
+		*id = NewID()
+	}
+}
+
+// BeforeCreate hooks mint an identifier for any row inserted without one. GORM
+// calls them for every create path, including the raw ones tests use.
+func (a *Account) BeforeCreate(*gorm.DB) error              { ensureID(&a.ID); return nil }
+func (p *Project) BeforeCreate(*gorm.DB) error              { ensureID(&p.ID); return nil }
+func (lb *LoadBalancer) BeforeCreate(*gorm.DB) error        { ensureID(&lb.ID); return nil }
+func (n *LBNode) BeforeCreate(*gorm.DB) error               { ensureID(&n.ID); return nil }
+func (a *Alias) BeforeCreate(*gorm.DB) error                { ensureID(&a.ID); return nil }
+func (d *Domain) BeforeCreate(*gorm.DB) error               { ensureID(&d.ID); return nil }
+func (k *APIKey) BeforeCreate(*gorm.DB) error               { ensureID(&k.ID); return nil }
+func (n *APIKeyNetwork) BeforeCreate(*gorm.DB) error        { ensureID(&n.ID); return nil }
+func (c *Challenge) BeforeCreate(*gorm.DB) error            { ensureID(&c.ID); return nil }
+func (e *AuditEntry) BeforeCreate(*gorm.DB) error           { ensureID(&e.ID); return nil }
+func (i *ChallengeInteraction) BeforeCreate(*gorm.DB) error { ensureID(&i.ID); return nil }
 
 // StringArray maps a PostgreSQL text[] column onto []string.
 //

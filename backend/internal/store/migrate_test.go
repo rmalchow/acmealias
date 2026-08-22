@@ -36,29 +36,37 @@ func TestIntegrationMigrationsAreIdempotent(t *testing.T) {
 func TestIntegrationMigrateDownReverses(t *testing.T) {
 	db, dsn := migratedDB(t)
 
-	project := model.Project{Slug: "acme-shop", Name: "Acme Shop"}
+	// The row graph starts at an account now: projects reference one, and the
+	// migration seeds exactly one for this deployment.
+	var account model.Account
+	if err := db.First(&account).Error; err != nil {
+		t.Fatalf("read seeded account: %v", err)
+	}
+
+	project := model.Project{AccountID: account.ID, Slug: "acme-shop", Name: "Acme Shop"}
 	if err := db.Create(&project).Error; err != nil {
 		t.Fatalf("insert project: %v", err)
 	}
-	lb := model.LoadBalancer{ProjectID: project.ID, Slug: "eu-prod", Name: "EU production"}
+	lb := model.LoadBalancer{AccountID: account.ID, ProjectID: project.ID, Slug: "eu-prod", Name: "EU production"}
 	if err := db.Create(&lb).Error; err != nil {
 		t.Fatalf("insert load_balancer: %v", err)
 	}
 	ipv4, ipv6 := "192.0.2.10", "2001:db8::10"
-	if err := db.Create(&model.LBNode{LoadBalancerID: lb.ID, Label: "a", IPv4: &ipv4, IPv6: &ipv6}).Error; err != nil {
+	if err := db.Create(&model.LBNode{AccountID: account.ID, ProjectID: project.ID, LoadBalancerID: lb.ID, Label: "a", IPv4: &ipv4, IPv6: &ipv6}).Error; err != nil {
 		t.Fatalf("insert lb_node: %v", err)
 	}
-	alias := model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
+	alias := model.Alias{AccountID: account.ID, ProjectID: project.ID, LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
 	if err := db.Create(&alias).Error; err != nil {
 		t.Fatalf("insert alias: %v", err)
 	}
 	// example.com and *.example.com share one alias — the wildcard case from design D4.
 	for _, name := range []string{"example.com", "*.example.com"} {
-		if err := db.Create(&model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: name}).Error; err != nil {
+		if err := db.Create(&model.Domain{AccountID: account.ID, ProjectID: project.ID, LoadBalancerID: lb.ID, AliasID: alias.ID, Name: name}).Error; err != nil {
 			t.Fatalf("insert domain %s: %v", name, err)
 		}
 	}
 	key := model.APIKey{
+		AccountID: account.ID, ProjectID: project.ID,
 		LoadBalancerID: lb.ID, Identifier: "k_7f3a91c4",
 		SecretHash: []byte("0123456789abcdef0123456789abcdef"), DisplayPrefix: "AbCdEf",
 	}
