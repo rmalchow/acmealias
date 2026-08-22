@@ -63,14 +63,14 @@
 - [ ] 8.1 Extend the acceptance harness to run both editions and fail if either is broken
 - [ ] 8.2 Cover registration, address confirmation, a domain reaching verification, a credit purchase and a protective limit refusal in the locally authenticated edition
 - [ ] 8.3 Add an operational runbook for email delivery failure, since a bounced confirmation locks a customer out
-- [ ] 8.4 Remove `add-accounts-and-public-edition` once this change and `tenancy-and-permissions` are accepted, having confirmed every requirement of it is either here or named in this change's supersession table
+- [x] 8.4 `add-accounts-and-public-edition` is archived unimplemented; confirm before closing that every requirement of it is either here or named in this change's supersession table
 - [ ] 8.5 Decide where the unhoused rule "an unverified domain is not charged for" belongs, or record that the credit model makes it moot
 
-## 8. Registration and payment switches
+## 9. Registration and payment switches
 
-- [ ] 8.1 Add the self-registration configuration switch; refuse the registration and account-creation handlers with a stated reason when it is off (design U9)
-- [ ] 8.2 Add a test calling the registration endpoint directly, bypassing the console, asserting refusal when the switch is off and success when it is on
-- [ ] 8.3 Follow the switch in the console's links and the marketing site's call to action, as presentation only
-- [ ] 8.4 Add the payment configuration switch; refuse the purchase endpoints when it is off, leaving the staff credit grant as the only source of balance
-- [ ] 8.5 Confirm invitation acceptance is unaffected by either switch
-- [ ] 8.6 State on the marketing site that DNSSEC is not supported, and that a signed domain must have its delegation signer removed before it can be hosted (design U10)
+- [ ] 9.1 Add the self-registration configuration switch; refuse the registration and account-creation handlers with a stated reason when it is off (design U9)
+- [ ] 9.2 Add a test calling the registration endpoint directly, bypassing the console, asserting refusal when the switch is off and success when it is on
+- [ ] 9.3 Follow the switch in the console's links and the marketing site's call to action, as presentation only
+- [ ] 9.4 Add the payment configuration switch; refuse the purchase endpoints when it is off, leaving the staff credit grant as the only source of balance
+- [ ] 9.5 Confirm invitation acceptance is unaffected by either switch
+- [ ] 9.6 State on the marketing site that DNSSEC is not supported, and that a signed domain must have its delegation signer removed before it can be hosted (design U10)
