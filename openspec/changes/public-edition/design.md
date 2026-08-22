@@ -277,6 +277,25 @@ session, and a copy change must never require redeploying a DNS service.
 Static site, its own pipeline, its own domain. The only coupling is a link into the public edition's
 registration route and a shared visual language.
 
+The deployment's names, decided alongside the nameserver names in `dns-records` R9:
+
+| Name | Serves |
+| --- | --- |
+| `www.edgedns.eu` | the marketing site — static, no session, its own pipeline |
+| `console.edgedns.eu` | the authenticated console and the public API |
+| `admin.edgedns.eu` | the staff surface of `staff-plane` |
+| `auth.edgedns.eu` | the identity provider |
+
+`admin` being a separate name rather than a path under `console` is worth stating as deliberate: the
+staff routes are served on the same listener (`staff-plane` S9), and the separate hostname is what
+lets network-level restriction be applied to the staff surface without touching the customer one.
+
+One dependency this arrangement creates and which should be an operational decision rather than an
+accident: `console`, `www`, `admin` and `auth` all live inside `edgedns.eu`, which is also a parent of
+two of the fleet's nameservers. If that zone is served by the fleet itself, then a fleet-wide failure
+takes down the console and the marketing site along with customers' DNS — including the pages a
+customer would visit to find out what is happening.
+
 ### U11. The site carries the obligations, because several decisions elsewhere say "published"
 
 U7 settles how the marketing site is *delivered* and says almost nothing about what it must contain.

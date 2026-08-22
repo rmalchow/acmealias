@@ -252,9 +252,31 @@ What follows is a constraint rather than a name:
 - **Glue records** at the parent for any nameserver name that lives inside a domain we ourselves
   serve, since otherwise resolving the nameserver requires asking the nameserver.
 
-The concrete names are not decided in this change. Every name appearing in these documents —
-`acme.example.net`, `ns1.example.net` — is illustrative, and the eventual names are configuration
-read by the apex generator in R6, not constants.
+**The names are now decided**, and they satisfy the constraint:
+
+```
+ns1.edgedns.eu     ns1.edgedns.info
+ns2.edgedns.eu     ns2.edgedns.info
+```
+
+Two parent domains, two top-level domains, four names. A zone's apex `NS` set is generated from this
+configuration by R6; the set is not a constant in the code, so it remains changeable for zones added
+later even though it is effectively permanent for zones already delegated.
+
+Two consequences follow from these particular names and are recorded because they are easy to miss:
+
+- **Glue is required at both registries.** `ns1.edgedns.eu` lives inside `edgedns.eu`, so resolving it
+  requires asking `edgedns.eu`'s nameservers, which are the names being resolved. The `.eu` and
+  `.info` registries must each hold address records for the nameservers in their own zone. This is
+  ordinary registrar configuration, and it is the step whose omission produces a delegation that
+  works from a warm cache and fails from a cold one.
+- **The two domains must not share a registrar**, or the second domain buys nothing. The whole point
+  of the second parent is that one lapsed renewal, one account compromise or one registrar dispute
+  cannot take every customer's delegation down at once, and a single account holding both is exactly
+  the correlated failure being designed against. If they are currently at one registrar, moving one
+  is a small piece of work with a large payoff.
+
+Every *zone* name in these documents — `example.com`, `shop.example.com` — remains illustrative.
 
 **Rejected: one domain with `ns1`/`ns2`/`ns3` under it.** The common arrangement, and the reason it is
 common is that large operators mitigate the shared-parent risk with contracts and registry locks and

@@ -21,6 +21,9 @@
 - [ ] 3.3 Refuse management operations that would create, change or delete apex `SOA` or `NS`
 - [ ] 3.4 Permit `NS` below the apex, subject to a grant covering the `NS` type
 - [ ] 3.5 Read the fleet's nameserver names from configuration (design R9); refuse startup unless there are at least two names spanning at least two parent domains in two top-level domains
+- [ ] 3.5a Configure the fleet as `ns1.edgedns.eu`, `ns2.edgedns.eu`, `ns1.edgedns.info`, `ns2.edgedns.info`
+- [ ] 3.5b Create glue records for the nameservers at both the `.eu` and `.info` registries, and verify delegation from a cold resolver rather than a warm cache
+- [ ] 3.5c Confirm the two domains are held at different registrars, moving one if not (design R9)
 - [ ] 3.6 Keep every nameserver and zone name in documentation and fixtures illustrative, so no concrete name is depended on before it is chosen
 
 ## 3a. Delegation signer pre-flight (design R8)
