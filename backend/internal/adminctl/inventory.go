@@ -75,7 +75,7 @@ func ProjectCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "created project %q (id %d): %s\n", p.Slug, p.ID, p.Name)
+	fmt.Fprintf(out, "created project %q (id %s): %s\n", p.Slug, p.ID, p.Name)
 	return nil
 }
 
@@ -91,14 +91,14 @@ func ProjectList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer
 		return nil
 	}
 	for _, p := range ps {
-		fmt.Fprintf(out, "project %s (id %d) %q\n", p.Slug, p.ID, p.Name)
+		fmt.Fprintf(out, "project %s (id %s) %q\n", p.Slug, p.ID, p.Name)
 		for _, lb := range p.LoadBalancers {
-			fmt.Fprintf(out, "  loadbalancer %s/%s (id %d) %q\n", p.Slug, lb.Slug, lb.ID, lb.Name)
+			fmt.Fprintf(out, "  loadbalancer %s/%s (id %s) %q\n", p.Slug, lb.Slug, lb.ID, lb.Name)
 			for _, n := range lb.Nodes {
-				fmt.Fprintf(out, "    node %s (id %d) %s\n", n.Label, n.ID, formatAddrs(n))
+				fmt.Fprintf(out, "    node %s (id %s) %s\n", n.Label, n.ID, formatAddrs(n))
 			}
 			for _, d := range lb.Domains {
-				fmt.Fprintf(out, "    domain %s (id %d)\n", d.Name, d.ID)
+				fmt.Fprintf(out, "    domain %s (id %s)\n", d.Name, d.ID)
 			}
 		}
 	}
@@ -134,7 +134,7 @@ func ProjectDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "deleted project %q (id %d)\n", p.Slug, p.ID)
+	fmt.Fprintf(out, "deleted project %q (id %s)\n", p.Slug, p.ID)
 	return nil
 }
 
@@ -159,7 +159,7 @@ func LoadBalancerCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "created load balancer %q (id %d) in project %q: %s\n", p.Slug, p.ID, projectSlug, p.Name)
+	fmt.Fprintf(out, "created load balancer %q (id %s) in project %q: %s\n", p.Slug, p.ID, projectSlug, p.Name)
 	return nil
 }
 
@@ -181,7 +181,7 @@ func LoadBalancerDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "deleted load balancer %q (id %d)\n", lb.Slug, lb.ID)
+	fmt.Fprintf(out, "deleted load balancer %q (id %s)\n", lb.Slug, lb.ID)
 	return nil
 }
 
@@ -206,7 +206,7 @@ func NodeAdd(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, re
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "added node %q (id %d) to load balancer %q: %s\n", n.Label, n.ID, lb.Slug, formatAddrs(*n))
+	fmt.Fprintf(out, "added node %q (id %s) to load balancer %q: %s\n", n.Label, n.ID, lb.Slug, formatAddrs(*n))
 	return nil
 }
 
@@ -231,7 +231,7 @@ func NodeDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer,
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "deleted node id %d\n", id)
+	fmt.Fprintf(out, "deleted node id %s\n", id)
 	return nil
 }
 
@@ -310,7 +310,7 @@ func DomainList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer,
 		return nil
 	}
 	for _, d := range domains {
-		fmt.Fprintf(out, "%s (id %d)\n", d.Name, d.ID)
+		fmt.Fprintf(out, "%s (id %s)\n", d.Name, d.ID)
 	}
 	return nil
 }
@@ -348,7 +348,7 @@ func DomainDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Write
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "deleted domain %q (id %d)\n", d.Name, id)
+	fmt.Fprintf(out, "deleted domain %q (id %s)\n", d.Name, id)
 	if aliasRemoved {
 		fmt.Fprintln(out, "its alias had no other domains and was removed too")
 	}

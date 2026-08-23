@@ -148,6 +148,11 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	// in, and everything below this block would otherwise act in whichever one
 	// happened to be selected.
 	//
+	// The contract, served unauthenticated: a contract nobody can read without
+	// credentials is not a published one, and it describes only what the API
+	// already answers.
+	registerOpenAPI(e)
+
 	// Every signed-in user may read their own identity; there is nothing here
 	// they did not already supply.
 	sec.GET("/me", a.me)

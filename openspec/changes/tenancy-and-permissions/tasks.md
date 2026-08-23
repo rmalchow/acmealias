@@ -69,7 +69,7 @@
 
 - [x] 7.1 Remove `authz.Require(action)` route middleware; move permission checks into `internal/inventory`, the service layer the API and the CLI share (design P7)
 - [x] 7.1a Split the route tree: versioned public API under `/api/v1/**`, unversioned administrative API under `/api/admin/**` (design P15)
-- [ ] 7.1b Publish an OpenAPI document for the public API only, and add a test asserting every console request is an operation it describes
+- [x] 7.1b Publish an OpenAPI document for the public API only, and add a test asserting every console request is an operation it describes
 - [x] 7.2 Add role, membership and grant routes
 - [x] 7.3 Report permitted actions per object on every listing and read (design P12)
 - [x] 7.4 Make project creation require membership of the account's unrestricted role, not a grant; refuse any grant naming an account as its object (design P14)
@@ -107,7 +107,7 @@
 
 ## 11. Documentation and closing the overlap
 
-- [ ] 11.1 Update `docs/` for accounts, roles as data, and per-project keys
-- [ ] 11.2 Amend `add-accounts-and-public-edition`: remove its `identity-and-roles` delta and its `accounts-and-tenancy` spec, and its non-goal reversing per-project scoping; leave the public-edition product scope intact
-- [ ] 11.3 Update the CLI (`internal/adminctl`) to operate within the single account and to accept grants when creating keys
-- [ ] 11.4 Run the full acceptance suite and confirm the internal edition's observable behaviour is unchanged
+- [x] 11.1 Update `docs/` for accounts, roles as data, and per-project keys
+- [x] 11.2 Superseded by archiving. `add-accounts-and-public-edition` was archived unimplemented with a note saying where each half went, so amending its deltas would be editing a document nobody should build from — the task asked for surgery on a live change that is no longer live
+- [x] 11.3 Update the CLI (`internal/adminctl`) to operate within the single account and to accept grants when creating keys
+- [ ] 11.4 NOT DONE, and not because it passed quietly. The acceptance suite's `TestMain` begins with `./scripts/dev.sh reset --yes`, which destroys the database it resets, so it cannot be run against a stack anyone is using. Run instead with `ACCEPTANCE_KEEP_STACK=1` against a stack brought up with `--acme`, it reached the readiness gate and timed out after six minutes: the stack was torn down underneath it partway through. The run therefore proves nothing in either direction. This is the one gate that would show end to end that the internal edition's observable behaviour is unchanged — the property constraint 1 turns on — and it remains unproven. Re-run on a machine where the stack can be reset.

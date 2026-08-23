@@ -17,6 +17,7 @@ for, and the handful of recipes that cover almost everything you will actually d
 - [Recent interactions](#recent-interactions)
 - [Live challenges](#live-challenges)
 - [Audit log](#audit-log)
+- [Roles](#roles)
 - [Settings](#settings)
 - [Recipes](#recipes)
 
@@ -26,12 +27,14 @@ There is no password to remember. Opening the console redirects you to the ident
 back; a deep link you followed is preserved, so a link to a specific load balancer still lands you there
 after signing in.
 
-Your permissions come from the Keycloak groups you are a member of. There is no per-project
-scoping and no screen for editing who has what — the four roles below are **global**,
-and which Keycloak group maps to which role is set once, in the running service's configuration.
-If you sign in successfully but see a refusal, the page lists the groups it saw for you — that
-list is what an administrator needs in order to fix it (by adding you to the right Keycloak
-group). Holding several roles at once is normal: they are additive, not exclusive.
+Your permissions come from the Keycloak groups you are a member of: each configured group grants a
+role, and holding several at once is normal — they are additive, not exclusive. If you sign in
+successfully but see a refusal, the page lists the groups it saw for you, and that list is what an
+administrator needs in order to fix it.
+
+Roles are **rows in your account**, not fixed names in the software. The four below are seeded for
+you and confer exactly what they always did, but they can be edited and you can add others — see
+**Roles** in the navigation.
 
 | | `ADMIN` | `CONFIG_ADMIN` | `KEY_ROTATION` | `READ_ONLY` |
 | --- | --- | --- | --- | --- |
@@ -41,6 +44,23 @@ group). Holding several roles at once is normal: they are additive, not exclusiv
 | see a key secret (once) | yes | yes | yes | no |
 | DNS plan + run verification | yes | yes | yes | yes |
 | view inventory + audit log | yes | yes | yes | yes |
+
+`ADMIN` is your account's **unrestricted** role: every action on every object, uneditable, and
+always with at least one member. The console shows it as fixed rather than as a form you cannot
+submit, because there is nothing in it to edit — its authority is a property of the account, not a
+list someone could shorten. For the same reason the last member's **Remove** button is absent: an
+account with nobody in that role is one nobody can administer.
+
+Any other role is a set of **grants**. A grant names an object type, an object, and an action, plus
+whether it reaches the things that object contains — so "read this one project" and "manage keys for
+this load balancer" are both sayable, and a contractor given the first sees only that project in
+every listing. Grants are anchored to your account: a wildcard means "everything here", and there is
+no way to write one that names anything outside it.
+
+You may only grant what you hold. The composer offers no more than your own authority, and the
+service refuses anything wider — checked against a single grant you hold rather than against your
+grants combined, so holding two load balancers does not let you issue authority over the project
+containing them. Today those are the only two; tomorrow there might be a third you never had.
 
 Controls you may not use are not shown. That is a convenience, not the enforcement — every action is
 checked again on the server, so nothing is reachable by poking at the API directly.
@@ -54,19 +74,22 @@ Projects
         ├── Nodes                  addresses of its Traefik hosts
         ├── Domains                what this load balancer answers for
         ├── DNS plan               what the customer must publish + live status
-        ├── API keys               credentials for this load balancer
+        ├── API keys               credentials, and what each one may reach
         └── Recent interactions    every publish, and whether the CA came to look
 
 Live challenges                    what is being validated right now
 Audit log                          who changed what
+Roles                              who may do what, and to which objects
 Settings                           effective configuration, active sessions
 ```
 
 ## Projects and load balancers
 
 A **project** groups everything belonging to one customer engagement or one of our own
-products. Permissions are *not* granted per project — the four roles are global — so
-organising projects to match teams is a matter of tidiness, not access control.
+products. Permission *can* be granted per project now: a role holding a grant over one project, with
+"reaches contained objects" ticked, sees and manages everything inside it and nothing outside. So
+organising projects to match teams is no longer only tidiness — it is the shape access control will
+follow.
 
 A **load balancer** is one environment's Traefik nodes. Record every node's public address:
 those addresses become the address records in the DNS plan, and they are offered as the default
@@ -197,8 +220,16 @@ DNS is somebody else's mutable state, and a green tick from yesterday means noth
 
 ## API keys
 
-A key belongs to one load balancer and can publish challenges only for that load balancer's domains. All of
-its Traefik nodes normally share one key.
+A key is a credential with **grants**: it reaches whatever they name, and nothing else. Create one
+from a load balancer page and it gets the obvious pair — publish and withdraw challenge values for
+that load balancer — which is what a key used to be, and still the right answer for most
+deployments. All of a load balancer's Traefik nodes normally share one.
+
+Keys are no longer *owned* by a load balancer, though, and the listing shows what each one can
+actually do. A key granted a whole project appears on every load balancer inside it, because it can
+genuinely act on all of them; one key for a project instead of four keys for four load balancers is
+now a thing you can ask for. The **Authority** column is where that difference is visible, and it is
+worth reading before revoking anything.
 
 ### Creating one
 
@@ -214,7 +245,7 @@ its Traefik nodes normally share one key.
 > it via `last used`, then revoke the first. No coordinated cutover, no window where
 > renewals fail.
 
-The list shows the identifier, a short display prefix, restrictions, expiry and
+The list shows the identifier, a short display prefix, its grants, restrictions, expiry and
 **last used** — that last column is the useful one. A key that has never been used
 points at a deployment that never picked it up; a key nobody has used in months is a candidate for
 revocation.
@@ -278,12 +309,46 @@ see [Settings](#settings) for how to check who currently has what.
 Besides the obvious compliance use, it is the fastest way to answer "this used to work" — a domain
 removed, a key revoked, or a restriction added usually shows up right before the failure started.
 
+## Roles
+
+Who may do what in this account, and to which objects.
+
+Reading the roster needs no permission at all — knowing who else is in the room is not a privilege,
+and an account whose membership nobody can see is how it ends up with a member nobody remembers
+adding. Changing anything on this screen needs `ADMIN`.
+
+A role is a name and a list of grants. Each grant is three choices and a flag:
+
+| | |
+| --- | --- |
+| **Applies to** | a kind of object, or anything in the account |
+| **Object** | one identifier, or blank for every object of that kind |
+| **Action** | what may be done to it |
+| **Reaches contained objects** | whether it extends to what that object contains |
+
+The flag is the one worth pausing on. Without it, a grant on a project is a grant on the project row
+itself and nothing beneath it — you can rename the project and touch none of its load balancers.
+With it, the grant reaches every load balancer, node, domain and alias inside. Inheritance never
+runs the other way: a grant on a load balancer says nothing about the project containing it.
+
+The composer offers only actions you already hold, and the service refuses anything wider. It checks
+each proposed grant against a **single** grant you hold rather than against all of them together, so
+holding two load balancers separately does not let you issue authority over the project containing
+them. That refusal is deliberate: those two may be the only load balancers in the project today, and
+a third added tomorrow would silently fall under a grant you were never entitled to make.
+
+`ADMIN` shows as *fixed* rather than as a disabled form, and the last member of it has no
+**Remove** button. Both are the same rule: an account must always have someone who can administer
+it, and neither editing the role's authority nor removing its last member is a thing this screen
+will help you do by accident.
+
 ## Settings
 
-`ADMIN` only. There is no role-binding editor here any more — the four roles are global
-and which Keycloak group maps to which is a `.env` setting on the running service, not
-data in this database. See [install & configure, first
-sign-in](installation.md#6-first-sign-in) for the four `ACME_*_GROUP` variables and the full permission matrix.
+`ADMIN` only. Roles themselves live on the [Roles](#roles) screen — they are data in this account
+now, and editable there. What is *not* editable anywhere is which Keycloak group grants which role:
+that stays a `.env` setting on the running service, because deciding who is in an account is not
+something the account may do for itself. See [install & configure, first
+sign-in](installation.md#6-first-sign-in) for the `ACME_*_GROUP` variables.
 
 What remains on this screen is more useful for exactly that reason: an **effective
 configuration** view, with secrets redacted, that shows the zone, resolver, trusted proxies
@@ -324,15 +389,15 @@ than guessing.
 
 ### Give someone access
 
-1. Decide which of the four roles they actually need — usually `CONFIG_ADMIN` for a
-   team that manages its own load balancers and domains, or `READ_ONLY` for someone who
-   only needs visibility.
-2. Ask the Keycloak group owner to add them to the group configured for that role. Check
-   [Settings](#settings) in this console for the exact group name currently loaded —
-   it is easy for `.env` and memory to drift apart.
-3. They have access from their next sign-in. There is no per-project handoff any more: a role is
-   global, so this grants access to every project, not just one. If that is too broad, the
-   available roles are the ceiling — there is no narrower option today.
+1. Decide what they actually need. One of the seeded roles usually fits — `CONFIG_ADMIN` for a team
+   that manages its own load balancers and domains, `READ_ONLY` for someone who only needs
+   visibility.
+2. If neither does, make a role that does. **Roles → New role**, then add grants: naming one project
+   and ticking "reaches contained objects" gives someone everything inside it and nothing outside.
+   This is the answer to "that is too broad" — it no longer has to be.
+3. Ask the Keycloak group owner to add them to the group configured for that role.
+4. They have access from their next sign-in. Removing them from the group takes effect at their next
+   sign-in too, so if access must end now, revoke their session as well.
 
 ### Investigate a renewal that is not happening
 

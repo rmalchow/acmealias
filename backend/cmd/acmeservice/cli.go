@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/adminctl"
@@ -48,7 +49,7 @@ func usage() {
   acmeservice adminctl loadbalancer    create --project S --slug S --name N | delete --loadbalancer REF | dns REF
   acmeservice adminctl node      add --loadbalancer REF --label L [--ipv4 A] [--ipv6 A] | delete --id ID
   acmeservice adminctl domain    create --loadbalancer REF --name N [--include-wildcard] | list --loadbalancer REF | delete --id ID
-  acmeservice adminctl key       create --loadbalancer REF --name N [--expires DUR] | list --loadbalancer REF | revoke --id ID
+  acmeservice adminctl key       create [--loadbalancer REF] [--grant T:O:A]... --name N [--expires DUR] | list --loadbalancer REF | revoke --id ID
 
 REF is a load balancer reference: a numeric id, or "project-slug/loadbalancer-slug".`)
 }
@@ -222,9 +223,11 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 
 	case "key create":
 		fs := flag.NewFlagSet("key create", flag.ExitOnError)
-		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
+		loadbalancer := fs.String("loadbalancer", "", "load balancer reference: the two challenge grants over it")
 		name := fs.String("name", "", "key note")
 		expires := fs.String("expires", "", "key lifetime, e.g. 8760h (empty: never expires)")
+		var grants grantFlag
+		fs.Var(&grants, "grant", "TYPE:OBJECT:ACTION[:noinherit], repeatable; OBJECT may be * within the account")
 		fs.Parse(args)
 		var d time.Duration
 		if *expires != "" {
@@ -234,7 +237,7 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 				return fmt.Errorf("--expires: %w", err)
 			}
 		}
-		return adminctl.KeyCreate(ctx, db, sc, out, *loadbalancer, *name, d)
+		return adminctl.KeyCreate(ctx, db, sc, out, *loadbalancer, *name, d, grants)
 	case "key list":
 		fs := flag.NewFlagSet("key list", flag.ExitOnError)
 		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
@@ -254,4 +257,25 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 		usage()
 		return fmt.Errorf("unknown adminctl command %q %q", noun, verb)
 	}
+}
+
+// grantFlag collects repeated --grant values.
+//
+// A key's authority is a set, so the flag is repeatable rather than a single
+// comma-joined string: a comma is a character that appears inside a DNS record
+// selector, and a separator that can occur in a value is a parser waiting to be
+// wrong.
+type grantFlag []adminctl.GrantSpec
+
+func (g *grantFlag) String() string {
+	parts := make([]string, 0, len(*g))
+	for _, s := range *g {
+		parts = append(parts, string(s))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (g *grantFlag) Set(v string) error {
+	*g = append(*g, adminctl.GrantSpec(v))
+	return nil
 }

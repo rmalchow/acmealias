@@ -71,6 +71,18 @@ const (
 
 	ActionAccountCreate = "account.create"
 	ActionAccountSelect = "account.select"
+
+	// The two actions a challenge key performs. They are separate so a key can
+	// publish without being able to withdraw — which is what an operator wants
+	// for a load balancer that renews automatically but should never take a
+	// live value away.
+	//
+	// They live here rather than beside the handler because two packages
+	// authorize against them now — the challenge API and the CLI that mints
+	// keys — and a vocabulary held as string literals in two places is the
+	// typo nobody notices until a key silently cannot do its job.
+	ActionChallengePublish  = "challenge.publish"
+	ActionChallengeWithdraw = "challenge.withdraw"
 )
 
 // Action classes. The two questions asked of an audit trail are "who changed

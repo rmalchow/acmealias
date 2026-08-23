@@ -172,7 +172,7 @@ ACME_OIDC_CLIENT_SECRET=<secret>
 ACME_OIDC_REDIRECT_URL=https://acme-console.cloudpowered.services/api/v1/auth/callback
 ACME_OIDC_GROUPS_CLAIM=groups
 
-# --- roles: four fixed global roles, mapped from Keycloak groups ---
+# --- roles: which Keycloak group grants which role (the roles themselves are data) ---
 ACME_ADMIN_GROUP=infra-admins
 ACME_CONFIG_ADMIN_GROUP=infra-config-admins
 ACME_KEY_ROTATION_GROUP=infra-key-rotators
@@ -293,10 +293,15 @@ Terminate TLS on the existing proxy, as with everything else we run.
 
 ## 6 · First sign-in
 
-There is no role-binding table to seed. Permissions come from four fixed, **global**
-roles — `ADMIN`, `CONFIG_ADMIN`, `KEY_ROTATION`, `READ_ONLY`
-— each mapped to one Keycloak group by an environment variable you already set in
-[step 3](#3-configuration):
+There is no role-binding table to seed, and the four roles you start with are **rows**, not
+constants in the code. The migration creates them in the deployment's single account — `ADMIN`,
+`CONFIG_ADMIN`, `KEY_ROTATION`, `READ_ONLY` — carrying exactly the permissions their
+predecessors carried, so an upgrade changes nothing you can observe. What is new is that they can be
+edited, and that you can add others.
+
+Which Keycloak group grants which role is still configuration, and deliberately so: a role is an
+account's own data, but deciding who is in it from outside the account is not something an account
+may do for itself.
 
 ```
 ACME_ADMIN_GROUP=infra-admins
@@ -306,12 +311,16 @@ ACME_READ_ONLY_GROUP=support
 ```
 
 A user's roles are the union of every role whose configured group appears in their Keycloak groups
-claim — holding several is normal and additive. There is nothing to bootstrap in the old sense: on
-a database with no rows at all, the operator whose Keycloak account is in
-`infra-admins` is already an `ADMIN`, because that is what
-`ACME_ADMIN_GROUP` says, not because of anything stored. The problem the old bootstrap
-group existed to solve — an empty bindings table meaning nobody, including you, has permissions —
-is dissolved rather than solved: there is no table to be empty.
+claim — holding several is normal and additive. On a database with no inventory at all, the operator
+whose Keycloak account is in `infra-admins` is already an `ADMIN`, because that is what
+`ACME_ADMIN_GROUP` says. The problem the old bootstrap group existed to solve — an empty bindings
+table meaning nobody, including you, has permissions — is dissolved rather than solved.
+
+A configured group naming a role nobody created grants nothing, and the service says so at startup
+rather than leaving you to discover it when somebody cannot sign in. It is a warning and not a
+refusal: creating the group before the role is a reasonable order to work in.
+
+The seeded roles confer:
 
 | | `ADMIN` | `CONFIG_ADMIN` | `KEY_ROTATION` | `READ_ONLY` |
 | --- | --- | --- | --- | --- |
@@ -321,6 +330,19 @@ is dissolved rather than solved: there is no table to be empty.
 | see a key secret (once) | yes | yes | yes | no |
 | DNS plan + run verification | yes | yes | yes | yes |
 | view inventory + audit log | yes | yes | yes | yes |
+
+`ADMIN` is the account's **unrestricted** role and is not a list of permissions at all: it confers
+every action on every object of that account, it cannot be edited or deleted, and the account must
+always keep at least one member of it. That is what guarantees there is always a way back in — a
+role whose authority could be edited away one row at a time would not.
+
+Everything below `ADMIN` is a set of grants you can change. A grant is
+`[object type, object, action]` plus a flag saying whether it reaches objects contained by the one
+it names, and every grant is anchored to one account: a wildcard means "everything in this account",
+never "everywhere". So a role that reads one project, or an API key that publishes challenges for a
+whole project rather than one load balancer, is now expressible — the latter being the request that
+prompted the model in the first place. The console's Roles screen composes them; the composer offers
+only what the person using it already holds, because a subject may grant only what it holds.
 
 Open `https://acme-console.cloudpowered.services/`. You are redirected to the IdP and
 back. If you land on a page saying you match no role, it lists the groups it saw for your sign-in —
@@ -406,10 +428,10 @@ Then set up the monitoring that actually matters — see
 | `ACME_OIDC_REDIRECT_URL` | *required* | Must exactly match what the IdP has registered. |
 | `ACME_OIDC_GROUPS_CLAIM` | `groups` | Claim carrying group membership. |
 | `ACME_OIDC_GROUP_PREFIX` | *empty* | Stripped from each group value — useful when the IdP emits path-style names. |
-| `ACME_ADMIN_GROUP` | *required* | Keycloak group mapped to the global `ADMIN` role. |
-| `ACME_CONFIG_ADMIN_GROUP` | *required* | Keycloak group mapped to the global `CONFIG_ADMIN` role. |
-| `ACME_KEY_ROTATION_GROUP` | *required* | Keycloak group mapped to the global `KEY_ROTATION` role. |
-| `ACME_READ_ONLY_GROUP` | *required* | Keycloak group mapped to the global `READ_ONLY` role. A user in none of the four configured groups has no access at all. |
+| `ACME_ADMIN_GROUP` | *required* | Keycloak group granting the seeded `ADMIN` role. A group naming a role that does not exist grants nothing, and is reported at startup. |
+| `ACME_CONFIG_ADMIN_GROUP` | *required* | Keycloak group granting the seeded `CONFIG_ADMIN` role. A group naming a role that does not exist grants nothing, and is reported at startup. |
+| `ACME_KEY_ROTATION_GROUP` | *required* | Keycloak group granting the seeded `KEY_ROTATION` role. A group naming a role that does not exist grants nothing, and is reported at startup. |
+| `ACME_READ_ONLY_GROUP` | *required* | Keycloak group granting the seeded `READ_ONLY` role. A user in none of the configured groups has no access at all. |
 | `ACME_SESSION_IDLE_TIMEOUT` | `8h` | Idle expiry. |
 | `ACME_SESSION_MAX_LIFETIME` | `24h` | Absolute expiry. Also bounds how stale a user's group list can be. |
 | `ACME_LOG_LEVEL` | `info` | `debug` logs each expiry sweep and every DNS decision. |

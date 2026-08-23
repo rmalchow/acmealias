@@ -1,0 +1,529 @@
+openapi: 3.1.0
+info:
+  title: acmeservice management API
+  version: "1"
+  description: |
+    The public management API. One contract with two kinds of caller: the console, and customer
+    programs. The console is not privileged — it is simply the first client, and its use of this
+    API is what demonstrates the API is usable.
+
+    Every account-scoped resource lives under /accounts/{accountId}/. The account is named in the
+    path even though an authenticated session already knows which one it selected: if the target
+    came only from the session, a forged or confused-deputy request would act in whatever account
+    happened to be selected, and the caller would never have had to know which. The service
+    refuses a mismatch.
+
+    Collection reads are filtered, paged and counted by the service. The total in X-Total-Count is
+    the number of rows the caller MAY SEE that match the filter — not the number in the table —
+    because a total counting invisible rows would leak their existence through a number.
+
+servers:
+  - url: /api/v1
+
+security:
+  - session: []
+  - apiKey: []
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: acmeservice_session
+      description: |
+        A server-side session established through the identity provider. State-changing requests
+        additionally carry the cross-site request forgery token as an X-XSRF-TOKEN header.
+    apiKey:
+      type: http
+      scheme: basic
+      description: |
+        An API key, as basic auth: the key identifier as the username and the secret as the
+        password. A key is a subject anchored to one account, and reaches only what its grants
+        permit — it never needs to select an account, because its anchor already fixes one.
+
+  parameters:
+    accountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: The account this request acts in. Must be the one the session has selected.
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+        code:
+          type: string
+          description: |
+            Present where a caller can act on the distinction — no_account_selected and
+            account_creation_closed are the two today.
+    PermittedActions:
+      type: array
+      items: { type: string }
+      description: |
+        What THIS caller may do to THIS object. It accompanies every object rather than costing a
+        request per row, and it is not the enforcement point: every request is checked again when
+        it arrives, so a stale value costs a refusal rather than access.
+    Account:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        selected: { type: boolean }
+    Project:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        permittedActions: { $ref: "#/components/schemas/PermittedActions" }
+    LoadBalancer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        permittedActions: { $ref: "#/components/schemas/PermittedActions" }
+    Grant:
+      type: object
+      description: |
+        [object type, identifier, action] plus a flag saying whether it reaches objects contained
+        by the one it names. Each part may be a wildcard; the identifier may instead be a typed
+        selector where the type defines one. Every grant is anchored to one account, and a
+        wildcard means "within this account", never "everywhere".
+      properties:
+        type: { type: string }
+        objectId: { type: string, format: uuid, nullable: true }
+        selector:
+          type: object
+          nullable: true
+          properties:
+            zone: { type: string }
+            names: { type: string }
+            types: { type: array, items: { type: string } }
+        action: { type: string }
+        inheritable: { type: boolean }
+        summary: { type: string }
+    Role:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        unrestricted:
+          type: boolean
+          description: |
+            The account's fixed role: every action on every object of that account. Uneditable,
+            undeletable, and never without a member — it is the way back into an account.
+        grants: { type: array, items: { $ref: "#/components/schemas/Grant" } }
+    Member:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        subject: { type: string }
+        displayName: { type: string }
+        roleId: { type: string, format: uuid }
+        roleName: { type: string }
+    ApiKey:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        identifier: { type: string }
+        displayPrefix: { type: string }
+        note: { type: string }
+        networks: { type: array, items: { type: string } }
+        grants: { type: array, items: { $ref: "#/components/schemas/Grant" } }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+        disabledAt: { type: string, format: date-time, nullable: true }
+        active: { type: boolean }
+
+  responses:
+    NoAccountSelected:
+      description: |
+        The session has selected no account. Distinct from an empty result, which would read as
+        "you have nothing" — a different and wrong answer.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: |
+        No such object, OR one this caller may not see. The two are deliberately indistinguishable:
+        the query that answered cannot tell them apart either.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+paths:
+  /me:
+    get:
+      summary: The signed-in person, and which account they are acting in
+      responses:
+        "200": { description: OK }
+
+  /accounts:
+    get:
+      summary: The accounts this person belongs to
+      description: Reachable with no account selected.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Account" } }
+    post:
+      summary: Create an account, becoming its first unrestricted member
+      description: |
+        Refused unless the deployment enables it. A deployment authenticating a whole organization
+        does not want every person in it able to create a tenant.
+      responses:
+        "201": { description: Created }
+        "403": { description: Account creation is not enabled here }
+
+  /accounts/{accountId}/select:
+    post:
+      summary: Switch the session into one account
+      description: Membership is re-evaluated here, so a revoked membership takes effect at the switch.
+      parameters: [{ $ref: "#/components/parameters/accountId" }]
+      responses:
+        "204": { description: Selected }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /accounts/{accountId}/projects:
+    parameters: [{ $ref: "#/components/parameters/accountId" }]
+    get:
+      summary: Projects this caller may see
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Total-Count:
+              schema: { type: integer }
+              description: Rows matching the filter that this caller may see.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Project" } }
+        "409": { $ref: "#/components/responses/NoAccountSelected" }
+    post:
+      summary: Create a project
+      description: Governed by membership of the account's unrestricted role, not by a grant.
+      responses:
+        "201": { description: Created }
+
+  /accounts/{accountId}/projects/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: One project
+      responses:
+        "200": { description: OK }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Rename a project
+      responses:
+        "200": { description: OK }
+    delete:
+      summary: Delete an empty project
+      responses:
+        "200": { description: Deleted }
+        "409": { description: The project still has load balancers }
+
+  /accounts/{accountId}/projects/{id}/loadbalancers:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: A project's load balancers
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Create a load balancer
+      responses:
+        "201": { description: Created }
+
+  /accounts/{accountId}/projects/{id}/usage:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: Challenge and issuance activity over time
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/projects/{id}/inventory-history:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: Inventory size over time
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/loadbalancers/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: One load balancer
+      responses:
+        "200": { description: OK }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Rename a load balancer
+      responses:
+        "200": { description: OK }
+    delete:
+      summary: Delete an empty load balancer
+      responses:
+        "200": { description: Deleted }
+
+  /accounts/{accountId}/loadbalancers/{id}/nodes:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    post:
+      summary: Add a node
+      responses:
+        "201": { description: Created }
+
+  /accounts/{accountId}/nodes/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    patch:
+      summary: Replace a node's addresses
+      responses:
+        "200": { description: OK }
+    delete:
+      summary: Remove a node
+      responses:
+        "200": { description: Deleted }
+
+  /accounts/{accountId}/loadbalancers/{id}/domains:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: A load balancer's domains
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Add a domain, creating or reusing its challenge alias
+      responses:
+        "201": { description: Created }
+        "409": { description: The challenge name belongs to another load balancer }
+
+  /accounts/{accountId}/domains/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    delete:
+      summary: Remove a domain, and its alias if nothing else uses it
+      responses:
+        "200": { description: Deleted }
+
+  /accounts/{accountId}/loadbalancers/{id}/keys:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: The keys whose authority reaches this load balancer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ApiKey" } }
+    post:
+      summary: Create a key with grants over this load balancer
+      description: |
+        Refused unless every grant is covered by a single grant the creator holds. Coverage is not
+        assembled from several held grants: the union is true only of today's inventory.
+      responses:
+        "201": { description: Created — the secret is in this response and nowhere else, ever }
+
+  /accounts/{accountId}/keys/{id}/networks:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    put:
+      summary: Replace a key's address restrictions
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/keys/{id}/expiry:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    put:
+      summary: Set or clear a key's expiry
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/keys/{id}/rotate:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    post:
+      summary: Replace a key's secret, keeping its authority exactly
+      responses:
+        "201": { description: Created }
+
+  /accounts/{accountId}/keys/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    delete:
+      summary: Revoke a key without deleting its history
+      responses:
+        "200": { description: Revoked }
+
+  /accounts/{accountId}/loadbalancers/{id}/plan:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: The DNS records the customer must publish
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/loadbalancers/{id}/plan/zone:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: The same plan as a zone-file snippet
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/loadbalancers/{id}/verification:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: What the plan's records actually resolve to right now
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/loadbalancers/{id}/interactions:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: Publications seen through to their end
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/challenges:
+    parameters: [{ $ref: "#/components/parameters/accountId" }]
+    get:
+      summary: Values answerable right now
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/audit:
+    parameters: [{ $ref: "#/components/parameters/accountId" }]
+    get:
+      summary: What changed in this account, and who changed it
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/config:
+    parameters: [{ $ref: "#/components/parameters/accountId" }]
+    get:
+      summary: The effective configuration, redacted
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/roles:
+    parameters: [{ $ref: "#/components/parameters/accountId" }]
+    get:
+      summary: The roles this account defines
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Role" } }
+    post:
+      summary: Create a role
+      responses:
+        "201": { description: Created }
+        "403": { description: A grant was not covered by one the writer holds }
+
+  /accounts/{accountId}/roles/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    put:
+      summary: Replace a role's name, description and grants
+      responses:
+        "200": { description: OK }
+        "409": { description: The unrestricted role cannot be changed }
+    delete:
+      summary: Delete a role that has no members
+      responses:
+        "204": { description: Deleted }
+
+  /accounts/{accountId}/members:
+    parameters: [{ $ref: "#/components/parameters/accountId" }]
+    get:
+      summary: Who is in this account
+      description: Readable by any member without a grant.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Member" } }
+    post:
+      summary: Add a member
+      responses:
+        "204": { description: Added }
+
+  /accounts/{accountId}/members/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    delete:
+      summary: Remove a member
+      responses:
+        "204": { description: Removed }
+        "409": { description: This would leave the unrestricted role with no member }
+
+  /sessions:
+    get:
+      summary: Console sessions
+      responses:
+        "200": { description: OK }
+    delete:
+      summary: Revoke every session of one subject
+      responses:
+        "200": { description: OK }
+
+  /sessions/{handle}:
+    parameters:
+      - { name: handle, in: path, required: true, schema: { type: string } }
+    delete:
+      summary: Revoke one session
+      responses:
+        "200": { description: OK }

@@ -401,9 +401,6 @@ func assertEveryRouteHasARow(t *testing.T, e *echo.Echo, covered map[string]bool
 		// Sign-in is deliberately outside the guard, the catch-alls match no
 		// endpoint of their own, and echo registers a placeholder under a
 		// pseudo-method for a group prefix no handler serves.
-		// Sign-in is deliberately outside the guard, the catch-alls match no
-		// endpoint of their own, and echo registers a placeholder for a group
-		// prefix that no handler serves.
 		if !strings.HasPrefix(r.Path, "/api/v1/") || strings.HasPrefix(r.Path, "/api/v1/auth/") ||
 			strings.HasSuffix(r.Path, "*") || !isHTTPMethod(r.Method) {
 			continue
@@ -493,6 +490,12 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"PUT", "", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/expiry")},
 		{"POST", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/rotate")},
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("")},
+
+		// The published contract, reachable by anyone — including, deliberately,
+		// callers with no session at all. A contract nobody can read without
+		// credentials is not a published contract, and it describes only what
+		// the API already answers.
+		{"GET", "/api/v1/openapi.yaml", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 
 		// Accounts and their administration.
 		//

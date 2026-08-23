@@ -215,13 +215,12 @@ var errBadBody = echo.NewHTTPError(http.StatusBadRequest,
 // caller cannot map the inventory by the difference.
 var errRefused = echo.NewHTTPError(http.StatusForbidden, "not authorized for that name")
 
-// The two actions a challenge key performs. They are separate so a key can be
-// given the ability to publish without the ability to withdraw — which is what
-// an operator wants for a load balancer that renews automatically but should
-// never take a live value away.
+// The two actions a challenge key performs, named once in the vocabulary
+// package: the CLI mints keys holding them, so a literal here would be the same
+// string written twice.
 const (
-	challengePublish  = "challenge.publish"
-	challengeWithdraw = "challenge.withdraw"
+	challengePublish  = authz.ActionChallengePublish
+	challengeWithdraw = authz.ActionChallengeWithdraw
 )
 
 // errStorage is the single 500. It names no datastore identifier, driver message
