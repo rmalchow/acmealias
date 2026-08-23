@@ -67,18 +67,14 @@ type ServerOptions struct {
 // say so in front of the service rather than relying on a second port nobody
 // published.
 //
-// Satellites will get their own listener, because mutual TLS is the one thing
-// paths cannot express: the handshake completes before any path is known, so a
-// client-certificate requirement is a property of a listener.
+// There was to be a second listener for satellites, because mutual TLS is the one
+// thing paths cannot express — the handshake completes before any path is known.
+// The fleet it would have served went with the DNS product.
 type Servers struct {
 	// Public serves every path group: /api/v1/**, /api/admin/**,
 	// /acme/httpreq/**, the bare /present and /cleanup, the console, and the
 	// health and metrics endpoints.
 	Public *echo.Echo
-
-	// Satellite is nil until `satellite-sync` fills it. It exists here so the
-	// shape of the answer is visible: a second listener, not a path prefix.
-	Satellite *echo.Echo
 }
 
 // NewServers builds all three. It returns an error rather than panicking

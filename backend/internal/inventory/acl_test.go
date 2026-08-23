@@ -169,31 +169,4 @@ func TestCompilePredicate(t *testing.T) {
 	}
 }
 
-// The reversed-name trick behind the record predicate: "everything beneath this
-// name" becomes a prefix an index can serve rather than a leading-wildcard LIKE
-// that no btree can.
-func TestRecordPredicateReversesNames(t *testing.T) {
-	if got := authz.ReverseName("www.example.com"); got != "com.example.www" {
-		t.Fatalf("ReverseName = %q, want com.example.www", got)
-	}
-	account := model.NewID()
-	s := authz.Subject{AccountID: account, Grants: []authz.Grant{{
-		AccountID: account, Type: authz.TypeDNSRecord, Action: "dns.write",
-		Selector: &authz.DNSSelector{Zone: "example.com", Names: "*.staging.example.com", Types: []string{"A"}},
-	}}}
-	p := authz.CompileRecordPredicate(s, "dns.write")
-	if len(p.Terms) != 1 {
-		t.Fatalf("terms = %d, want 1", len(p.Terms))
-	}
-	term := p.Terms[0]
-	if term.ReversedPrefix != "com.example.staging." {
-		t.Errorf("prefix = %q, want com.example.staging.", term.ReversedPrefix)
-	}
-	// The pattern's own apex is excluded, which is what keeps a subtree grant
-	// away from the zone's NS and MX.
-	if term.ExcludeReversedApex != "com.example.staging" {
-		t.Errorf("excluded apex = %q, want com.example.staging", term.ExcludeReversedApex)
-	}
-}
-
 var _ = store.ACL{}

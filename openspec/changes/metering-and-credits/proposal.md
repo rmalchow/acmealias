@@ -1,3 +1,24 @@
+> **`zone.active` is gone with the DNS product, and the shape of the economics changed with it.**
+>
+> This change opened by observing that three things cost money and none can be charged the same way:
+> publishes (triggered by the customer, countable), checks (triggered by a schedule), and zones
+> (triggered by nothing at all — existence). The third was the interesting one, because it was the
+> only charge that could drain a balance while the customer did nothing, and most of the machinery
+> here was built for it: the tick job, its idempotent period key, the backfill-across-an-outage rule,
+> and much of the urgency behind soft suspension.
+>
+> There are no zones. What is left is publishes and certificate observations, and observations are
+> hours apart rather than seconds.
+>
+> `node.observed` keeps the rate SHAPE — billed per observed node per period, from the same periodic
+> job — for the reason M11 gives: the customer chose "observe this node", not the interval or the
+> number of address families, and both of those are ours to change. But nothing accrues for an
+> account that has configured nothing, which makes the overdraft rule of M6 much less load-bearing
+> than it was: a lapsed customer with no configured nodes now costs nothing and drifts nowhere.
+>
+> Every reference to `zone.active` and zone-time below is superseded. Read them as `node.observed`
+> where the shape carries over, and as removed where the reasoning was about existence-as-a-charge.
+
 ## Why
 
 ### Three things now cost money, and none of them can be charged the same way

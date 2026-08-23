@@ -82,7 +82,7 @@ and explicitly rejected running an identity provider for public customers as "th
 new security-sensitive code in the change.
 
 The rejection assumed the identity provider would be *additional*. It is not: one is being run
-anyway, at `auth.edgedns.eu`, for staff and for the internal edition. Adding customers to it is a
+anyway, at `auth.acmealias.de`, for staff and for the internal edition. Adding customers to it is a
 second tenant, not a second system. The second half of the rejection — that registration through
 someone else's screens cedes the part of onboarding worth owning — was also wrong, because the
 screens can be themed, and the part of onboarding that actually matters happens *after* sign-in:
@@ -199,15 +199,16 @@ which is exactly what an invite-only period needs.
 
 ### One sentence the marketing site has to contain
 
-`dns-records` defers DNSSEC and, to keep that deferral safe, refuses to host a zone whose registrar
-still publishes a delegation signer. That refusal happens at the end of onboarding — after someone has
-read the site, registered, and tried to add their domain.
+Not about DNSSEC — that concern left with the DNS product, because nobody delegates a zone here. The
+sentence that matters now is the boundary:
 
-So the capability page says it before any of that: **DNSSEC is not currently supported, and a domain
-that is signed today must have its delegation signer removed at the registrar before it can be hosted
-here.** Every provider a buyer is comparing us with gives DNSSEC away for free, so the gap is going to
-be noticed regardless. Saying it plainly costs a sale occasionally; being caught not saying it costs
-the trust that is most of what a DNS customer is buying.
+**The service answers ACME DNS-01 challenges and observes the certificates that result. It does not
+host your DNS, does not issue certificates, and does not hold private keys.**
+
+Every one of those is a thing a visitor may reasonably assume from the words "DNS" and "certificate"
+on a page, and every one is cheaper to say there than to explain in a support reply after somebody
+has signed up expecting it. The pitch — *you publish one CNAME, once, and never hand anyone your DNS
+credentials* — only works if what is being declined is stated as plainly as what is offered.
 
 ### Not in scope
 

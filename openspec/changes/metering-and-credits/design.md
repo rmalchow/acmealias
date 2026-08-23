@@ -178,9 +178,8 @@ carries.
 
 ### M10. There is no tier column: what a customer bought is what they configured
 
-The product is sold at three levels — challenge answering alone; challenge answering plus
-authoritative DNS; both plus reachability checking. That is the sales conversation, and it is
-tempting to make it a column: `accounts.tier`, gates on zone creation, a monthly base charge per
+The product is sold at two levels — challenge answering alone, and challenge answering plus
+certificate observation. That is the sales conversation, and it is tempting to make it a column: `accounts.tier`, gates on zone creation, a monthly base charge per
 level.
 
 **Rejected, and this is a decision rather than a deferral.** A tier is a second mechanism that can

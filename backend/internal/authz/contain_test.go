@@ -7,67 +7,6 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
 
-// Pattern containment, exhaustively. The table is the specification: every row
-// is a claim someone will otherwise have to re-derive from the code.
-func TestPatternContains(t *testing.T) {
-	for _, tc := range []struct {
-		outer, inner string
-		want         bool
-		why          string
-	}{
-		{"*.b", "*.a.b", true, "a subtree is inside a wider subtree"},
-		{"*.b", "a.b", true, "an exact name is inside the subtree above it"},
-		{"*.a.b", "*.b", false, "a wider subtree is not inside a narrower one"},
-		{"*.a.b", "a.b", false, "a pattern does not contain its own apex"},
-		{"a.b", "a.b", true, "a name contains itself"},
-		{"a.b", "*.a.b", false, "an exact name does not contain a subtree"},
-		{"a.b", "c.b", false, "unrelated names contain nothing of each other"},
-		{"*.b", "*.b", true, "a subtree contains itself"},
-		{"*.example.com", "www.example.com", true, "the ordinary case"},
-		{"*.example.com", "example.com", false, "the apex is excluded, which is what protects NS and MX"},
-		{"*.example.com", "a.b.c.example.com", true, "a wildcard label spans several labels"},
-		{"*.EXAMPLE.com", "www.example.COM", true, "comparison is case-insensitive"},
-		{"*.example.com.", "www.example.com", true, "a trailing dot is not a difference"},
-	} {
-		if got := PatternContains(tc.outer, tc.inner); got != tc.want {
-			t.Errorf("PatternContains(%q, %q) = %v, want %v — %s", tc.outer, tc.inner, got, tc.want, tc.why)
-		}
-	}
-}
-
-func TestMatchPattern(t *testing.T) {
-	for _, tc := range []struct {
-		pattern, name string
-		want          bool
-	}{
-		{"*.staging.example.com", "web.staging.example.com", true},
-		{"*.staging.example.com", "db.web.staging.example.com", true},
-		{"*.staging.example.com", "staging.example.com", false},
-		{"*.staging.example.com", "example.com", false},
-		{"*.staging.example.com", "webstaging.example.com", false},
-		{"www.example.com", "www.example.com", true},
-		{"www.example.com", "other.example.com", false},
-	} {
-		if got := MatchPattern(tc.pattern, tc.name); got != tc.want {
-			t.Errorf("MatchPattern(%q, %q) = %v, want %v", tc.pattern, tc.name, got, tc.want)
-		}
-	}
-}
-
-// Interior wildcards are refused at write time rather than given a meaning.
-func TestValidatePatternRefusesInteriorWildcards(t *testing.T) {
-	for _, p := range []string{"web-*.example.com", "*.web.*.example.com", "web.*.example.com", "*x.example.com", ""} {
-		if err := ValidatePattern(p); err == nil {
-			t.Errorf("ValidatePattern(%q) = nil, want a refusal", p)
-		}
-	}
-	for _, p := range []string{"*.example.com", "www.example.com", "*.a.b.c.example.com"} {
-		if err := ValidatePattern(p); err != nil {
-			t.Errorf("ValidatePattern(%q) = %v, want nil", p, err)
-		}
-	}
-}
-
 func TestCoversSingleGrant(t *testing.T) {
 	a := model.NewID()
 	p1, lb1, lb2 := model.NewID(), model.NewID(), model.NewID()
@@ -137,30 +76,6 @@ func TestCoversSingleGrant(t *testing.T) {
 			proposed: g(func(x *Grant) { x.AccountID = model.NewID() }),
 			want:     false,
 		},
-		{
-			name: "a wider selector covers a narrower one",
-			held: Grant{AccountID: a, Type: TypeDNSRecord, Action: "dns.write",
-				Selector: &DNSSelector{Zone: "example.com", Names: "*.example.com", Types: []string{"A", "AAAA", "MX"}}},
-			proposed: Grant{AccountID: a, Type: TypeDNSRecord, Action: "dns.write",
-				Selector: &DNSSelector{Zone: "example.com", Names: "*.staging.example.com", Types: []string{"A"}}},
-			want: true,
-		},
-		{
-			name: "a selector does not cover a type it lacks",
-			held: Grant{AccountID: a, Type: TypeDNSRecord, Action: "dns.write",
-				Selector: &DNSSelector{Zone: "example.com", Names: "*.example.com", Types: []string{"A"}}},
-			proposed: Grant{AccountID: a, Type: TypeDNSRecord, Action: "dns.write",
-				Selector: &DNSSelector{Zone: "example.com", Names: "*.example.com", Types: []string{"A", "MX"}}},
-			want: false,
-		},
-		{
-			name: "a selector does not cover another zone",
-			held: Grant{AccountID: a, Type: TypeDNSRecord, Action: "dns.write",
-				Selector: &DNSSelector{Zone: "example.com", Names: "*.example.com", Types: []string{"A"}}},
-			proposed: Grant{AccountID: a, Type: TypeDNSRecord, Action: "dns.write",
-				Selector: &DNSSelector{Zone: "example.org", Names: "*.example.org", Types: []string{"A"}}},
-			want: false,
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := Covers(tc.held, tc.proposed); got != tc.want {
@@ -228,13 +143,9 @@ func TestGrantValidation(t *testing.T) {
 		{"no account", Grant{Type: TypeLoadBalancer, Action: "x"}, false},
 		{"no action", Grant{AccountID: a, Type: TypeLoadBalancer}, false},
 		{"no type", Grant{AccountID: a, Action: "x"}, false},
-		{"both an id and a selector", Grant{AccountID: a, Type: TypeDNSRecord, Action: "x", ObjectID: &oid,
-			Selector: &DNSSelector{Zone: "example.com", Names: "*.example.com", Types: []string{"A"}}}, false},
-		{"a selector on a type that defines none", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x",
-			Selector: &DNSSelector{Zone: "example.com", Names: "*.example.com", Types: []string{"A"}}}, false},
+		{"both an id and a selector", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x", ObjectID: &oid, Selector: &Selector{}}, false},
+		{"a selector at all — no type defines one", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x", Selector: &Selector{}}, false},
 		{"a wildcard type naming one object", Grant{AccountID: a, Type: TypeAny, Action: "x", ObjectID: &oid}, false},
-		{"a selector with an interior wildcard", Grant{AccountID: a, Type: TypeDNSRecord, Action: "x",
-			Selector: &DNSSelector{Zone: "example.com", Names: "web-*.example.com", Types: []string{"A"}}}, false},
 	} {
 		err := tc.g.Validate()
 		if tc.ok && err != nil {

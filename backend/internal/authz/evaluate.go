@@ -1,9 +1,6 @@
 package authz
 
 import (
-	"slices"
-	"strings"
-
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
 
@@ -20,13 +17,6 @@ type Object struct {
 	AccountID      model.ID
 	ProjectID      model.ID
 	LoadBalancerID model.ID
-	// Zone, Name and RecordType are set only for TypeDNSRecord, where the
-	// identifier is a selector rather than an id. Nothing constructs one yet —
-	// dns-records creates the objects — but the grammar has to accommodate them
-	// before they exist, or it would have to change once they do.
-	Zone       string
-	Name       string
-	RecordType string
 }
 
 // ancestor returns this object's identifier of the given type, and whether it
@@ -105,7 +95,10 @@ func matches(g Grant, action string, o Object) bool {
 		case FormID:
 			return *g.ObjectID == o.ID
 		case FormSelector:
-			return matchesSelector(*g.Selector, o)
+			// No object type defines a selector, and Validate refuses a grant
+			// carrying one — so a stored grant that has one is a row nothing can
+			// evaluate, and matching nothing is the safe reading.
+			return false
 		}
 
 	case Contains(g.Type, o.Type):
@@ -129,29 +122,6 @@ func matches(g Grant, action string, o Object) bool {
 	// Inheritance never reaches upward: a grant on a load balancer says nothing
 	// about the project containing it.
 	return false
-}
-
-// matchesSelector applies the three-part DNS record predicate. All three parts
-// must match — a grant over A records under a subtree is not a grant over the MX
-// at the same name.
-func matchesSelector(sel DNSSelector, o Object) bool {
-	if o.Type != TypeDNSRecord {
-		return false
-	}
-	if !strings.EqualFold(normalizeName(sel.Zone), normalizeName(o.Zone)) {
-		return false
-	}
-	if !MatchPattern(sel.Names, o.Name) {
-		return false
-	}
-	if len(sel.Types) == 0 {
-		// An empty type set selects nothing. The alternative — reading it as
-		// "every type" — would make an under-specified grant the widest one.
-		return false
-	}
-	return slices.ContainsFunc(sel.Types, func(t string) bool {
-		return strings.EqualFold(t, o.RecordType)
-	})
 }
 
 // Permitted lists the actions a subject may perform on one object, from a

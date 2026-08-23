@@ -3,7 +3,6 @@ package authz
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
@@ -38,11 +37,7 @@ const (
 	TypeDomain       ObjectType = "domain"
 	TypeAlias        ObjectType = "alias"
 	TypeAPIKey       ObjectType = "api_key"
-	// TypeDNSRecord has no rows yet — dns-records creates them. The selector is
-	// specified here because the grant grammar has to accommodate it before the
-	// objects exist, or the grammar would have to change once they do.
-	TypeDNSRecord ObjectType = "dns_record"
-	TypeAny       ObjectType = Wildcard
+	TypeAny          ObjectType = Wildcard
 )
 
 // containedBy is the containment hierarchy, as a child-to-parent map. It is
@@ -59,7 +54,6 @@ var containedBy = map[ObjectType]ObjectType{
 	TypeDomain:       TypeLoadBalancer,
 	TypeAlias:        TypeLoadBalancer,
 	TypeAPIKey:       TypeLoadBalancer,
-	TypeDNSRecord:    TypeLoadBalancer,
 }
 
 // Contains reports whether parent contains child, directly or indirectly.
@@ -73,15 +67,14 @@ func Contains(parent, child ObjectType) bool {
 	return false
 }
 
-// DNSSelector picks DNS records by zone, name pattern and record type. All three
-// must match: a grant over `A` records in `*.staging.example.com` is not a grant
-// over the `MX` at the same name, and the difference is whether someone can
-// redirect the customer's mail.
-type DNSSelector struct {
-	Zone  string   `json:"zone"`
-	Names string   `json:"names"`
-	Types []string `json:"types"`
-}
+// The identifier admits a third form the grammar reserves and nothing uses: a
+// typed SELECTOR, for an object type whose members are picked by a predicate
+// rather than named one at a time.
+//
+// It was built for DNS records — zone, name pattern, record type — and went with
+// them when the service stopped hosting DNS. The slot is kept because keeping it
+// costs one nil check and re-adding it would otherwise mean changing the grammar
+// every subject and every stored row is written against.
 
 // Grant is one row of a role or of an API key.
 type Grant struct {
@@ -91,9 +84,10 @@ type Grant struct {
 	// ObjectID names one object. Nil means the identifier is a wildcard or a
 	// selector — Selector says which.
 	ObjectID *model.ID `json:"objectId,omitempty"`
-	// Selector is the typed identifier form. Nil unless Type defines one.
-	Selector *DNSSelector `json:"selector,omitempty"`
-	Action   string       `json:"action"`
+	// Selector is the reserved typed identifier form. Always nil today: no object
+	// type defines one. See the note above.
+	Selector *Selector `json:"selector,omitempty"`
+	Action   string    `json:"action"`
 	// Inheritable makes the grant reach every object contained by the one it
 	// names. Without it a grant on a project is a grant on the project row and
 	// nothing beneath it.
@@ -141,15 +135,10 @@ func (g Grant) Validate() error {
 		return fmt.Errorf("%w: a grant is not anchored to an account", ErrInvalidGrant)
 	}
 	if g.Selector != nil {
-		if g.Type != TypeDNSRecord {
-			return fmt.Errorf("%w: object type %q defines no selector", ErrInvalidGrant, g.Type)
-		}
-		if err := ValidatePattern(g.Selector.Names); err != nil {
-			return err
-		}
-		if g.Selector.Zone == "" {
-			return fmt.Errorf("%w: a DNS record selector names no zone", ErrInvalidGrant)
-		}
+		// No object type defines a selector today, so any grant carrying one is a
+		// grant nothing could evaluate. Refused rather than ignored: a stored
+		// selector that matched nothing would look like a permission somebody had.
+		return fmt.Errorf("%w: object type %q defines no selector", ErrInvalidGrant, g.Type)
 	}
 	if g.Type == TypeAny && g.ObjectID != nil {
 		return fmt.Errorf("%w: a wildcard object type cannot name one object — "+
@@ -158,10 +147,15 @@ func (g Grant) Validate() error {
 	return nil
 }
 
+// Selector is the reserved predicate form of a grant identifier. It carries no
+// fields, because no object type defines one; it exists so the three-form shape
+// of an identifier stays visible in the type rather than only in a comment.
+type Selector struct{}
+
 // EncodeSelector renders the selector for storage. Nil selectors store as SQL
 // NULL rather than as the JSON literal "null", so the identifier-form check
 // constraint can tell the two apart.
-func EncodeSelector(s *DNSSelector) ([]byte, error) {
+func EncodeSelector(s *Selector) ([]byte, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -169,11 +163,11 @@ func EncodeSelector(s *DNSSelector) ([]byte, error) {
 }
 
 // DecodeSelector reads a stored selector back.
-func DecodeSelector(raw []byte) (*DNSSelector, error) {
+func DecodeSelector(raw []byte) (*Selector, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	var s DNSSelector
+	var s Selector
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return nil, fmt.Errorf("%w: selector is not readable: %v", ErrInvalidGrant, err)
 	}
@@ -188,8 +182,7 @@ func (g Grant) String() string {
 	case FormID:
 		id = g.ObjectID.String()
 	case FormSelector:
-		id = fmt.Sprintf("{zone: %s, names: %s, types: {%s}}",
-			g.Selector.Zone, g.Selector.Names, strings.Join(g.Selector.Types, ", "))
+		id = "{selector}"
 	}
 	suffix := ""
 	if g.Inheritable {

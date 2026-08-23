@@ -1,3 +1,26 @@
+> **Reduced to certificate observation.**
+>
+> This proposal argued that checks exist *primarily to steer DNS answers*, and that the status
+> display and the expiry log come free as byproducts. It was explicit that designing it the other
+> way round — a monitoring product that might later steer DNS — would produce something with no
+> quorum, no fail-open rule, and per-satellite results that disagree.
+>
+> The product no longer serves customers' DNS, so nothing steers. That removes the reason for
+> quorum, hysteresis, the never-serve-empty rule, per-family failover state and the correlated-family
+> suppression — all of which existed because check results changed what the internet was told. The
+> warning above no longer applies either: it was about *later* steering with a mechanism not built
+> to be trusted, and there is no later.
+>
+> What remains is the half the original called a byproduct, and it is the half that closes a loop
+> nothing else can see. The service answers a DNS-01 challenge; `challenge-history` records that a
+> certificate authority came and validated; and then nothing in the system knows whether a
+> certificate was ever installed, or whether it covers the names it should. One TLS handshake per
+> node per address family answers that.
+>
+> Reachability probing is NOT kept. Its only remaining purpose would be a status display, nothing
+> acts on it, and everyone being monitored already has monitoring. Certificate expiry and coverage
+> are the things a customer genuinely cannot see easily, which is what makes them worth building.
+
 ## Why
 
 ### A nameserver that knows a host is down and answers with it anyway is doing half a job

@@ -1,54 +1,69 @@
 # Build order
 
-Eight changes are proposed and none is implemented. They have dependencies on each other, they are
-built by one person, and several of them exist only to serve customers who do not exist yet. This
-file records the order they are built in and — more usefully — what has to become true before the
-later ones are worth starting.
+The product is **ACME DNS-01 challenge handling, plus certificate observation.** A customer
+publishes one `CNAME` into our challenge zone, once, and keeps their DNS wherever it already is.
+We answer the one question a certificate authority asks about that name, and afterwards we look at
+what they actually serve.
 
-It is not a schedule. It is a sequence with triggers.
+That is smaller than this repository once planned for, deliberately. What was removed and why is at
+the bottom.
 
 ## The order
 
-1. **`tenancy-and-permissions`** — the floor. Everything else assumes accounts, anchored grants,
-   `Scope`, and the database-enforced isolation of P20. It is also the only change that is
-   substantially cheaper to do now than later, because it rewrites the shape of every table while the
-   only data in them is ours.
-2. **`account-invitations`** — the entry path. While `public-edition`'s self-registration switch is
-   off, an invitation is the only way a person becomes a user, so this is what onboarding the first
-   customers actually runs on.
-3. **First customers, on challenge answering alone.** No satellites, no zones, no checks. Worth
-   pausing here deliberately rather than treating it as a milestone passed on the way to something
-   else: it is the whole product for a customer who wants certificates and keeps their DNS where it
-   is, and its worst outage is invisible. A renewal has about thirty days of slack, so a service
-   interruption of a few hours costs nobody anything. Nothing else in this sequence is that forgiving.
-4. **`satellite-sync`** — answering has to be separable from deciding before there is anything worth
-   answering in more than one place.
-5. **`dns-records`** — zones and recordsets, the delegation-signer pre-flight of R8, and the
-   nameserver-naming constraint of R9. From here on a mistake takes a customer's domain off the
-   internet, which is the step change this sequence exists to make visible.
-6. **`health-checks`** — needs satellites to probe from and records to steer.
-7. **`metering-and-credits`** — needs something to meter. Deferred this far because credits are
-   granted by hand while the customers are people we know, and because the billable shapes only
-   settle once checks and zones exist.
-8. **`public-edition`** — the residue: self-registration, payment, abuse limits, the marketing site.
+1. **`tenancy-and-permissions`** — the floor, and the only change that is substantially cheaper now
+   than later, because it rewrites the shape of every table while the only data is ours.
+   *Implemented: 80 of 81 tasks; the acceptance suite has not yet run green on the branch.*
+2. **`account-invitations`** — the entry path. While self-registration is closed, an invitation is
+   the only way a person becomes a user.
+3. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+   a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
+   anything. Nothing else in this list is that forgiving.
+4. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+   hours apart, answering the question the challenge history opens and cannot close: validation
+   succeeded, but was a certificate ever installed, and does it cover the right names.
+5. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+   observation exists. Deferred this far because credits are granted by hand while the customers
+   are people we know.
+6. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
 
-`staff-plane` sits outside the numbering. Its suspension button (S10) and blocklists (S12) are needed
-**before the first customer we do not know personally**, wherever in the sequence that falls. Its
-support-access machinery can follow later.
+`staff-plane` sits outside the numbering. Its suspension button and blocklists are needed **before
+the first customer we do not know personally**, wherever that falls; its support-access machinery
+can follow.
 
 ## Triggers, not dates
 
-- **Satellites and zones** wait until a customer wants DNS hosted, not until the specs feel finished.
-- **`metering-and-credits`** waits until manual credit grants stop being reasonable — which is a
-  count of customers, not a date.
+- **`metering-and-credits`** waits until manual credit grants stop being reasonable — a count of
+  customers, not a date.
 - **`public-edition`'s registration switch** and payment integration wait until strangers arrive.
-  Both are already built and inert by then (U9), so opening them is configuration.
-- **`staff-plane`'s suspension path** must exist before the first stranger, because discovering it is
+  Both are built and inert by then, so opening them is configuration.
+- **`staff-plane`'s suspension path** must exist before the first stranger. Discovering it is
   missing during a live phishing incident is the wrong time to write it.
+
+## What was removed, and what that bought
+
+`dns-records` and `satellite-sync` are archived unimplemented. `health-checks` was cut down to its
+certificate half.
+
+The service was going to host customers' zones: real records, a replicated fleet to answer them,
+health checks steering those answers. That is gone.
+
+- **The step change in risk went with it.** The old order had a phase after which "a mistake takes a
+  customer's domain off the internet". Nothing here does that. The worst failure now is that
+  renewals stop until someone notices, with weeks of slack.
+- **DNSSEC stopped being a problem in any form** — no delegation, no delegation signer, no
+  `SERVFAIL` for a customer who followed the instructions.
+- **The nameservers stopped needing to be diverse.** One domain, `acmealias.de`, rather than two at
+  two registrars. The name says what the service does, which the old one did not.
+- **Quorum, hysteresis, fail-open and failover answers went** — every one existed because check
+  results changed what the internet was told.
+- **`zone.active` went**, and with it the only charge that drained a balance while a customer did
+  nothing.
+
+Roughly 140 tasks of designed work removed, and the single largest source of irreversible risk for
+one person running this alone.
 
 ## What this sequence is protecting against
 
-One person can hold one change in their head at a time. Specs four through eight will rot if they are
-written and then left for a year, so the value of the order is that each change is implemented while
-its reasoning is still recent — and that the two changes with the largest irreversible surface, the
-data model and the nameserver names, are decided first and last respectively.
+One person can hold one change in their head at a time. The value of the order is that each change
+is implemented while its reasoning is still recent — and that the change with the largest
+irreversible surface, the data model, is decided first.

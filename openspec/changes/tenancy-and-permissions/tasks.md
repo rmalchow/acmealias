@@ -17,7 +17,7 @@
 - [x] 2.4 Build the ACL predicate compiler: fold a subject's grants for one action and object type into a disjunction of single-column predicates (design P13)
 - [x] 2.5 Implement `List` applying the ACL predicate together with the caller's filters, paging and count; assert the count uses the same predicate as the page
 - [x] 2.6 Implement `GetWithPermission(id, perm)` as `List` narrowed by `id`, returning the object or nil, with absence and denial indistinguishable
-- [~] 2.7 The `dns_record` predicate is compiled — reversed names, prefix match, apex excluded, record-type set — and unit-tested. The reversed COLUMN and its `text_pattern_ops` index arrive with `dns-records`, which creates the table; there is nothing to index yet
+- [x] 2.7 WITHDRAWN with the DNS product: there are no record objects to select. The grant grammar keeps the third identifier form reserved and refuses any grant carrying one, since a stored selector nothing can evaluate would look like a permission somebody had. Original text: the `dns_record` predicate is compiled — reversed names, prefix match, apex excluded, record-type set — and unit-tested. The reversed COLUMN and its `text_pattern_ops` index arrive with `dns-records`, which creates the table; there is nothing to index yet
 - [x] 2.8 Thread `Scope` through `internal/inventory` and `internal/reporting`
 - [x] 2.9 Add a test asserting every exported store read takes a `Scope`, so a new query cannot be added without one
 - [x] 2.10 Add tests that an object of another account is refused as though it did not exist, for read, list, count and write
@@ -102,7 +102,7 @@
 
 - [x] 10.0 Collapse the three listeners into one, separated by path prefix with per-group middleware (design P16); keep `/present` and `/cleanup` serving alongside the namespaced `/acme/httpreq/**`
 - [x] 10.1 Replace the tests asserting no listener mounts another's routes with tests asserting each path group carries its intended middleware
-- [~] 10.2 `Servers.Satellite` exists as the shape of the answer — a second listener, not a path prefix, because mutual TLS completes before any path is known. It is nil until `satellite-sync` gives it routes to serve; there is nothing yet to require a client certificate for
+- [x] 10.2 WITHDRAWN with `satellite-sync`: there is no fleet to authenticate. Original text: `Servers.Satellite` exists as the shape of the answer — a second listener, not a path prefix, because mutual TLS completes before any path is known. It is nil until `satellite-sync` gives it routes to serve; there is nothing yet to require a client certificate for
 - [x] 10.3 Update the `service-operations` documentation and deployment manifests for the new port layout
 
 ## 11. Documentation and closing the overlap

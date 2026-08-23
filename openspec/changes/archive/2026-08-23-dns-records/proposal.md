@@ -1,3 +1,28 @@
+> **Withdrawn — the product no longer does this.**
+>
+> This change existed to make the service authoritative for customers' own zones: real records,
+> a replicated fleet to answer them, and everything that follows from being the thing the internet
+> asks about someone else's domain.
+>
+> That is out of scope. The product is ACME DNS-01 challenge handling, plus certificate
+> observation. A customer publishes one `CNAME` into our challenge zone and keeps their DNS
+> wherever it already is — which was always the differentiator, and which this change spent.
+>
+> What went with it, and is worth knowing was considered:
+>
+> - **DNSSEC in every form.** The `DS` pre-flight of R8 existed because a customer delegating an
+>   already-signed zone to an unsigning provider goes `SERVFAIL` for most of the internet. Nobody
+>   delegates a zone to us now, so the failure has no way to happen.
+> - **The nameserver-diversity argument of R9**, in its original weight. The challenge zone still
+>   needs nameservers and they are still permanent, but the blast radius of losing them is
+>   "renewals stop until someone notices", with weeks of slack — not "every customer's domain and
+>   mail, instantly".
+> - **The step change in risk** the build order was sequenced around: from here on, a mistake no
+>   longer takes a customer's site off the internet.
+>
+> Archived unimplemented rather than deleted, so the reasoning stays readable if hosting DNS is
+> ever wanted again. Nothing should be built from it.
+
 ## Why
 
 ### The service answers one question about one kind of name

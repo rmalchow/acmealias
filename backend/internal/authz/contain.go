@@ -2,8 +2,6 @@ package authz
 
 import (
 	"fmt"
-	"slices"
-	"strings"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
@@ -99,32 +97,12 @@ func identifierCovers(held, proposed Grant) bool {
 		}
 
 	case FormSelector:
-		if proposed.Form() != FormSelector {
-			return false
-		}
-		return selectorCovers(*held.Selector, *proposed.Selector)
+		// Reserved and unused: no object type defines a selector, so a held one
+		// covers nothing. Refusing is the safe direction — the alternative is a
+		// grant that appears to confer something nothing can evaluate.
+		return false
 	}
 	return false
-}
-
-// selectorCovers is containment for the DNS record selector: same zone, a
-// pattern that contains the proposed one, and a type set that is a superset.
-func selectorCovers(held, proposed DNSSelector) bool {
-	if !strings.EqualFold(normalizeName(held.Zone), normalizeName(proposed.Zone)) {
-		return false
-	}
-	if !PatternContains(held.Names, proposed.Names) {
-		return false
-	}
-	if len(proposed.Types) == 0 {
-		return false
-	}
-	for _, t := range proposed.Types {
-		if !slices.ContainsFunc(held.Types, func(h string) bool { return strings.EqualFold(h, t) }) {
-			return false
-		}
-	}
-	return true
 }
 
 // CoversResolved is Covers for the case where the held grant names an ancestor

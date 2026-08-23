@@ -4,17 +4,16 @@
 export interface Grant {
   type: string;
   objectId?: string | null;
-  selector?: DNSSelector | null;
+  /**
+   * The reserved predicate form of an identifier. Always null: no object type defines a selector
+   * today. It was built for DNS records and went with them; the slot stays because re-adding one
+   * would otherwise mean changing the grammar every stored grant is written against.
+   */
+  selector?: null;
   action: string;
   inheritable: boolean;
   /** The grant written the way the design writes them, so a listing needs no assembly. */
   summary?: string;
-}
-
-export interface DNSSelector {
-  zone: string;
-  names: string;
-  types: string[];
 }
 
 export interface Role {
@@ -42,11 +41,7 @@ export interface Member {
 /** The wildcard, spelled once. */
 export const ANY = '*';
 
-/**
- * The object types a grant can name. Nothing stores DNS records yet — `dns-records` creates
- * them — but the grammar accommodates the selector already, and the composer offers it so the
- * shape is visible before the objects exist.
- */
+/** The object types a grant can name. */
 export const OBJECT_TYPES = [
   { value: ANY, label: 'Anything in this account' },
   { value: 'project', label: 'Project' },
@@ -55,7 +50,6 @@ export const OBJECT_TYPES = [
   { value: 'domain', label: 'Domain' },
   { value: 'alias', label: 'Alias' },
   { value: 'api_key', label: 'API key' },
-  { value: 'dns_record', label: 'DNS record' },
 ];
 
 /** The actions a grant can confer, in the vocabulary the service authorizes against. */

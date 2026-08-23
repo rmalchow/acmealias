@@ -98,7 +98,7 @@ internal aliases, and the cost is a second delegation rather than a second desig
 ### U3. Authentication is delegated to the identity provider in both editions, and the seam stays for one reason
 
 `internal/oidcauth` is the only authentication implementation. Both editions authenticate against
-the same self-hosted identity provider at `auth.edgedns.eu`, differing in which of its tenants — its
+the same self-hosted identity provider at `auth.acmealias.de`, differing in which of its tenants — its
 brand, its enrollment flow, its user directory — they point at. There is no `internal/localauth`.
 
 The contract is unchanged in substance: authentication produces a server-side session, and everything
@@ -182,7 +182,7 @@ dependency is the cheaper of the two, especially when it already exists for staf
 
 ### U12. One identity provider instance, and separation inside it is policy rather than isolation
 
-Staff and customers authenticate against the same authentik instance at `auth.edgedns.eu`. The
+Staff and customers authenticate against the same authentik instance at `auth.acmealias.de`. The
 alternative — a second instance, or authentik's own multi-tenancy feature — is rejected: the feature
 is experimental, and a second instance doubles the thing this design just decided was cheap precisely
 because it already exists.
@@ -320,19 +320,29 @@ the "add signup" change would arrive as a large one rather than a switch.
 **Rejected: gating in the console only.** The route would be live and undefended, discoverable by
 anyone who reads the bundle. The interface is not a security boundary.
 
-### U10. The marketing site states that DNSSEC is not supported
+### U10. Withdrawn: there is no DNSSEC statement to make
 
-`dns-records` defers DNSSEC signing and refuses zones whose parent already publishes a delegation
-signer. That refusal is the safe behaviour, and it means a customer can reach the end of onboarding
-before discovering the limitation — which is exactly the moment not to discover it.
+This decision required the marketing site to say that DNSSEC is not supported, because `dns-records`
+deferred signing and refused a zone whose registrar still published a delegation signer — a refusal a
+customer would meet at the end of onboarding.
 
-So the capability page says it plainly: **DNSSEC is not currently supported; a domain that is signed
-today must have its delegation signer removed at the registrar before it can be hosted here.** Not
-omitted, not deferred to a support conversation, not phrased as "coming soon" without a date.
+Nobody delegates a zone to this service. The customer keeps their DNS exactly where it is and
+publishes one `CNAME` into ours, which is the entire product and was always the differentiator. A
+`CNAME` in a signed zone is signed by its own operator and validates normally; whether our challenge
+zone is signed is our business and affects nobody's mail.
 
-The reasoning is commercial rather than technical. Every provider a buyer compares us against offers
-DNSSEC at no charge, so the gap will be noticed. Being caught having omitted it costs more than the
-sale it loses, and a stranger's trust in a DNS provider is most of what they are buying.
+Kept as a numbered decision rather than deleted, because "why does the site not mention DNSSEC" is a
+question somebody will ask.
+
+### U10a. The marketing site states what the service does not do
+
+The service answers ACME DNS-01 challenges and observes the certificates that result. It does not
+host DNS, does not issue certificates, and does not hold private keys.
+
+Each of those is a thing a visitor may reasonably assume from the words "DNS" and "certificate", and
+each is cheaper to say on the capability page than to explain in a support reply after somebody has
+signed up expecting it. "We answer one question about one name, so you never hand anyone your DNS
+credentials" is the pitch, and it only works if the boundary is stated.
 
 ### U6. Protective limits are not credits, and apply in every edition
 
@@ -380,17 +390,27 @@ The deployment's names, decided alongside the nameserver names in `dns-records` 
 
 | Name | Serves |
 | --- | --- |
-| `www.edgedns.eu` | the marketing site — static, no session, its own pipeline |
-| `console.edgedns.eu` | the authenticated console and the public API |
-| `admin.edgedns.eu` | the staff surface of `staff-plane` |
-| `auth.edgedns.eu` | the identity provider |
+| `www.acmealias.de` | the marketing site — static, no session, its own pipeline |
+| `console.acmealias.de` | the authenticated console and the public API |
+| `admin.acmealias.de` | the staff surface of `staff-plane` |
+| `auth.acmealias.de` | the identity provider |
+
+One domain, not two. An earlier version split the nameservers across two domains in two top-level
+domains at two registrars, so that one lapsed registration could not take every customer's DNS down at once.
+That reasoning belonged to a product that hosted customers' zones; this one does not. What a lost
+domain costs now is that certificate renewals stop working until somebody notices — with roughly
+thirty days of slack — rather than every customer's website and mail going dark within a TTL.
+
+The name is also no longer a compromise. `acmealias.de` says what the service does: it holds the
+alias a customer's `_acme-challenge` CNAME points at. `edgedns` was bought for the DNS product that
+no longer exists.
 
 `admin` being a separate name rather than a path under `console` is worth stating as deliberate: the
 staff routes are served on the same listener (`staff-plane` S9), and the separate hostname is what
 lets network-level restriction be applied to the staff surface without touching the customer one.
 
 One dependency this arrangement creates and which should be an operational decision rather than an
-accident: `console`, `www`, `admin` and `auth` all live inside `edgedns.eu`, which is also a parent of
+accident: `console`, `www`, `admin` and `auth` all live inside `acmealias.de`, which is also a parent of
 two of the fleet's nameservers. If that zone is served by the fleet itself, then a fleet-wide failure
 takes down the console and the marketing site along with customers' DNS — including the pages a
 customer would visit to find out what is happening.

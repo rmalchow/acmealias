@@ -338,7 +338,17 @@ caller may not see, because the query cannot tell them apart either.
 rows the caller cannot see, the existence of invisible objects leaks through a number, which undoes
 the property the `nil` return was protecting. The count and the page run the same predicate.
 
-**`dns_record` is the one type that does not reduce to equality.** Its selector matches by name pattern,
+**Superseded: `dns_record` was the one type that did not reduce to equality.**
+
+The service does not host DNS, so there are no record objects and no selector-shaped identifiers.
+The grant grammar keeps the third identifier FORM reserved — a typed predicate rather than an id —
+because removing it would mean changing the shape every stored grant is written against, and because
+the trick that made it affordable is worth remembering: store names reversed, so "everything beneath
+this name" is a prefix an index can serve rather than a leading-wildcard `LIKE` that no btree can.
+
+What follows is the original reasoning, kept because it explains the reserved slot.
+
+**`dns_record` was the one type that does not reduce to equality.** Its selector matches by name pattern,
 so its predicate is a suffix match (`name LIKE '%.staging.example.com'`, with the apex excluded per P9)
 and a record-type set. A leading-wildcard `LIKE` cannot use an ordinary btree index, so record names are
 stored reversed with a `text_pattern_ops` index and the predicate is built against the reversed column.

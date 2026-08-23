@@ -131,41 +131,6 @@ func TestCanCoversEveryCombination(t *testing.T) {
 			object: lbObject(acct, projA, lbA),
 			want:   true,
 		},
-		{
-			name:   "a DNS selector matches names beneath its pattern",
-			grants: []Grant{{AccountID: acct, Type: TypeDNSRecord, Action: "dns.write", Selector: &DNSSelector{Zone: "example.com", Names: "*.staging.example.com", Types: []string{"A", "AAAA"}}}},
-			action: "dns.write",
-			object: Object{Type: TypeDNSRecord, AccountID: acct, Zone: "example.com", Name: "web.staging.example.com", RecordType: "A"},
-			want:   true,
-		},
-		{
-			name:   "a DNS selector does not match its own apex",
-			grants: []Grant{{AccountID: acct, Type: TypeDNSRecord, Action: "dns.write", Selector: &DNSSelector{Zone: "example.com", Names: "*.staging.example.com", Types: []string{"A"}}}},
-			action: "dns.write",
-			object: Object{Type: TypeDNSRecord, AccountID: acct, Zone: "example.com", Name: "staging.example.com", RecordType: "A"},
-			want:   false,
-		},
-		{
-			name:   "a record type outside the selector is refused",
-			grants: []Grant{{AccountID: acct, Type: TypeDNSRecord, Action: "dns.write", Selector: &DNSSelector{Zone: "example.com", Names: "*.staging.example.com", Types: []string{"A", "AAAA"}}}},
-			action: "dns.write",
-			object: Object{Type: TypeDNSRecord, AccountID: acct, Zone: "example.com", Name: "web.staging.example.com", RecordType: "MX"},
-			want:   false,
-		},
-		{
-			name:   "an empty type set selects nothing",
-			grants: []Grant{{AccountID: acct, Type: TypeDNSRecord, Action: "dns.write", Selector: &DNSSelector{Zone: "example.com", Names: "*.example.com", Types: nil}}},
-			action: "dns.write",
-			object: Object{Type: TypeDNSRecord, AccountID: acct, Zone: "example.com", Name: "web.example.com", RecordType: "A"},
-			want:   false,
-		},
-		{
-			name:   "a selector for another zone does not match",
-			grants: []Grant{{AccountID: acct, Type: TypeDNSRecord, Action: "dns.write", Selector: &DNSSelector{Zone: "example.org", Names: "*.example.com", Types: []string{"A"}}}},
-			action: "dns.write",
-			object: Object{Type: TypeDNSRecord, AccountID: acct, Zone: "example.com", Name: "web.example.com", RecordType: "A"},
-			want:   false,
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := Subject{AccountID: acct, Grants: tc.grants}

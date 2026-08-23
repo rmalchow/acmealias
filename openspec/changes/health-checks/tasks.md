@@ -1,74 +1,48 @@
+# Tasks
+
+> Quorum, hysteresis, fail-open, failover answers, per-family decision state, correlated-family
+> suppression and the late-report rules were all removed with the DNS product. Every one existed
+> because check results changed what the internet was told; nothing steers now.
+>
+> What is left is one TLS handshake per node per address family, and what is done with what it sees.
+
 ## 1. Model and schema
 
-- [ ] 1.1 Add check definitions, per-node current state, probe results history and certificate observations, with materialized `account_id` and composite foreign keys
-- [ ] 1.2 Keep results history and decision state in separate tables so retention on one cannot endanger the other (design H7)
-- [ ] 1.3 Add a health-checked flag and a per-recordset time to live to `recordsets`
-- [ ] 1.4 Regenerate `internal/store/schema.sql` via the golden test
+- [ ] 1.1 Add `certificate_observations` to the model and a migration: node, address family, observed at, not-before, not-after, issuer, serial, the subject alternative names, and the error when the handshake failed
+- [ ] 1.2 Carry the materialized `account_id`, `project_id` and `load_balancer_id` of design P3, so an observation is confined and filterable like every other row
+- [ ] 1.3 Give the table the forced row-level security policy every tenant table has
+- [ ] 1.4 Index by `(load_balancer_id, observed_at desc)` for the per-load-balancer view, and by `not_after` for the expiry sweep
+- [ ] 1.5 Regenerate `internal/store/schema.sql` via the golden test
 
-## 2. Probe execution on satellites
+## 2. Observation
 
-- [ ] 2.1 Add `internal/healthcheck` probe execution, deliberately separate from `internal/resolvercheck`
-- [ ] 2.2 Implement reachability probing per node address
-- [ ] 2.3 Implement certificate observation: one handshake per node, reading expiry, issuer and covered names (design H6)
-- [ ] 2.4 Emit results on the existing report channel, batched with a batch identifier
-- [ ] 2.5 Ensure a satellite never changes what it serves from its own probe result
+- [ ] 2.1 Connect to each node address, complete a TLS handshake, read the certificate offered, and record it. One handshake per (node, address family), not per (node, domain) — the matrix is two hundred probes for four nodes and fifty domains, to observe what is usually four certificates
+- [ ] 2.2 Probe both address families separately: they are different paths through different transit, and a certificate served on one and not the other is a real and otherwise invisible failure
+- [ ] 2.3 Record a failed handshake as an observation with its error, not as an absence. "We could not look" and "there is nothing there" are different answers and only one of them is about the customer
+- [ ] 2.4 Run on a schedule measured in hours, not seconds. Nothing depends on the result within a renewal window, and a certificate does not change between one hour and the next
+- [ ] 2.5 Never obtain, install or hold a certificate or a private key — the service observes, and that boundary is what keeps it out of the customer's trust chain
 
-## 3. Central decision
+## 3. What the observations answer
 
-- [ ] 3.1 Evaluate quorum over distinct satellites, counting a re-delivered cycle once (design H8)
-- [ ] 3.2 Implement hysteresis with K failing cycles to remove and M passing cycles to restore, M > 1
-- [ ] 3.3 Refuse to change state when fewer satellites are assigned than quorum requires, and report the condition
-- [ ] 3.4 Assign satellites to nodes so that quorum is reachable
-- [ ] 3.5 Test that a persistent minority reporter changes nothing and is itself surfaced
+- [ ] 3.1 Compare the union of observed subject alternative names against the account's inventory, and identify domains covered by no observed certificate at all
+- [ ] 3.2 Report approaching expiry before it occurs, with the lead time a renewal needs rather than the moment it lapses
+- [ ] 3.3 Surface the case the challenge history cannot see: validation succeeded, and the certificate was never deployed — or was deployed to some nodes and not others
 
-## 4. Failover answers
+## 4. Retention
 
-- [ ] 4.1 Compute served values as stored values filtered by node state, without altering the stored recordset (design H9)
-- [ ] 4.2 Implement the never-empty rule: serve everything when every value would be excluded (design H3)
-- [ ] 4.3 Raise an alarm for the all-unavailable state without changing what is served
-- [ ] 4.4 Apply a lower default time to live to health-checked recordsets
-- [ ] 4.5 Distribute a failover decision over the existing stream as a served-values change
-- [ ] 4.6 Test that a returning node is served again with no change to stored values
+- [ ] 4.1 Keep observations as history with a stated retention, downsampled beyond a full-resolution window; their value is a trend measured in weeks
+- [ ] 4.2 Keep them out of the credit ledger: they are operational data, and what is billed is the node being observed rather than each observation
 
-## 5. Certificate reporting
+## 5. Metering
 
-- [ ] 5.1 Compare inventory domains against observed covered names and report those covered by none
-- [ ] 5.2 Report approaching expiry against a configurable threshold, and expired certificates distinctly
-- [ ] 5.3 Retain certificate observations as history with a retention longer than reachability samples
-- [ ] 5.4 Assert no private key and no certificate material beyond the observation is stored
+- [ ] 5.1 Emit `node.observed` as a count over an interval from the same periodic job that emits every other rate event, so the invoice is a function of what the customer configured rather than of how often we look
 
-## 6. Retention
+## 6. Management API and console
 
-- [ ] 6.1 Implement retention for probe history: full resolution for a short window, downsampled beyond
-- [ ] 6.2 Confirm decision state is unaffected by history removal
-- [ ] 6.3 Measure the growth rate per node per satellite per cycle and record it in the operator documentation
+- [ ] 6.1 Report observations per load balancer, newest first, with the covered-names comparison alongside
+- [ ] 6.2 Show expiry, issuer and covered names per node and address family, and name the domains covered by nothing
+- [ ] 6.3 Confine every read by `Scope` and gate it by the ACL predicate, like every other listing
 
-## 7. Metering
+## 7. Documentation
 
-- [ ] 7.1 Record a delivered probe result as a metering event; record nothing for an undelivered batch
-- [ ] 7.2 Confirm event cardinality is per node and per certificate, not per node-domain pair
-
-## 8. Management API and console
-
-- [ ] 8.1 Add routes for check configuration, node status and history, gated by permission
-- [ ] 8.2 Add the per-node status view with reachability, certificate, expiry, issuer and history
-- [ ] 8.3 Surface uncovered domains and approaching expiries
-- [ ] 8.4 Show which values of a health-checked recordset are served and which are excluded, and the all-unavailable state
-
-## 9. Documentation
-
-- [ ] 9.1 Document that the time to live, not the probe interval, bounds observed failover time (design H4)
-- [ ] 9.2 Document the never-empty rule and why the check system fails open
-- [ ] 9.3 Document the difference between these checks and the advisory checks in `internal/resolvercheck`
-- [ ] 9.4 Document the certificate observation limitation for servers offering different certificates per server name
-
-## 7. Address families and late reports
-
-- [ ] 7.1 Key node state by `(node, address family)` throughout: quorum, hysteresis, and the serve-time filter (design H10)
-- [ ] 7.2 Apply the IPv4 state to `A` recordsets and the IPv6 state to `AAAA` recordsets
-- [ ] 7.3 Evaluate the never-empty rule within one recordset, so a family whose values all fail serves in full
-- [ ] 7.4 Add a test for the empty-`AAAA`-beside-healthy-`A` case, asserting the family serves in full
-- [ ] 7.5 Detect one family failing across unrelated accounts within an interval; suppress withdrawal for that family fleet-wide and alert (design H10)
-- [ ] 7.6 Mark results describing cycles older than the permitted delay as late; write them to history and exclude them from quorum and hysteresis (design H11)
-- [ ] 7.7 Emit no billable event for a late result
-- [ ] 7.8 Test that a reconnecting satellite's backlog changes no state and produces no deduction
+- [ ] 7.1 Document what is observed, how often, and what it explicitly does not do: no reachability monitoring, no certificate issuance, no private keys

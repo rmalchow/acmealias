@@ -1,3 +1,21 @@
+> **Withdrawn — the fleet it distributes to has no reason to exist.**
+>
+> This change opens: *"one process cannot be an authoritative nameserver for the internet"* — needing
+> DNS in several places, near the resolvers asking, surviving an upgrade of the thing that holds the
+> data. Every one of those pressures came from serving customers' real zones.
+>
+> The product answers ACME DNS-01 challenges and observes certificates. A challenge answer sits on a
+> renewal path with roughly thirty days of slack, so an hour when nothing answers is invisible to
+> everyone; and certificate observation is infrequent enough that one prober is enough. Neither
+> justifies a replicated fleet, an event stream, enrolment credentials, or a staleness story.
+>
+> The parts worth remembering if a fleet is ever wanted: the connection direction (satellites dial
+> out, so we never hold a customer's DNS provider credentials), and enrolment as a single-use token
+> exchanged for a per-satellite credential, which is the cheapest arrangement that can revoke ONE
+> machine.
+>
+> Archived unimplemented. Nothing should be built from it.
+
 ## Why
 
 ### One process cannot be an authoritative nameserver for the internet

@@ -91,8 +91,8 @@ func CompilePredicate(s Subject, action string, target ObjectType) Predicate {
 			case FormID:
 				p.Columns["id"] = append(p.Columns["id"], *g.ObjectID)
 			case FormSelector:
-				// Selectors do not reduce to equality and are compiled
-				// separately; see CompileRecordPredicate.
+				// Reserved and unused; a grant carrying one is refused at write
+				// time, so a stored one contributes nothing.
 			}
 
 		case Contains(g.Type, target) && g.Inheritable:
@@ -114,85 +114,15 @@ func CompilePredicate(s Subject, action string, target ObjectType) Predicate {
 	return p
 }
 
-// RecordPredicate is the compiled filter for DNS records, which is the one type
-// whose identifier does not reduce to equality (design P13).
+// There was a second compiler here, for the one identifier form that did not
+// reduce to equality: a DNS record selector, matched by name pattern. It stored
+// names reversed so that "everything beneath this name" became a prefix an index
+// could serve rather than a leading-wildcard LIKE that no btree can, and excluded
+// the pattern's own apex so a subtree grant could not reach the zone's own NS and
+// MX.
 //
-// A selector matches by name pattern, so its term is a suffix match with the
-// pattern's own apex excluded — and a leading-wildcard LIKE cannot use an
-// ordinary btree index. The remedy is to store record names REVERSED with a
-// text_pattern_ops index and match a prefix instead, which is why this carries
-// reversed values rather than the patterns as written.
-//
-// The special case is isolated here and does not shape the general builder.
-type RecordPredicate struct {
-	All   bool
-	Terms []RecordTerm
-}
-
-// RecordTerm is one selector: a zone, a reversed-name prefix, the exact reversed
-// name that the prefix must NOT match (the pattern's apex), and a type set.
-type RecordTerm struct {
-	Zone string
-	// ReversedPrefix is empty for a pattern with no wildcard label, in which
-	// case ReversedExact is the whole of the match.
-	ReversedPrefix string
-	ReversedExact  string
-	// ExcludeReversedApex is the apex the wildcard does not reach. Empty when
-	// the pattern names an exact host.
-	ExcludeReversedApex string
-	Types               []string
-}
-
-// ReverseName reverses a DNS name label-wise, which is what turns "everything
-// beneath this name" from a leading-wildcard LIKE into a prefix match an index
-// can serve.
-//
-//	www.example.com  ->  com.example.www
-func ReverseName(name string) string {
-	labels := strings.Split(normalizeName(name), ".")
-	for i, j := 0, len(labels)-1; i < j; i, j = i+1, j-1 {
-		labels[i], labels[j] = labels[j], labels[i]
-	}
-	return strings.Join(labels, ".")
-}
-
-// CompileRecordPredicate folds the record selectors a subject holds for one
-// action.
-func CompileRecordPredicate(s Subject, action string) RecordPredicate {
-	if s.AccountID == model.NilID {
-		return RecordPredicate{}
-	}
-	if s.Unrestricted {
-		return RecordPredicate{All: true}
-	}
-	var out RecordPredicate
-	for _, g := range s.Grants {
-		if g.AccountID != s.AccountID {
-			continue
-		}
-		if g.Action != Wildcard && g.Action != action {
-			continue
-		}
-		if g.Type == TypeAny && g.Form() == FormWildcard {
-			return RecordPredicate{All: true}
-		}
-		if g.Type != TypeDNSRecord || g.Form() != FormSelector {
-			continue
-		}
-		sel := *g.Selector
-		term := RecordTerm{Zone: normalizeName(sel.Zone), Types: sel.Types}
-		if rest, ok := strings.CutPrefix(normalizeName(sel.Names), "*."); ok {
-			// Beneath the pattern, and NOT the pattern's own apex — which is the
-			// rule that keeps a subtree grant away from the zone's own NS and MX.
-			term.ReversedPrefix = ReverseName(rest) + "."
-			term.ExcludeReversedApex = ReverseName(rest)
-		} else {
-			term.ReversedExact = ReverseName(sel.Names)
-		}
-		out.Terms = append(out.Terms, term)
-	}
-	return out
-}
+// It went with the DNS product. The trick is worth remembering — reverse the
+// name, match a prefix — if a predicate-shaped identifier is ever wanted again.
 
 // String renders a predicate for a log line or a test failure, so a wrong
 // listing can be diagnosed without reconstructing the fold by hand.

@@ -30,11 +30,11 @@ import (
 // set of grants, and every screen that lists keys has to show what they can
 // actually do (task 9.5).
 type grantView struct {
-	Type        string             `json:"type"`
-	ObjectID    *model.ID          `json:"objectId,omitempty"`
-	Selector    *authz.DNSSelector `json:"selector,omitempty"`
-	Action      string             `json:"action"`
-	Inheritable bool               `json:"inheritable"`
+	Type        string          `json:"type"`
+	ObjectID    *model.ID       `json:"objectId,omitempty"`
+	Selector    *authz.Selector `json:"selector,omitempty"`
+	Action      string          `json:"action"`
+	Inheritable bool            `json:"inheritable"`
 	// Summary is the grant written the way the design writes them, so an
 	// operator reading a listing does not have to assemble four fields in their
 	// head.

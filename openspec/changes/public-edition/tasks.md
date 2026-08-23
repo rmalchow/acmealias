@@ -7,7 +7,7 @@
 
 ## 2. Delegated authentication
 
-- [ ] 2.1 Point both editions at the identity provider at `auth.edgedns.eu`, differing only in the tenant they authenticate against (design U3)
+- [ ] 2.1 Point both editions at the identity provider at `auth.acmealias.de`, differing only in the tenant they authenticate against (design U3)
 - [ ] 2.2 Configure one instance with two applications — console and staff — each bound to its own group; register customers as external users; give the staff application no enrolment flow (design U12)
 - [ ] 2.2a Verify the issuing application when validating a token, rather than accepting any validly signed one; assert a console token is refused on the staff surface
 - [ ] 2.2b Separate the hostnames by brand so customer enrolment and recovery are unreachable from the staff name
@@ -64,7 +64,7 @@
 - [ ] 7.1 Create the static site as a separate deployment with its own pipeline and domain
 - [ ] 7.2 Link "try now" into the public edition's registration route
 - [ ] 7.3 State plainly that the service answers challenges and serves DNS, and does not issue certificates
-- [ ] 7.4 State that DNSSEC is not supported and that a signed domain must have its delegation signer removed first (design U10, U11)
+- [ ] 7.4 State what the service does not do: no DNS hosting, no certificate issuance, no private keys (design U10a, U11)
 - [ ] 7.5 Publish terms stating best-effort availability with no service level agreement
 - [ ] 7.6 Publish an abuse contact address and the twelve-hour response commitment `staff-plane` S10 makes
 - [ ] 7.7 Publish a privacy statement covering registration addresses, zone contents, staff access records and blocked identities, each with its retention period
@@ -86,4 +86,4 @@
 - [ ] 9.3 Follow the switch in the console's links and the marketing site's call to action, as presentation only
 - [ ] 9.4 Add the payment configuration switch; refuse the purchase endpoints when it is off, leaving the staff credit grant as the only source of balance
 - [ ] 9.5 Confirm invitation acceptance is unaffected by either switch
-- [ ] 9.6 State on the marketing site that DNSSEC is not supported, and that a signed domain must have its delegation signer removed before it can be hosted (design U10)
+- [ ] 9.6 State the boundary on the marketing site: one question about one name, and the customer keeps their DNS where it is (design U10a)
