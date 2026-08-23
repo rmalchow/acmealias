@@ -29,7 +29,10 @@ describe('AppComponent', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     const labels = fixture.componentInstance.nav().map((i) => i.label);
-    expect(labels).toEqual(['Projects', 'Live challenges', 'Audit log']);
+    // Roles is offered to everyone, deliberately: reading the roster needs no grant, and
+    // changing it is refused by the service for anyone who is not an unrestricted member. A
+    // navigation entry that hid the screen would hide the roster too.
+    expect(labels).toEqual(['Projects', 'Live challenges', 'Audit log', 'Roles']);
   });
 
   it('prompts when the session has expired', () => {

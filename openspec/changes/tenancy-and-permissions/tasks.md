@@ -90,13 +90,13 @@
 
 ## 9. Console
 
-- [ ] 9.0 Build the no-account-selected shell: profile, the list of accounts the user belongs to, create-account, accept-invitation, and nothing else
-- [ ] 9.0a Build the account switcher, and render neither it nor the selection screen in a single-account edition
+- [x] 9.0 Build the no-account-selected shell: profile, the list of accounts the user belongs to, create-account, accept-invitation, and nothing else
+- [x] 9.0a Build the account switcher, and render neither it nor the selection screen in a single-account edition
 - [x] 9.1 Consume the per-object permitted-actions report and replace role-name gating throughout
-- [ ] 9.2 Build the role editor: create, edit, delete, and membership management
-- [ ] 9.3 Build the grant composer, offering only what the acting user holds
-- [ ] 9.4 Present the unrestricted role as uneditable and hide removal of its last member
-- [ ] 9.5 Extend the key dialog with anchor and grant selection; show a key's authority wherever it is listed
+- [x] 9.2 Build the role editor: create, edit, delete, and membership management
+- [x] 9.3 Build the grant composer, offering only what the acting user holds
+- [x] 9.4 Present the unrestricted role as uneditable and hide removal of its last member
+- [x] 9.5 Extend the key dialog with anchor and grant selection; show a key's authority wherever it is listed
 
 ## 10. Listeners
 

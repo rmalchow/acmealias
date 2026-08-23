@@ -102,7 +102,12 @@ export interface Project {
 
 export interface ApiKey {
   id: string;
-  loadBalancerId: string;
+  /**
+   * What the key may do, and to what. A key used to belong to one load balancer and its authority
+   * WAS that foreign key; it is a subject holding grants now, anchored to the account, so the only
+   * honest way to show what it can reach is to show them (task 9.5).
+   */
+  grants: KeyGrant[];
   identifier: string;
   displayPrefix: string;
   note: string;
@@ -112,6 +117,16 @@ export interface ApiKey {
   lastUsedAt: string | null;
   disabledAt: string | null;
   active: boolean;
+}
+
+/** One grant a key holds, as the service renders it. */
+export interface KeyGrant {
+  type: string;
+  objectId?: string | null;
+  action: string;
+  inheritable: boolean;
+  /** The grant written the way the design writes them, so a listing needs no assembly. */
+  summary: string;
 }
 
 /** Response of create/rotate — the one and only time `secret` is ever sent. */

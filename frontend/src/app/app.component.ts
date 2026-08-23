@@ -5,6 +5,7 @@ import { NzDropDownModule } from 'ng-zorro-antd/dropdown';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzMenuModule } from 'ng-zorro-antd/menu';
 import { NzModalModule } from 'ng-zorro-antd/modal';
+import { AccountSwitcherComponent } from './features/accounts/account-switcher.component';
 import { Role, SessionService } from './core/session.service';
 
 interface NavItem {
@@ -23,6 +24,11 @@ export const NAV: NavItem[] = [
   { path: '/projects', label: 'Projects', roles: [] },
   { path: '/challenges', label: 'Live challenges', roles: [] },
   { path: '/audit', label: 'Audit log', roles: [] },
+  // Roles and membership are an account administering itself. Reading the roster
+  // needs no grant; changing it is refused by the service for anyone who is not
+  // an unrestricted member, so the link is offered to everyone and the screen
+  // says what they may do.
+  { path: '/roles', label: 'Roles', roles: [] },
 ];
 
 @Component({
@@ -36,6 +42,7 @@ export const NAV: NavItem[] = [
     NzIconModule,
     NzMenuModule,
     NzModalModule,
+    AccountSwitcherComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',

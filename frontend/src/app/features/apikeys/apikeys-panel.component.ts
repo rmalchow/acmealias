@@ -56,6 +56,7 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
         <tr>
           <th>Identifier</th>
           <th>Note</th>
+          <th>Authority</th>
           <th>Restrictions</th>
           <th>Expires</th>
           <th>Last used</th>
@@ -68,6 +69,19 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
           <tr [class.inactive]="!k.active">
             <td class="ac-mono">{{ k.displayPrefix }}&hellip;</td>
             <td>{{ k.note || '—' }}</td>
+            <!--
+              What this key can actually do. It used to be implied by which load balancer the key
+              belonged to; a key is a subject holding grants now, so showing the grants is the only
+              honest answer — and a key that reaches a whole project looks different here from one
+              that reaches a single load balancer, which is the point of the change.
+            -->
+            <td>
+              @for (g of k.grants; track $index) {
+                <div class="ac-mono ac-grant">{{ g.summary }}</div>
+              } @empty {
+                <span class="ac-hint">no grants — this key can do nothing</span>
+              }
+            </td>
             <td>
               @if (k.networks.length) {
                 {{ k.networks.join(', ') }}

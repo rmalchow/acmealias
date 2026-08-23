@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { accountGuard } from './core/account.guard';
 import { MessageComponent } from './core/message.component';
 
 /**
@@ -18,24 +19,43 @@ import { MessageComponent } from './core/message.component';
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'projects' },
   {
+    // The shell a session with no account selected sees (design P19). It is the
+    // only screen reachable from that state, so it is deliberately outside the
+    // account guard that sends people here.
+    path: 'accounts',
+    loadComponent: () =>
+      import('./features/accounts/select-account.component').then((m) => m.SelectAccountComponent),
+  },
+  {
     path: 'projects',
+    canActivate: [accountGuard],
     loadComponent: () => import('./features/projects/project-list.component').then((m) => m.ProjectListComponent),
   },
   {
     path: 'projects/:id',
+    canActivate: [accountGuard],
     loadComponent: () => import('./features/projects/project-detail.component').then((m) => m.ProjectDetailComponent),
   },
   {
     path: 'loadbalancers/:id',
+    canActivate: [accountGuard],
     loadComponent: () => import('./features/loadbalancer/loadbalancer-detail.component').then((m) => m.LoadBalancerDetailComponent),
   },
   {
     path: 'challenges',
+    canActivate: [accountGuard],
     loadComponent: () => import('./features/challenges/challenges.component').then((m) => m.ChallengesComponent),
   },
   {
     path: 'audit',
+    canActivate: [accountGuard],
     loadComponent: () => import('./features/audit/audit.component').then((m) => m.AuditComponent),
+  },
+  {
+    // Roles and membership: who may do what inside this account.
+    path: 'roles',
+    canActivate: [accountGuard],
+    loadComponent: () => import('./features/roles/roles.component').then((m) => m.RolesComponent),
   },
   {
     path: 'forbidden',

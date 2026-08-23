@@ -9,6 +9,11 @@
     </nav>
 
     @if (session.me(); as me) {
+      <!--
+        The account switcher renders nothing when there is one account to choose from, which is
+        the whole internal edition. It is absent rather than hidden: there is no choice to offer.
+      -->
+      <app-account-switcher />
       <button class="account" nz-button nzType="text" nz-dropdown [nzDropdownMenu]="account">
         <span nz-icon nzType="user"></span>
         {{ me.displayName }}
