@@ -52,15 +52,43 @@ func RoleNames(ctx context.Context, db *gorm.DB, sc Scope) ([]string, error) {
 	return names, nil
 }
 
+// GrantCheck decides whether one grant may be written. It is a parameter rather
+// than a rule this package knows, because the rule lives in the permission model
+// and this package must not import it — but it is a REQUIRED parameter, so a new
+// write path cannot forget the check by omission (task 4.3).
+//
+// AllowAnyGrant is the honest way to say "no check here", and every use of it
+// has to explain itself.
+type GrantCheck func(g Grant) error
+
+// Grant is the shape a grant takes as it crosses this boundary, so the check can
+// be written against something without importing the model of either side.
+type Grant struct {
+	ObjectType  string
+	ObjectID    *model.ID
+	Selector    []byte
+	Action      string
+	Inheritable bool
+}
+
+// AllowAnyGrant permits everything. It exists for `internal/adminctl`, whose
+// authority is the database connection string: a check it could bypass by
+// writing the row directly would be theatre, and the audit trail would claim a
+// constraint that did not exist.
+func AllowAnyGrant(Grant) error { return nil }
+
 // CreateRole inserts a role and its grants in one transaction.
 //
 // The unrestricted flag cannot be set through this path: the account's fixed
 // role is created by the migration, and a second one would make "the role that
 // can always get you back in" ambiguous. The database also refuses it, with a
 // partial unique index — this is the error message.
-func CreateRole(ctx context.Context, db *gorm.DB, sc Scope, r *model.Role) error {
+func CreateRole(ctx context.Context, db *gorm.DB, sc Scope, r *model.Role, check GrantCheck) error {
 	if r.Unrestricted {
 		return fmt.Errorf("%w: an account has exactly one, created with it", ErrUnrestrictedRole)
+	}
+	if err := checkGrants(check, r.Grants); err != nil {
+		return err
 	}
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
 		r.AccountID = sc.AccountID()
@@ -80,7 +108,10 @@ func CreateRole(ctx context.Context, db *gorm.DB, sc Scope, r *model.Role) error
 // identity per grant and an intent for rows the caller did not mention, and
 // neither is obvious enough to guess: "these are the grants" is a sentence an
 // operator can verify against the screen in front of them.
-func UpdateRole(ctx context.Context, db *gorm.DB, sc Scope, r *model.Role) error {
+func UpdateRole(ctx context.Context, db *gorm.DB, sc Scope, r *model.Role, check GrantCheck) error {
+	if err := checkGrants(check, r.Grants); err != nil {
+		return err
+	}
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
 		var existing model.Role
 		if err := sc.Where(tx).First(&existing, "id = ?", r.ID).Error; err != nil {
@@ -192,4 +223,21 @@ func ListMembers(ctx context.Context, db *gorm.DB, sc Scope) ([]model.AccountMem
 		return nil, fmt.Errorf("store: list members: %w", err)
 	}
 	return ms, nil
+}
+
+// checkGrants runs the write-time rule over a role's grants.
+func checkGrants(check GrantCheck, grants []model.RoleGrant) error {
+	if check == nil {
+		return fmt.Errorf("store: a grant write was attempted with no check; " +
+			"pass AllowAnyGrant if that is genuinely intended and say why")
+	}
+	for _, g := range grants {
+		if err := check(Grant{
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID, Selector: g.Selector,
+			Action: g.Action, Inheritable: g.Inheritable,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

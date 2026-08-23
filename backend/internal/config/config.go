@@ -37,10 +37,21 @@ type Config struct {
 	NSNames []string
 
 	// Listen addresses.
-	DNSListenAddr       string // ACME_DNS_LISTEN: UDP+TCP, e.g. ":53"
-	ChallengeListenAddr string // ACME_CHALLENGE_LISTEN
-	AdminListenAddr     string // ACME_ADMIN_LISTEN
-	InternalListenAddr  string // ACME_INTERNAL_LISTEN
+	DNSListenAddr string // ACME_DNS_LISTEN: UDP+TCP, e.g. ":53"
+
+	// ListenAddr is the one HTTP listener (design P16). It serves every path
+	// group: the management API, the staff tree, the challenge protocol, the
+	// console, and the health and metrics endpoints.
+	//
+	// It replaces three. The old split existed so a stolen API key could reach
+	// no management route even if a routing rule in front of us was wrong; the
+	// permission model carries that guarantee now, because a key reaches only
+	// what its grants permit.
+	//
+	// What moves to the reverse proxy is exposure control — /metrics and the
+	// staff tree are on the same port as everything else, so a deployment that
+	// wants them unreachable from outside must say so in front of the service.
+	ListenAddr string // ACME_LISTEN
 
 	// DatabaseURL is a postgres:// connection string (ACME_DATABASE_URL).
 	DatabaseURL string
@@ -247,10 +258,8 @@ func Load() (Config, error) {
 
 		NSNames: csv("ACME_NS_NAMES"),
 
-		DNSListenAddr:       str("ACME_DNS_LISTEN", ":53"),
-		ChallengeListenAddr: str("ACME_CHALLENGE_LISTEN", ":8080"),
-		AdminListenAddr:     str("ACME_ADMIN_LISTEN", ":8081"),
-		InternalListenAddr:  str("ACME_INTERNAL_LISTEN", ":9090"),
+		DNSListenAddr: str("ACME_DNS_LISTEN", ":53"),
+		ListenAddr:    str("ACME_LISTEN", ":8080"),
 
 		DatabaseURL:          str("ACME_DATABASE_URL", ""),
 		AllowAccountCreation: boolean("ACME_ALLOW_ACCOUNT_CREATION", false),

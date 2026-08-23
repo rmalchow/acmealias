@@ -35,12 +35,16 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 		{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &lb.ID, Action: "challenge.withdraw", Inheritable: true},
 	}
 	k.Note = note
+	// AllowAnyGrant, and the reason is the same one internal/adminctl/actor.go
+	// gives for its actor: the CLI runs with the connection string, so whoever
+	// can run it can write the row directly. A subset check here would obstruct
+	// the honest path and leave the dishonest one open.
 	if expiresIn > 0 {
 		t := time.Now().UTC().Add(expiresIn)
 		k.ExpiresAt = &t
 	}
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := store.CreateAPIKey(ctx, tx, sc, k); err != nil {
+		if err := store.CreateAPIKey(ctx, tx, sc, k, store.AllowAnyGrant); err != nil {
 			return nil, err
 		}
 		// k carries SecretHash; authz.Record scrubs it out by name before the

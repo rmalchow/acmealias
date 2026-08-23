@@ -200,9 +200,7 @@ func runService(cfg config.Config, log *slog.Logger) error {
 		name, setting, addr string
 		h                   http.Handler
 	}{
-		{"challenge", "ACME_CHALLENGE_LISTEN", cfg.ChallengeListenAddr, servers.Challenge},
-		{"admin", "ACME_ADMIN_LISTEN", cfg.AdminListenAddr, servers.Admin},
-		{"internal", "ACME_INTERNAL_LISTEN", cfg.InternalListenAddr, servers.Internal},
+		{"public", "ACME_LISTEN", cfg.ListenAddr, servers.Public},
 	} {
 		ln, err := net.Listen("tcp", l.addr)
 		if err != nil {

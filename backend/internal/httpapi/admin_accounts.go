@@ -231,6 +231,22 @@ func (a *admin) listRoles(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
+// subsetCheck is the write-time rule as the store takes it: one grant at a time,
+// against a single grant the writer holds (task 4.3).
+func (a *admin) subsetCheck(c echo.Context, sc store.Scope) (store.GrantCheck, error) {
+	writer, err := a.subject(c)
+	if err != nil {
+		return nil, err
+	}
+	return func(g store.Grant) error {
+		parsed := authz.GrantFromRow(model.APIKeyGrant{
+			AccountID: sc.AccountID(), ObjectType: g.ObjectType, ObjectID: g.ObjectID,
+			Selector: g.Selector, Action: g.Action, Inheritable: g.Inheritable,
+		})
+		return authz.CheckSubset(writer, parsed)
+	}, nil
+}
+
 // grantsFromBody turns the request's grants into rows, refusing any the writer
 // does not itself hold (the subset rule).
 func (a *admin) grantsFromBody(c echo.Context, sc store.Scope, in []grantView) ([]model.RoleGrant, error) {
@@ -286,10 +302,14 @@ func (a *admin) createRole(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	check, err := a.subsetCheck(c, sc)
+	if err != nil {
+		return err
+	}
 	r := &model.Role{Name: body.Name, Description: body.Description, Grants: grants}
 	var out roleView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := store.CreateRole(c.Request().Context(), tx, sc, r); err != nil {
+		if err := store.CreateRole(c.Request().Context(), tx, sc, r, check); err != nil {
 			return nil, err
 		}
 		out = toRole(*r)
@@ -327,6 +347,10 @@ func (a *admin) updateRole(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	check, err := a.subsetCheck(c, sc)
+	if err != nil {
+		return err
+	}
 	ctx := c.Request().Context()
 	var out roleView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
@@ -339,7 +363,7 @@ func (a *admin) updateRole(c echo.Context) error {
 		}
 		before := toRole(existing[0])
 		r := &model.Role{ID: id, Name: body.Name, Description: body.Description, Grants: grants}
-		if err := store.UpdateRole(ctx, tx, sc, r); err != nil {
+		if err := store.UpdateRole(ctx, tx, sc, r, check); err != nil {
 			return nil, err
 		}
 		after, err := store.RolesFor(ctx, tx, sc, id)

@@ -143,9 +143,19 @@ ACME_NS_NAMES=ns1.cloudpowered.services,ns2.cloudpowered.services
 
 # --- listeners ---
 ACME_DNS_LISTEN=:53
-ACME_CHALLENGE_LISTEN=:8080
-ACME_ADMIN_LISTEN=:8081
-ACME_INTERNAL_LISTEN=127.0.0.1:9090
+ACME_LISTEN=:8080
+# One HTTP listener serves every path group (design P16): the management API,
+# the staff tree, the challenge protocol, the console, and the health and
+# metrics endpoints.
+#
+# The three-port split is gone, and with it the guarantee it carried — that a
+# stolen API key reached no management route even if a routing rule in front of
+# the service was wrong. The permission model carries that now: a key reaches
+# only what its grants permit.
+#
+# What this moves onto YOU: /metrics and /api/admin/** are on the same port as
+# the console. If they should not be reachable from outside, the proxy in front
+# has to say so. Nothing below this line does it for you.
 
 # --- database ---
 ACME_DATABASE_URL=postgres://acmeservice:<pw>@db:5432/acmeservice?sslmode=disable
@@ -224,8 +234,7 @@ services:
       - "203.0.113.53:53:53/udp"     # both protocols, on the dedicated address
       - "203.0.113.53:53:53/tcp"
       - "127.0.0.1:8080:8080"        # challenge API   — proxy reaches it locally
-      - "127.0.0.1:8081:8081"        # console + API   — proxy reaches it locally
-      - "127.0.0.1:9090:9090"        # health, metrics — loopback ONLY
+      - "127.0.0.1:8080:8080"        # everything      — proxy reaches it locally
     healthcheck:
       test: ["CMD", "acmeservice", "healthcheck"]
       interval: 30s
@@ -246,11 +255,17 @@ docker compose logs -f acmeservice
 > `compose.yaml`, so that `docker compose up -d` after an unrelated change
 > cannot silently move you onto a new version — including one whose migrations you have not read.
 
-> **Do not publish the internal listener**
+> **Block `/metrics` and `/api/admin/` at the proxy**
 >
-> `ACME_INTERNAL_LISTEN` carries `/healthz`, `/readyz` and
-> `/metrics`. Bind it to loopback and scrape it locally. It is a separate listener
-> specifically so that no proxy misconfiguration can expose it.
+> These used to live on their own listener, bound to loopback, so no proxy
+> misconfiguration could expose them. They do not any more: one listener serves
+> every path group (design P16), and what was a topology guarantee is now a
+> reverse-proxy rule you have to write.
+>
+> `/metrics` names your customers' projects and load balancers in its labels, and
+> `/api/admin/` is the staff surface. Neither should be reachable from the
+> internet. Deny both on the public virtual host and scrape metrics from the host
+> itself over loopback.
 >
 > Note the port mappings above bind explicitly to `127.0.0.1` and to the dedicated
 > public address. A bare `"53:53/udp"` would publish on every interface the host has,
@@ -267,7 +282,7 @@ Terminate TLS on the existing proxy, as with everything else we run.
 | Hostname | Backend | Who may reach it |
 | --- | --- | --- |
 | `acme-api.cloudpowered.services` | `127.0.0.1:8080` | Our load balancer node addresses only. Restrict at the proxy or the firewall. |
-| `acme-console.cloudpowered.services` | `127.0.0.1:8081` | Office ranges and VPN. |
+| `acme-console.cloudpowered.services` | `127.0.0.1:8080` | Office ranges and VPN. Block `/metrics` and `/api/admin/` here. |
 
 > **These certificates cannot come from this service**
 >
@@ -326,8 +341,8 @@ compare those against the four `ACME_*_GROUP` values in `.env`.
 
 ```
 # the service is up and its dependencies are reachable
-curl -s localhost:9090/healthz
-curl -s localhost:9090/readyz
+curl -s localhost:8080/healthz
+curl -s localhost:8080/readyz
 
 # the zone answers authoritatively over BOTH transports
 dig @203.0.113.53      acmeservice.cloudpowered.services SOA +norecurse
@@ -366,9 +381,7 @@ Then set up the monitoring that actually matters — see
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ACME_DNS_LISTEN` | `:53` | UDP and TCP. Bind to the dedicated address on a multi-homed host. |
-| `ACME_CHALLENGE_LISTEN` | `:8080` | `/present` and `/cleanup` only. |
-| `ACME_ADMIN_LISTEN` | `:8081` | Management API and the console. |
-| `ACME_INTERNAL_LISTEN` | `:9090` | Health and metrics. Never expose. |
+| `ACME_LISTEN` | `:8080` | Every HTTP path group: management API, staff tree, challenge protocol, console, health, metrics. |
 
 ### Database and lifecycle
 

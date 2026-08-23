@@ -34,7 +34,7 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 			{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true},
 		},
 	}
-	if err := CreateAPIKey(ctx, db, sc, key); err != nil {
+	if err := CreateAPIKey(ctx, db, sc, key, AllowAnyGrant); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 

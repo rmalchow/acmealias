@@ -135,14 +135,8 @@ func TestDefaultsApply(t *testing.T) {
 	if cfg.DNSListenAddr != ":53" {
 		t.Errorf("DNSListenAddr default = %q, want :53", cfg.DNSListenAddr)
 	}
-	if cfg.ChallengeListenAddr != ":8080" {
-		t.Errorf("ChallengeListenAddr default = %q, want :8080", cfg.ChallengeListenAddr)
-	}
-	if cfg.AdminListenAddr != ":8081" {
-		t.Errorf("AdminListenAddr default = %q, want :8081", cfg.AdminListenAddr)
-	}
-	if cfg.InternalListenAddr != ":9090" {
-		t.Errorf("InternalListenAddr default = %q, want :9090", cfg.InternalListenAddr)
+	if cfg.ListenAddr != ":8080" {
+		t.Errorf("ListenAddr default = %q, want :8080", cfg.ListenAddr)
 	}
 	if !cfg.MigrateOnStart {
 		t.Errorf("MigrateOnStart default = false, want true")

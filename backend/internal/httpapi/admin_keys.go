@@ -213,23 +213,13 @@ func (a *admin) mint(c echo.Context, grants []model.APIKeyGrant, note string, ne
 		return err
 	}
 
-	// The subset rule (task 6.5): a key may be given only what its creator
-	// holds, checked one grant at a time against one held grant. Refusing here
-	// rather than at the store means the message can name the grant that was
-	// not covered, which is the difference between "forbidden" and something an
-	// operator can act on.
-	writer, err := a.subject(c)
+	// The subset rule (tasks 4.3 and 6.5): a key may be given only what its
+	// creator holds, checked one grant at a time against one held grant. The
+	// check is handed to the store rather than run here, so a future write path
+	// cannot forget it — the parameter is required.
+	check, err := a.subsetCheck(c, sc)
 	if err != nil {
 		return err
-	}
-	for i := range grants {
-		g := authz.GrantFromRow(model.APIKeyGrant{
-			AccountID: sc.AccountID(), ObjectType: grants[i].ObjectType, ObjectID: grants[i].ObjectID,
-			Selector: grants[i].Selector, Action: grants[i].Action, Inheritable: grants[i].Inheritable,
-		})
-		if err := authz.CheckSubset(writer, g); err != nil {
-			return err
-		}
 	}
 
 	k, secret, err := apikey.New()
@@ -245,7 +235,7 @@ func (a *admin) mint(c echo.Context, grants []model.APIKeyGrant, note string, ne
 
 	var v keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := store.CreateAPIKey(ctx, tx, sc, k); err != nil {
+		if err := store.CreateAPIKey(ctx, tx, sc, k, check); err != nil {
 			return nil, err
 		}
 		v = toKey(*k)

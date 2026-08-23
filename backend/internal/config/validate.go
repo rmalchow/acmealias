@@ -99,9 +99,7 @@ func (c Config) Validate() error {
 
 	for _, addr := range []struct{ name, value string }{
 		{"ACME_DNS_LISTEN", c.DNSListenAddr},
-		{"ACME_CHALLENGE_LISTEN", c.ChallengeListenAddr},
-		{"ACME_ADMIN_LISTEN", c.AdminListenAddr},
-		{"ACME_INTERNAL_LISTEN", c.InternalListenAddr},
+		{"ACME_LISTEN", c.ListenAddr},
 	} {
 		if _, _, err := net.SplitHostPort(addr.value); err != nil {
 			errs.add(addr.name, err)

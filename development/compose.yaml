@@ -184,7 +184,7 @@ services:
       traefik.http.routers.challenge-api.entrypoints: web
       traefik.http.routers.challenge-api.service: challenge-api
 
-      traefik.http.services.admin-api.loadbalancer.server.port: "8081"
+      traefik.http.services.admin-api.loadbalancer.server.port: "8080"
       traefik.http.services.challenge-api.loadbalancer.server.port: "8080"
     ports:
       # Not HTTP, so the overlay cannot carry it: our authoritative DNS, for

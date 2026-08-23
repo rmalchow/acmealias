@@ -13,7 +13,19 @@ import (
 // CreateAPIKey inserts a new key, its digest already computed by the caller
 // (design D3 — the plaintext secret is never persisted). Any CIDR networks
 // on k.Networks are inserted along with it.
-func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey) error {
+func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey, check GrantCheck) error {
+	if check == nil {
+		return fmt.Errorf("store: a key was created with no grant check; " +
+			"pass AllowAnyGrant if that is genuinely intended and say why")
+	}
+	for _, g := range k.Grants {
+		if err := check(Grant{
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID, Selector: g.Selector,
+			Action: g.Action, Inheritable: g.Inheritable,
+		}); err != nil {
+			return err
+		}
+	}
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
 		k.AccountID = sc.AccountID()
 		if k.ID == model.NilID {

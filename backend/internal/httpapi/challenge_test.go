@@ -333,7 +333,7 @@ func newEnv(t *testing.T) *env {
 			t.Fatalf("new api key: %v", err)
 		}
 		k.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &loadBalancerID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "load_balancer", ObjectID: &loadBalancerID, Action: "challenge.withdraw", Inheritable: true}}
-		if err := store.CreateAPIKey(ctx, db, sc, k); err != nil {
+		if err := store.CreateAPIKey(ctx, db, sc, k, store.AllowAnyGrant); err != nil {
 			t.Fatalf("create api key: %v", err)
 		}
 		return func(r *http.Request) { r.SetBasicAuth(k.Identifier, secret) }
@@ -583,7 +583,7 @@ func TestRegisterChallengeRefusesUnprotectedCIDRRestriction(t *testing.T) {
 	}
 	k.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.withdraw", Inheritable: true}}
 	k.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
-	if err := store.CreateAPIKey(ctx, db, sc, k); err != nil {
+	if err := store.CreateAPIKey(ctx, db, sc, k, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
 

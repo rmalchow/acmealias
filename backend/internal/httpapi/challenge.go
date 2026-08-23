@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"gorm.io/gorm"
 
@@ -159,8 +160,21 @@ func RegisterChallenge(ctx context.Context, e *echo.Echo, o ChallengeOptions) er
 		LastUsed: o.LastUsed,
 		Logger:   o.Log,
 	})
-	e.POST("/present", h.present, auth)
-	e.POST("/cleanup", h.cleanup, auth)
+	// The body limit belongs to these routes rather than to the listener, since
+	// design P16 put everything on one. A publish body is two short strings;
+	// holding the management API's grant lists to the same 8K would be a limit
+	// with no visible reason.
+	limit := middleware.BodyLimit(challengeBodyLimit)
+
+	// Namespaced, and the bare paths alongside them. HTTPREQ_ENDPOINT is a base
+	// URL and the client appends the verbs itself, so the protocol can live
+	// under a prefix — but every deployment already has the old endpoint
+	// configured, and changing where a load balancer publishes is not a change
+	// anyone should have to make to upgrade.
+	for _, prefix := range []string{"", "/acme/httpreq"} {
+		e.POST(prefix+"/present", h.present, auth, limit)
+		e.POST(prefix+"/cleanup", h.cleanup, auth, limit)
+	}
 	return nil
 }
 

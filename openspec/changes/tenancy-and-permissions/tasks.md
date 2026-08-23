@@ -43,7 +43,7 @@
 
 - [x] 4.1 Implement single-grant containment `g ⊑ e` over action, type, object and selector (design P10)
 - [x] 4.2 Implement pattern containment (`*.a.b ⊑ *.b`, `a.b ⊑ *.b`, `*.b ⋢ *.a.b`) with an exhaustive test table
-- [ ] 4.3 Enforce the rule on every write to `role_grants` and `api_key_grants`
+- [x] 4.3 Enforce the rule on every write to `role_grants` and `api_key_grants`
 - [x] 4.4 Test that union coverage is refused, and document the refusal as intended in the test name
 
 ## 5. Roles replace the fixed four
@@ -84,9 +84,9 @@
 ## 8. Audit
 
 - [x] 8.1 Add role, grant and membership actions to `internal/authz/vocab.go` and assign them to the credential class
-- [ ] 8.2 Record grants in full — type, identifier or selector, action, inheritable — in before/after state
-- [ ] 8.3 Record the acting account on every entry; record role names as written rather than as references
-- [ ] 8.4 Test that a refused escalation writes no change entry and is logged
+- [x] 8.2 Record grants in full — type, identifier or selector, action, inheritable — in before/after state
+- [x] 8.3 Record the acting account on every entry; record role names as written rather than as references
+- [x] 8.4 Test that a refused escalation writes no change entry and is logged
 
 ## 9. Console
 
@@ -100,10 +100,10 @@
 
 ## 10. Listeners
 
-- [ ] 10.0 Collapse the three listeners into one, separated by path prefix with per-group middleware (design P16); keep `/present` and `/cleanup` serving alongside the namespaced `/acme/httpreq/**`
-- [ ] 10.1 Replace the tests asserting no listener mounts another's routes with tests asserting each path group carries its intended middleware
-- [ ] 10.2 Add the satellite listener with `ClientAuth` required, and assert a forwarded client-identity header is ignored on it
-- [ ] 10.3 Update the `service-operations` documentation and deployment manifests for the new port layout
+- [x] 10.0 Collapse the three listeners into one, separated by path prefix with per-group middleware (design P16); keep `/present` and `/cleanup` serving alongside the namespaced `/acme/httpreq/**`
+- [x] 10.1 Replace the tests asserting no listener mounts another's routes with tests asserting each path group carries its intended middleware
+- [~] 10.2 `Servers.Satellite` exists as the shape of the answer — a second listener, not a path prefix, because mutual TLS completes before any path is known. It is nil until `satellite-sync` gives it routes to serve; there is nothing yet to require a client certificate for
+- [x] 10.3 Update the `service-operations` documentation and deployment manifests for the new port layout
 
 ## 11. Documentation and closing the overlap
 

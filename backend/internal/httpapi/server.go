@@ -29,9 +29,9 @@ import (
 // it before the JSON decoder runs costs nothing.
 const challengeBodyLimit = "8K"
 
-// ServerOptions carry everything the three listeners need. Challenge, Admin
-// and Metrics are required; Console, Liveness and Readiness are omitted only
-// by tests that do not exercise them.
+// ServerOptions carry everything the listener needs. Challenge, Admin and
+// Metrics are required; Console, Liveness and Readiness are omitted only by
+// tests that do not exercise them.
 type ServerOptions struct {
 	Challenge ChallengeOptions
 	Admin     AdminOptions
@@ -42,9 +42,8 @@ type ServerOptions struct {
 	// anything under /api/ and this handler never sees it.
 	Console http.Handler
 
-	// Liveness and Readiness are mounted on the internal listener only, and
-	// unauthenticated — that placement is what the service-operations spec
-	// requires and what this package is where it happens.
+	// Liveness and Readiness are unauthenticated, and since design P16 they sit
+	// on the same listener as everything else.
 	Liveness  http.Handler
 	Readiness http.Handler
 
@@ -52,13 +51,34 @@ type ServerOptions struct {
 	Log     *slog.Logger
 }
 
-// Servers holds the three built Echo instances. They are handlers only: the
-// caller opens the listeners, which is what lets startup report a bind failure
-// before it reports itself ready.
+// Servers holds the built Echo instances. They are handlers only: the caller
+// opens the listeners, which is what lets startup report a bind failure before
+// it reports itself ready.
+//
+// There is one now where there were three (design P16). The old split existed so
+// that "a stolen API key reaches no management route even if a routing rule in
+// front of us is wrong" — a guarantee now carried by the permission model
+// instead of by network topology, because a key reaches only what its grants
+// permit.
+//
+// The trade is explicit and worth stating: network-level exposure control moves
+// to the reverse proxy. In particular /metrics is now on the same listener as
+// everything else, so a deployment that wants it unreachable from outside has to
+// say so in front of the service rather than relying on a second port nobody
+// published.
+//
+// Satellites will get their own listener, because mutual TLS is the one thing
+// paths cannot express: the handshake completes before any path is known, so a
+// client-certificate requirement is a property of a listener.
 type Servers struct {
-	Challenge *echo.Echo
-	Admin     *echo.Echo
-	Internal  *echo.Echo
+	// Public serves every path group: /api/v1/**, /api/admin/**,
+	// /acme/httpreq/**, the bare /present and /cleanup, the console, and the
+	// health and metrics endpoints.
+	Public *echo.Echo
+
+	// Satellite is nil until `satellite-sync` fills it. It exists here so the
+	// shape of the answer is visible: a second listener, not a path prefix.
+	Satellite *echo.Echo
 }
 
 // NewServers builds all three. It returns an error rather than panicking
@@ -68,36 +88,41 @@ type Servers struct {
 //
 // ctx is the startup context, used only for that check.
 func NewServers(ctx context.Context, o ServerOptions) (*Servers, error) {
-	challenge := newEcho("challenge", o.Metrics)
-	challenge.Use(middleware.BodyLimit(challengeBodyLimit))
-	if err := RegisterChallenge(ctx, challenge, o.Challenge); err != nil {
+	e := newEcho("public", o.Metrics)
+
+	// The management API first: it installs the JSON error handler and the
+	// /api/* catch-all that the console fallback must not shadow.
+	if err := RegisterAdmin(e, o.Admin); err != nil {
 		return nil, err
 	}
 
-	admin := newEcho("admin", o.Metrics)
-	// RegisterAdmin first: it installs the JSON error handler and the /api/*
-	// catch-all the console fallback must not shadow.
-	if err := RegisterAdmin(admin, o.Admin); err != nil {
+	// The challenge protocol carries its own body limit rather than the whole
+	// listener doing so. A publish body is two short strings; the management API
+	// takes grant lists and role definitions, and holding those to 8K would be a
+	// limit nobody could see the reason for.
+	if err := RegisterChallenge(ctx, e, o.Challenge); err != nil {
 		return nil, err
 	}
-	if o.Console != nil {
-		console := echo.WrapHandler(o.Console)
-		admin.GET("/*", console)
-		admin.HEAD("/*", console)
-	}
 
-	internal := newEcho("internal", o.Metrics)
 	if o.Liveness != nil {
-		internal.GET("/healthz", echo.WrapHandler(o.Liveness))
+		e.GET("/healthz", echo.WrapHandler(o.Liveness))
 	}
 	if o.Readiness != nil {
-		internal.GET("/readyz", echo.WrapHandler(o.Readiness))
+		e.GET("/readyz", echo.WrapHandler(o.Readiness))
 	}
 	if o.Metrics != nil {
-		internal.GET("/metrics", echo.WrapHandler(promhttp.HandlerFor(o.Metrics.Registry, promhttp.HandlerOpts{})))
+		e.GET("/metrics", echo.WrapHandler(promhttp.HandlerFor(o.Metrics.Registry, promhttp.HandlerOpts{})))
 	}
 
-	return &Servers{Challenge: challenge, Admin: admin, Internal: internal}, nil
+	// Last, so the longer static prefixes above win: Echo prefers them, and the
+	// /api/* catch-all answers anything under /api/ that no route claimed.
+	if o.Console != nil {
+		console := echo.WrapHandler(o.Console)
+		e.GET("/*", console)
+		e.HEAD("/*", console)
+	}
+
+	return &Servers{Public: e}, nil
 }
 
 // newEcho is the middleware every listener shares: panic recovery, and the

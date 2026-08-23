@@ -118,17 +118,21 @@ func Record(ctx context.Context, db *gorm.DB, m *obs.Metrics, a Actor, e Event) 
 		ActorSubject: nonEmpty(a.Subject),
 		ActorName:    nonEmpty(a.DisplayName),
 		ActorGroups:  a.Groups,
-		ActorRoles:   a.Roles.List(),
-		ActorSource:  cmp.Or(a.Source, SourceSystem),
-		RequestID:    nonEmpty(a.RequestID),
-		ClientIP:     nonEmpty(a.ClientIP),
-		Action:       e.Action,
-		ObjectType:   e.ObjectType,
-		ObjectID:     e.ObjectID,
-		ObjectLabel:  e.ObjectLabel,
-		ProjectID:    e.ProjectID,
-		Before:       before,
-		After:        after,
+		// Role NAMES as written, not references. A role is a row now and rows
+		// are edited and deleted; an entry that pointed at one would become
+		// unreadable exactly when it mattered — after somebody removed the role
+		// whose authority is being questioned (task 8.3).
+		ActorRoles:  a.Roles.List(),
+		ActorSource: cmp.Or(a.Source, SourceSystem),
+		RequestID:   nonEmpty(a.RequestID),
+		ClientIP:    nonEmpty(a.ClientIP),
+		Action:      e.Action,
+		ObjectType:  e.ObjectType,
+		ObjectID:    e.ObjectID,
+		ObjectLabel: e.ObjectLabel,
+		ProjectID:   e.ProjectID,
+		Before:      before,
+		After:       after,
 	}
 	if err := store.AppendAuditEntry(ctx, db, entry); err != nil {
 		return err

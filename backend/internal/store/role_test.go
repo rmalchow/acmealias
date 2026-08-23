@@ -32,13 +32,13 @@ func TestIntegrationUnrestrictedRoleIsFixed(t *testing.T) {
 	}
 
 	admin.Description = "something else"
-	if err := UpdateRole(ctx, db, sc, admin); !errors.Is(err, ErrUnrestrictedRole) {
+	if err := UpdateRole(ctx, db, sc, admin, AllowAnyGrant); !errors.Is(err, ErrUnrestrictedRole) {
 		t.Fatalf("update = %v, want ErrUnrestrictedRole", err)
 	}
 	if err := DeleteRole(ctx, db, sc, admin.ID); !errors.Is(err, ErrUnrestrictedRole) {
 		t.Fatalf("delete = %v, want ErrUnrestrictedRole", err)
 	}
-	if err := CreateRole(ctx, db, sc, &model.Role{Name: "second-admin", Unrestricted: true}); !errors.Is(err, ErrUnrestrictedRole) {
+	if err := CreateRole(ctx, db, sc, &model.Role{Name: "second-admin", Unrestricted: true}, AllowAnyGrant); !errors.Is(err, ErrUnrestrictedRole) {
 		t.Fatalf("create a second unrestricted role = %v, want ErrUnrestrictedRole", err)
 	}
 }
@@ -129,7 +129,7 @@ func TestIntegrationRoleWithMembersIsNotDeleted(t *testing.T) {
 	ctx := context.Background()
 
 	r := &model.Role{Name: "operators", Description: "test"}
-	if err := CreateRole(ctx, db, sc, r); err != nil {
+	if err := CreateRole(ctx, db, sc, r, AllowAnyGrant); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 	u := seedUser(t, db, "u-op")
@@ -157,12 +157,12 @@ func TestIntegrationUpdateRoleReplacesGrants(t *testing.T) {
 		{ObjectType: "*", Action: "inventory.view", Inheritable: true},
 		{ObjectType: "*", Action: "dns.plan", Inheritable: true},
 	}}
-	if err := CreateRole(ctx, db, sc, r); err != nil {
+	if err := CreateRole(ctx, db, sc, r, AllowAnyGrant); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 
 	r.Grants = []model.RoleGrant{{ObjectType: "*", Action: "inventory.view", Inheritable: true}}
-	if err := UpdateRole(ctx, db, sc, r); err != nil {
+	if err := UpdateRole(ctx, db, sc, r, AllowAnyGrant); err != nil {
 		t.Fatalf("update role: %v", err)
 	}
 

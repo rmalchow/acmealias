@@ -43,7 +43,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 		{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true},
 	}
 	lapsed.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
-	if err := store.CreateAPIKey(ctx, db, sc, lapsed); err != nil {
+	if err := store.CreateAPIKey(ctx, db, sc, lapsed, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create lapsed key: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	future := time.Now().UTC().Add(time.Hour)
 	live.ExpiresAt = &future
 	live.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true}}
-	if err := store.CreateAPIKey(ctx, db, sc, live); err != nil {
+	if err := store.CreateAPIKey(ctx, db, sc, live, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create live key: %v", err)
 	}
 

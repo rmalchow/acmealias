@@ -2,7 +2,10 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 	"testing"
+
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 )
 
 // TestIntegrationAccountCreationIsClosedByDefault covers the half of U9 that
@@ -123,5 +126,69 @@ func TestIntegrationTheReportDoesNotAuthorize(t *testing.T) {
 	path := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + projects[0].ID.String()
 	if rec := cl.do(http.MethodPatch, path, `{"name":"Renamed"}`); rec.Code != http.StatusForbidden {
 		t.Fatalf("PATCH as READ_ONLY: %d %s, want 403", rec.Code, rec.Body.String())
+	}
+}
+
+// TestIntegrationARefusedEscalationWritesNoEntry is task 8.4.
+//
+// A refused write must leave no change entry, because an audit trail that
+// records attempts as though they were changes tells an operator that something
+// happened when nothing did — and the one question the trail exists to answer is
+// "what happened".
+//
+// The refusal is still visible: it is logged, and the request is answered with a
+// message naming the grant that was not covered. What it is not is a row in the
+// list of changes.
+func TestIntegrationARefusedEscalationWritesNoEntry(t *testing.T) {
+	v := newAdminEnv(t)
+	// KEY_ROTATION may mint keys but holds no inventory write, so a role granting
+	// one is an escalation it cannot issue.
+	cl := v.session("escalator", groupKey)
+	auditAt := "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit"
+
+	before := entriesAt(t, cl, auditAt)
+
+	body := `{"name":"too-much","grants":[{"type":"*","action":"inventory.write","inheritable":true}]}`
+	rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/roles", body)
+	if rec.Code == http.StatusCreated {
+		t.Fatal("a role conferring more than the writer holds was created")
+	}
+
+	after := entriesAt(t, cl, auditAt)
+	if len(after) != len(before) {
+		t.Fatalf("the refused request wrote %d audit entries, want none", len(after)-len(before))
+	}
+}
+
+func entriesAt(t *testing.T, cl *client, auditAt string) []auditView {
+	t.Helper()
+	var es []auditView
+	decode(t, cl.do(http.MethodGet, auditAt+"?limit=1000", ""), &es)
+	return es
+}
+
+// TestIntegrationGrantsAreRecordedInFull is task 8.2: an entry has to say what
+// authority was conferred, in full, or it cannot answer the question it exists
+// for. A reference to a grant row would go stale the moment the role was edited.
+func TestIntegrationGrantsAreRecordedInFull(t *testing.T) {
+	v := newAdminEnv(t)
+	cl := v.session("roler", groupAdmin)
+	acct := "/api/v1/accounts/" + v.sc.AccountID().String()
+
+	body := `{"name":"readers","grants":[{"type":"*","action":"inventory.view","inheritable":true}]}`
+	if rec := cl.do(http.MethodPost, acct+"/roles", body); rec.Code != http.StatusCreated {
+		t.Fatalf("create role: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var es []auditView
+	decode(t, cl.do(http.MethodGet, acct+"/audit?action="+authz.ActionRoleCreate, ""), &es)
+	if len(es) == 0 {
+		t.Fatal("no entry for the role creation")
+	}
+	recorded := string(es[0].After)
+	for _, want := range []string{"inventory.view", "inheritable", `"type":"*"`} {
+		if !strings.Contains(recorded, want) {
+			t.Errorf("the entry does not record %s: %s", want, recorded)
+		}
 	}
 }

@@ -156,7 +156,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	// because its last-member guard would make the row's outcome depend on how
 	// many other rows ran first.
 	spare := &model.Role{Name: "route-table-spare"}
-	if err := store.CreateRole(t.Context(), db, sc, spare); err != nil {
+	if err := store.CreateRole(t.Context(), db, sc, spare, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create spare role: %v", err)
 	}
 	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID, roleID: spare.ID, opts: opts}
@@ -231,7 +231,7 @@ func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
 		k.Grants = []model.APIKeyGrant{
 			{ObjectType: "load_balancer", ObjectID: &v.lb.ID, Action: "challenge.publish", Inheritable: true},
 		}
-		if err := store.CreateAPIKey(t.Context(), v.db, v.sc, k); err != nil {
+		if err := store.CreateAPIKey(t.Context(), v.db, v.sc, k, store.AllowAnyGrant); err != nil {
 			t.Fatalf("seed key: %v", err)
 		}
 		return "/api/v1/accounts/" + v.sc.AccountID().String() + "/keys/" + k.ID.String() + tail
@@ -241,7 +241,7 @@ func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
 func seedRole(t *testing.T, v *adminEnv, suffix string) string {
 	t.Helper()
 	r := &model.Role{Name: fmt.Sprintf("seed-role%d", seedCounter.Add(1))}
-	if err := store.CreateRole(t.Context(), v.db, v.sc, r); err != nil {
+	if err := store.CreateRole(t.Context(), v.db, v.sc, r, store.AllowAnyGrant); err != nil {
 		t.Fatalf("seed role: %v", err)
 	}
 	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/roles/" + r.ID.String()
@@ -250,7 +250,7 @@ func seedRole(t *testing.T, v *adminEnv, suffix string) string {
 func seedMember(t *testing.T, v *adminEnv, suffix string) string {
 	t.Helper()
 	r := &model.Role{Name: fmt.Sprintf("seed-mrole%d", seedCounter.Add(1))}
-	if err := store.CreateRole(t.Context(), v.db, v.sc, r); err != nil {
+	if err := store.CreateRole(t.Context(), v.db, v.sc, r, store.AllowAnyGrant); err != nil {
 		t.Fatalf("seed role for member: %v", err)
 	}
 	u, err := store.FindOrCreateUser(t.Context(), v.db, fmt.Sprintf("seed-user%d", seedCounter.Add(1)), "Seed", "")

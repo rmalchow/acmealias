@@ -84,59 +84,82 @@ func get(t *testing.T, e *echo.Echo, method, path string, session ...string) *ht
 	return rec
 }
 
-// No listener serves another's routes — the separation is the security
-// property, not a tidiness one (design D9).
-func TestListenersServeOnlyTheirOwnRoutes(t *testing.T) {
+// Each path group carries its intended middleware (design P16, task 10.1).
+//
+// This replaces a test asserting that no listener mounted another's routes.
+// That property came from network topology: three listeners, and a stolen API
+// key reached no management route even if a routing rule in front of us was
+// wrong. There is one listener now, and the guarantee is carried by the
+// permission model instead — a key reaches only what its grants permit.
+//
+// So what is worth asserting changed shape. Not "these paths are absent here",
+// but "these paths are guarded there": the management API needs a session, the
+// challenge protocol needs a key, and the health endpoints need neither.
+func TestEachPathGroupCarriesItsMiddleware(t *testing.T) {
 	s, _ := newServers(t)
 
 	cases := []struct {
-		listener   string
-		e          *echo.Echo
+		name       string
 		method     string
 		path       string
 		wantStatus int
+		why        string
 	}{
-		{"challenge", s.Challenge, http.MethodGet, "/api/v1/me", http.StatusNotFound},
-		{"challenge", s.Challenge, http.MethodGet, "/api/v1/accounts/00000000-0000-7000-8000-000000000001/projects", http.StatusNotFound},
-		{"challenge", s.Challenge, http.MethodGet, "/metrics", http.StatusNotFound},
-		{"challenge", s.Challenge, http.MethodGet, "/healthz", http.StatusNotFound},
-		{"challenge", s.Challenge, http.MethodGet, "/readyz", http.StatusNotFound},
-		{"challenge", s.Challenge, http.MethodGet, "/", http.StatusNotFound},
-		{"admin", s.Admin, http.MethodGet, "/metrics", http.StatusOK}, // console fallback, NOT metrics
-		// 405, not 404: the console fallback claims /* for GET and HEAD, so
-		// Echo answers "method not allowed" for a POST. Either way the
-		// challenge handler is not reachable here, which is the property.
-		{"admin", s.Admin, http.MethodPost, "/present", http.StatusMethodNotAllowed},
-		{"admin", s.Admin, http.MethodPost, "/cleanup", http.StatusMethodNotAllowed},
-		{"internal", s.Internal, http.MethodGet, "/metrics", http.StatusOK},
-		{"internal", s.Internal, http.MethodGet, "/healthz", http.StatusOK},
-		{"internal", s.Internal, http.MethodGet, "/readyz", http.StatusOK},
-		{"internal", s.Internal, http.MethodPost, "/present", http.StatusNotFound},
-		{"internal", s.Internal, http.MethodGet, "/api/v1/me", http.StatusNotFound},
+		{
+			name:   "the management API refuses an unauthenticated caller",
+			method: http.MethodGet, path: "/api/v1/me", wantStatus: http.StatusUnauthorized,
+			why: "the session guard, not the absence of a route",
+		},
+		{
+			name:   "the staff tree is present and empty",
+			method: http.MethodGet, path: "/api/admin/anything", wantStatus: http.StatusNotFound,
+			why: "a separate tree, reserved for staff-plane, answering so a caller learns the surface exists",
+		},
+		{
+			name:   "the challenge protocol refuses an unauthenticated caller",
+			method: http.MethodPost, path: "/present", wantStatus: http.StatusUnauthorized,
+			why: "the API-key middleware",
+		},
+		{
+			name:   "the namespaced challenge path is guarded identically",
+			method: http.MethodPost, path: "/acme/httpreq/present", wantStatus: http.StatusUnauthorized,
+			why: "the same handler and the same middleware, under the prefix design P16 gives it",
+		},
+		{
+			name:   "the bare challenge path still serves",
+			method: http.MethodPost, path: "/cleanup", wantStatus: http.StatusUnauthorized,
+			why: "every existing deployment has the old endpoint configured; upgrading must not move it",
+		},
+		{
+			name:   "health needs nothing",
+			method: http.MethodGet, path: "/healthz", wantStatus: http.StatusOK,
+			why: "a probe cannot hold a session",
+		},
+		{
+			name:   "readiness needs nothing",
+			method: http.MethodGet, path: "/readyz", wantStatus: http.StatusOK,
+		},
+		{
+			name:   "metrics are served",
+			method: http.MethodGet, path: "/metrics", wantStatus: http.StatusOK,
+			why: "on the same listener as everything else now, so keeping it private is the proxy's job",
+		},
 	}
 	for _, c := range cases {
-		rec := get(t, c.e, c.method, c.path)
-		if rec.Code != c.wantStatus {
-			t.Errorf("%s listener %s %s: status %d, want %d", c.listener, c.method, c.path, rec.Code, c.wantStatus)
-		}
-	}
-
-	// The admin listener answering /metrics at all is only acceptable because
-	// what it returns is the console, not the metrics exposition.
-	if body := get(t, s.Admin, http.MethodGet, "/metrics").Body.String(); strings.Contains(body, "acmeservice_http_requests_total") {
-		t.Error("admin listener served the metrics exposition")
-	}
-	if body := get(t, s.Internal, http.MethodGet, "/metrics").Body.String(); !strings.Contains(body, "acmeservice_") {
-		t.Errorf("internal /metrics did not expose acmeservice metrics: %q", body)
+		t.Run(c.name, func(t *testing.T) {
+			rec := get(t, s.Public, c.method, c.path)
+			if rec.Code != c.wantStatus {
+				t.Errorf("%s %s: status %d, want %d — %s", c.method, c.path, rec.Code, c.wantStatus, c.why)
+			}
+		})
 	}
 }
 
-// A deep link loads the application; a typo'd API path stays JSON.
 func TestConsoleFallback(t *testing.T) {
 	s, db := newServers(t)
 	session := signedIn(t, db)
 
-	deep := get(t, s.Admin, http.MethodGet, "/projects/7/keys")
+	deep := get(t, s.Public, http.MethodGet, "/projects/7/keys")
 	if deep.Code != http.StatusOK {
 		t.Fatalf("deep link: status %d, want 200", deep.Code)
 	}
@@ -149,7 +172,7 @@ func TestConsoleFallback(t *testing.T) {
 
 	// Signed in, so what comes back is the router's answer for an unknown
 	// path rather than the session guard's 401.
-	api := get(t, s.Admin, http.MethodGet, "/api/v1/no-such-endpoint", session)
+	api := get(t, s.Public, http.MethodGet, "/api/v1/no-such-endpoint", session)
 	if api.Code != http.StatusNotFound {
 		t.Errorf("unknown API path: status %d, want 404", api.Code)
 	}
@@ -159,7 +182,7 @@ func TestConsoleFallback(t *testing.T) {
 
 	// A missing file stays a missing file rather than arriving as HTML with
 	// a 200, which would break the browser's script loading in silence.
-	if rec := get(t, s.Admin, http.MethodGet, "/nope-1234.js"); rec.Code != http.StatusNotFound {
+	if rec := get(t, s.Public, http.MethodGet, "/nope-1234.js"); rec.Code != http.StatusNotFound {
 		t.Errorf("missing asset: status %d, want 404", rec.Code)
 	}
 }
@@ -172,14 +195,14 @@ var hashedRef = regexp.MustCompile(`(?:src|href)="([^"]*-[A-Za-z0-9_]{8,}\.(?:js
 func TestHashedAssetIsCacheable(t *testing.T) {
 	s, _ := newServers(t)
 
-	index := get(t, s.Admin, http.MethodGet, "/")
+	index := get(t, s.Public, http.MethodGet, "/")
 	body, _ := io.ReadAll(index.Body)
 	match := hashedRef.FindSubmatch(body)
 	if match == nil {
 		t.Skip("skipping: the embedded console has no content-hashed asset — run `ng build admin` first")
 	}
 
-	rec := get(t, s.Admin, http.MethodGet, "/"+strings.TrimPrefix(string(match[1]), "/"))
+	rec := get(t, s.Public, http.MethodGet, "/"+strings.TrimPrefix(string(match[1]), "/"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("asset %s: status %d, want 200", match[1], rec.Code)
 	}
