@@ -33,6 +33,15 @@ the bottom.
 the first customer we do not know personally**, wherever that falls; its support-access machinery
 can follow.
 
+`authentik-and-self-signup` also sits outside the numbering, and belongs **between 1 and 2**. It
+replaces Keycloak with authentik in the development stack — the provider `public-edition` U12 already
+committed production to — and turns on self-registration so that path is built and inert rather than
+unbuilt, which is the posture the triggers below already assume for it. It is placed here for one
+reason: `account-invitations` is about turning an authenticated stranger into a member of an account,
+and it is worth having the stranger arrive through the software that will actually produce them
+before building the machinery that adopts them. It is deliberately **not** a prerequisite for
+answering challenges for the first customers, who are people we know and enrol by hand.
+
 ## Triggers, not dates
 
 - **`metering-and-credits`** waits until manual credit grants stop being reasonable — a count of
