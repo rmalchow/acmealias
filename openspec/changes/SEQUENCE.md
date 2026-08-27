@@ -12,7 +12,10 @@ the bottom.
 
 1. **`tenancy-and-permissions`** — the floor, and the only change that is substantially cheaper now
    than later, because it rewrites the shape of every table while the only data is ours.
-   *Implemented: 80 of 81 tasks; the acceptance suite has not yet run green on the branch.*
+   *Implemented: 81 of 81 tasks. The acceptance suite runs green on the branch, from a destroyed
+   database through a fresh migration chain — which is what finally showed that four cross-account
+   reads had been silently emptied by row-level security, one of them stopping certificate issuance
+   altogether. See task 11.4.*
 2. **`account-invitations`** — the entry path. While self-registration is closed, an invitation is
    the only way a person becomes a user.
 3. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:

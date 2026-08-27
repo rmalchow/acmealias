@@ -58,9 +58,18 @@ func RunSnapshots(ctx context.Context, db *gorm.DB, interval time.Duration, log 
 //
 // The counts are read in the same statement that writes them, so a project
 // created mid-pass is either fully counted or not in the pass at all.
+// It reads across every account by definition — one pass covers the deployment,
+// not a tenant — which is why it is one of the four readers CrossAccount's own
+// doc comment enumerates. Saying so is not optional: `projects`, `aliases`,
+// `domains` and `load_balancers` all carry the tenant_isolation policy of
+// migration 000007, and this runs on a ticker with no session and therefore no
+// `app.account_id`, so as a bare statement it selects from an empty view of every
+// one of them and writes nothing at all, for ever, without erroring.
 func Snapshot(ctx context.Context, db *gorm.DB, at time.Time) (int64, error) {
 	day := at.UTC().Format("2006-01-02")
-	res := db.WithContext(ctx).Exec(`
+	var rows int64
+	err := store.CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		res := tx.Exec(`
 		insert into project_daily_stats
 		       (project_id, project_slug, day, alias_count, domain_count, load_balancer_count)
 		select p.id, p.slug, ?::date,
@@ -77,10 +86,16 @@ func Snapshot(ctx context.Context, db *gorm.DB, at time.Time) (int64, error) {
 		       alias_count         = excluded.alias_count,
 		       domain_count        = excluded.domain_count,
 		       load_balancer_count = excluded.load_balancer_count`, day)
-	if res.Error != nil {
-		return 0, fmt.Errorf("reporting: snapshot inventory for %s: %w", day, res.Error)
+		if res.Error != nil {
+			return res.Error
+		}
+		rows = res.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("reporting: snapshot inventory for %s: %w", day, err)
 	}
-	return res.RowsAffected, nil
+	return rows, nil
 }
 
 // InventoryPoint is one project's inventory size on one day.

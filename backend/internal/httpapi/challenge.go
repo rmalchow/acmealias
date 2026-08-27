@@ -365,7 +365,17 @@ func (h *challenge) findAlias(ctx context.Context, name string) (string, *model.
 		// which internal/store does not have and which is not this group's file
 		// to add. Upgrade path: move this one line there and call it, alongside
 		// FindAliasByChallengeName.
-		if err := h.opts.DB.WithContext(ctx).Where("label = ?", label).First(&a).Error; err != nil {
+		//
+		// CrossAccount for the same reason FindAliasByChallengeName carries it: a
+		// label is unique across the deployment and is resolved BEFORE the account
+		// is known, so the row-level security policy on `aliases` would otherwise
+		// hide every row and refuse every publication. The account comparison
+		// against the key's anchor happens in resolve, immediately after this
+		// returns — that is what keeps the global read safe.
+		err := store.CrossAccount(ctx, h.opts.DB, func(tx *gorm.DB) error {
+			return tx.Where("label = ?", label).First(&a).Error
+		})
+		if err != nil {
 			return formAlias, nil, err
 		}
 		return formAlias, &a, nil

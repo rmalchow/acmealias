@@ -165,11 +165,21 @@ func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.O
 		ID    model.ID
 		Label string
 	}
-	err := db.WithContext(ctx).
-		Model(&model.Alias{}).
-		Select("id, label").
-		Where("label IN ?", labels).
-		Scan(&rows).Error
+	// CrossAccount, because this runs on the zone-view flush ticker: a batch of
+	// observations covers whatever the nameserver was asked about, across every
+	// account, and there is no session and so no `app.account_id` to confine it
+	// to. `aliases` carries the tenant_isolation policy of migration 000007, so a
+	// bare read here resolves NO labels at all — and the failure is silent in the
+	// worst way, because every observation is then counted as "dropped" and the
+	// history reports that the CA never queried anything. That is exactly the
+	// misreading the comment above warns about.
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.
+			Model(&model.Alias{}).
+			Select("id, label").
+			Where("label IN ?", labels).
+			Scan(&rows).Error
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("store: resolve alias labels: %w", err)
 	}

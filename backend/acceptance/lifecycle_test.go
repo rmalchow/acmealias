@@ -41,7 +41,7 @@ func TestPresentAndCleanupBothFiredAndNothingRemains(t *testing.T) {
 	// a wait rather than an instant read.
 	eventually(t, 2*time.Minute, "challenge rows for "+aliasLabel+" to disappear", func() error {
 		var rows []challengeRow
-		if err := s.getJSON("/api/v1/challenges", &rows); err != nil {
+		if err := s.getJSON(s.acct("/challenges"), &rows); err != nil {
 			return err
 		}
 		for _, r := range rows {

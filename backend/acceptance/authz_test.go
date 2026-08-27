@@ -5,7 +5,6 @@ package acceptance
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -25,7 +24,7 @@ import (
 
 type keyCreated struct {
 	Key struct {
-		ID         int64  `json:"id"`
+		ID         string `json:"id"`
 		Identifier string `json:"identifier"`
 	} `json:"key"`
 	Secret string `json:"secret"`
@@ -56,19 +55,19 @@ func present(t *testing.T, path, id, secret, fqdn, value string, extra map[strin
 
 // mintKey creates an API key on lb, restricted to networks (nil for none), and
 // registers its revocation.
-func mintKey(t *testing.T, s *session, lb int64, note string, networks []string) keyCreated {
+func mintKey(t *testing.T, s *session, lb string, note string, networks []string) keyCreated {
 	t.Helper()
 	var out keyCreated
 	body := map[string]any{"note": note}
 	if networks != nil {
 		body["networks"] = networks
 	}
-	if err := s.json(http.MethodPost, fmt.Sprintf("/api/v1/loadbalancers/%d/keys", lb),
+	if err := s.json(http.MethodPost, s.acct("/loadbalancers/"+lb+"/keys"),
 		body, http.StatusCreated, &out); err != nil {
 		t.Fatalf("creating key %q: %v", note, err)
 	}
 	t.Cleanup(func() {
-		_, _, _ = s.do(http.MethodDelete, fmt.Sprintf("/api/v1/keys/%d", out.Key.ID), nil)
+		_, _, _ = s.do(http.MethodDelete, s.acct("/keys/"+out.Key.ID), nil)
 	})
 	return out
 }
@@ -79,13 +78,13 @@ func TestChallengeAuthorizationBoundaries(t *testing.T) {
 
 	// --- (a) a valid key belonging to a different load balancer ------------
 	var other lbRef
-	if err := s.json(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/loadbalancers", project),
+	if err := s.json(http.MethodPost, s.acct("/projects/"+project+"/loadbalancers"),
 		map[string]string{"slug": "acceptance-other", "name": "Acceptance (other LB)"},
 		http.StatusCreated, &other); err != nil {
 		t.Fatalf("creating the second load balancer: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _, _ = s.do(http.MethodDelete, fmt.Sprintf("/api/v1/loadbalancers/%d", other.ID), nil)
+		_, _, _ = s.do(http.MethodDelete, s.acct("/loadbalancers/"+other.ID), nil)
 	})
 	foreign := mintKey(t, s, other.ID, "acceptance: foreign key", nil)
 
@@ -155,10 +154,10 @@ func TestChallengeAuthorizationBoundaries(t *testing.T) {
 // latestClientIP reads the client address the service recorded on the most
 // recent interaction for lb. The interaction history is written by /present
 // itself, so this is the address the CIDR check was actually made against.
-func latestClientIP(t *testing.T, s *session, lb int64) string {
+func latestClientIP(t *testing.T, s *session, lb string) string {
 	t.Helper()
 	var ins []interactionRow
-	if err := s.getJSON(fmt.Sprintf("/api/v1/loadbalancers/%d/interactions?limit=1", lb), &ins); err != nil {
+	if err := s.getJSON(s.acct("/loadbalancers/"+lb+"/interactions?limit=1"), &ins); err != nil {
 		t.Fatalf("reading interactions: %v", err)
 	}
 	if len(ins) == 0 || ins[0].ClientIP == nil {

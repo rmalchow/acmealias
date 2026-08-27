@@ -40,8 +40,21 @@ alter table api_keys drop column project_id;
 -- all and gains nothing.
 --
 -- ADMIN needs no row: it is unrestricted.
+--
+-- The cross-account setting is not decoration. 000008 turned on row-level
+-- security for `roles` and `role_grants` in its final statement, so from here on
+-- a bare `select ... from roles` is filtered by `account_id = current_account()`
+-- — and a migration has no session, so `app.account_id` is unset and the select
+-- matches NOTHING. Without this line the insert below reads zero rows, writes
+-- zero rows, and reports success: the migration becomes a no-op that leaves
+-- CONFIG_ADMIN and KEY_ROTATION unable to mint a usable key, which is the very
+-- regression the comment above says it exists to prevent.
+set local app.cross_account = 'on';
+
 insert into role_grants (role_id, account_id, object_type, action, inheritable)
 select r.id, r.account_id, '*', a.action, true
   from roles r
   cross join (values ('challenge.publish'), ('challenge.withdraw')) as a(action)
  where r.name in ('CONFIG_ADMIN', 'KEY_ROTATION');
+
+reset app.cross_account;

@@ -451,23 +451,29 @@ func eventually(t *testing.T, timeout time.Duration, what string, f func() error
 
 // --- seeded inventory ------------------------------------------------------
 
+// Identifiers are UUIDs and are carried as the strings the API answers with.
+//
+// They are never parsed into a uuid.UUID here: this suite is a client, and a
+// client's only business with an identifier is to send back the one it was
+// given. Decoding it would add a way for the test to disagree with the service
+// about a value it does not interpret.
 type projectRef struct {
-	ID   int64  `json:"id"`
+	ID   string `json:"id"`
 	Slug string `json:"slug"`
 }
 
 type lbRef struct {
-	ID        int64  `json:"id"`
-	ProjectID int64  `json:"projectId"`
+	ID        string `json:"id"`
+	ProjectID string `json:"projectId"`
 	Slug      string `json:"slug"`
 }
 
 // demoProd resolves the seeded project `demo` and its load balancer `prod` to
 // the ids the management API addresses them by.
-func demoProd(t *testing.T, s *session) (project, lb int64) {
+func demoProd(t *testing.T, s *session) (project, lb string) {
 	t.Helper()
 	var projects []projectRef
-	if err := s.getJSON("/api/v1/projects", &projects); err != nil {
+	if err := s.getJSON(s.acct("/projects"), &projects); err != nil {
 		t.Fatalf("listing projects: %v", err)
 	}
 	for _, p := range projects {
@@ -475,7 +481,7 @@ func demoProd(t *testing.T, s *session) (project, lb int64) {
 			continue
 		}
 		var lbs []lbRef
-		if err := s.getJSON(fmt.Sprintf("/api/v1/projects/%d/loadbalancers", p.ID), &lbs); err != nil {
+		if err := s.getJSON(s.acct("/projects/"+p.ID+"/loadbalancers"), &lbs); err != nil {
 			t.Fatalf("listing load balancers: %v", err)
 		}
 		for _, l := range lbs {
@@ -485,7 +491,7 @@ func demoProd(t *testing.T, s *session) (project, lb int64) {
 		}
 	}
 	t.Fatalf("the seeded project demo / load balancer prod is missing — did ./scripts/dev.sh seed run?")
-	return 0, 0
+	return "", ""
 }
 
 // mustSignIn is signIn with the failure reported against the test.

@@ -9,7 +9,7 @@ import (
 )
 
 type interactionRow struct {
-	ID          int64     `json:"id"`
+	ID          string    `json:"id"`
 	AliasLabel  string    `json:"aliasLabel"`
 	DomainNames []string  `json:"domainNames"`
 	ClientIP    *string   `json:"clientIp"`
@@ -47,7 +47,7 @@ func TestBothAuthorizationsAreCreditedForTheOneQuery(t *testing.T) {
 	// published to this alias, and of any earlier `./scripts/dev.sh issue`.
 	eventually(t, 2*time.Minute, "two closed interactions for "+aliasLabel, func() error {
 		var all []interactionRow
-		if err := s.getJSON(fmt.Sprintf("/api/v1/loadbalancers/%d/interactions?limit=500", lb), &all); err != nil {
+		if err := s.getJSON(s.acct("/loadbalancers/"+lb+"/interactions?limit=500"), &all); err != nil {
 			return err
 		}
 		rows = rows[:0]
@@ -70,7 +70,7 @@ func TestBothAuthorizationsAreCreditedForTheOneQuery(t *testing.T) {
 		// the difference between testing the rule and testing the timer.
 		for _, in := range rows {
 			if in.QueryCount == 0 {
-				return fmt.Errorf("interaction %d has no queries credited yet", in.ID)
+				return fmt.Errorf("interaction %s has no queries credited yet", in.ID)
 			}
 		}
 		return nil
@@ -78,12 +78,12 @@ func TestBothAuthorizationsAreCreditedForTheOneQuery(t *testing.T) {
 
 	for _, in := range rows {
 		if in.QueryCount == 0 {
-			t.Errorf("interaction %d (%v) was never credited with a query, "+
+			t.Errorf("interaction %s (%v) was never credited with a query, "+
 				"although the one TXT query at %s answered both values",
 				in.ID, in.DomainNames, aliasFQDN)
 		}
 		if in.Outcome != "validated" {
-			t.Errorf("interaction %d (%v): outcome %q, want \"validated\" "+
+			t.Errorf("interaction %s (%v): outcome %q, want \"validated\" "+
 				"(withdrawn after being queried at least once)", in.ID, in.DomainNames, in.Outcome)
 		}
 	}

@@ -3,7 +3,6 @@
 package acceptance
 
 import (
-	"fmt"
 	"net/http"
 	"slices"
 	"testing"
@@ -83,7 +82,10 @@ func TestSeededUsersResolveToTheirRoles(t *testing.T) {
 func TestRoleEnforcementThroughTheManagementAPI(t *testing.T) {
 	admin := mustSignIn(t, adminUser, devPassword)
 	_, lb := demoProd(t, admin)
-	domains := fmt.Sprintf("/api/v1/loadbalancers/%d/domains", lb)
+	// Every session below acts in the same single account, so one address
+	// serves all four users. In a multi-account edition this would have to be
+	// built per session.
+	domains := admin.acct("/loadbalancers/" + lb + "/domains")
 
 	// A name of its own, in a zone the plan comparison in plan_test.go does not
 	// look at, and removed again either way.
@@ -98,14 +100,14 @@ func TestRoleEnforcementThroughTheManagementAPI(t *testing.T) {
 
 	configAdmin := mustSignIn(t, configAdminUser, devPassword)
 	var created struct {
-		ID int64 `json:"id"`
+		ID string `json:"id"`
 	}
 	if err := configAdmin.json(http.MethodPost, domains,
 		newDomain("acceptance-ca.example.net"), http.StatusCreated, &created); err != nil {
 		t.Errorf("%s creating a domain: %v", configAdminUser, err)
 	} else {
 		t.Cleanup(func() {
-			_, _, _ = admin.do(http.MethodDelete, fmt.Sprintf("/api/v1/domains/%d", created.ID), nil)
+			_, _, _ = admin.do(http.MethodDelete, admin.acct("/domains/"+created.ID), nil)
 		})
 	}
 
@@ -116,12 +118,12 @@ func TestRoleEnforcementThroughTheManagementAPI(t *testing.T) {
 		t.Errorf("%s creating a domain: got %d, want 403: %s", keyRotationUser, status, body)
 	}
 	var key keyCreated
-	if err := rotation.json(http.MethodPost, fmt.Sprintf("/api/v1/loadbalancers/%d/keys", lb),
+	if err := rotation.json(http.MethodPost, rotation.acct("/loadbalancers/"+lb+"/keys"),
 		map[string]any{"note": "acceptance: key-rotation may mint"}, http.StatusCreated, &key); err != nil {
 		t.Errorf("%s creating an API key: %v", keyRotationUser, err)
 	} else {
 		t.Cleanup(func() {
-			_, _, _ = admin.do(http.MethodDelete, fmt.Sprintf("/api/v1/keys/%d", key.Key.ID), nil)
+			_, _, _ = admin.do(http.MethodDelete, admin.acct("/keys/"+key.Key.ID), nil)
 		})
 	}
 }

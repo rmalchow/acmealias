@@ -42,9 +42,20 @@ func CreateAlias(ctx context.Context, db *gorm.DB, sc Scope, a *model.Alias) err
 // The account check happens *after*, in the caller, by comparing the resolved
 // alias's AccountID against the key's anchor (design P8). Callers on the challenge
 // path must do that comparison; ScopedAlias is the wrapper that does it for them.
+//
+// Reading globally has to be SAID, not merely intended. The row-level security
+// policy of migration 000007 filters `aliases` by `current_setting('app.account_id')`,
+// and this query runs before any account is known — so left as a bare read it
+// matches nothing at all, and every /present is refused 403 "not authorized for
+// that name" because the alias appears not to exist. CrossAccount is the
+// deliberately greppable escape for exactly this case, and it belongs here for the
+// same reason FindAPIKeyByIdentifier carries it: both resolve the identifier that
+// ESTABLISHES the account, so neither can be confined by one.
 func FindAliasByChallengeName(ctx context.Context, db *gorm.DB, challengeFQDN string) (*model.Alias, error) {
 	var a model.Alias
-	err := db.WithContext(ctx).Where("challenge_fqdn = ?", challengeFQDN).First(&a).Error
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.Where("challenge_fqdn = ?", challengeFQDN).First(&a).Error
+	})
 	if err != nil {
 		return nil, fmt.Errorf("store: find alias by challenge name %q: %w", challengeFQDN, err)
 	}

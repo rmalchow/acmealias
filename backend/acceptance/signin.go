@@ -39,6 +39,29 @@ type session struct {
 	client *http.Client
 	jar    *laxJar
 	csrf   string
+	// account is the account this session acts in, as a UUID string.
+	//
+	// Every inventory route lives under /api/v1/accounts/{accountId}/… and the
+	// service refuses a path naming an account other than the session's
+	// selection (design P19), so the id is not decoration: it is part of every
+	// address below. The internal edition selects its single account at sign-in
+	// (internal/oidcauth/flow.go), so this is populated by the time signIn
+	// returns and a session with an empty one is a bug rather than a state to
+	// handle.
+	account string
+}
+
+// acct addresses one path within the account this session is acting in.
+//
+//	s.acct("/loadbalancers/" + lb + "/keys")
+//	  -> /api/v1/accounts/0199…-…/loadbalancers/0199…-…/keys
+//
+// Routes that are NOT account-scoped — /me, /accounts, the auth endpoints — are
+// written out in full at their call sites, because there are four of them and
+// hiding the distinction behind one helper is how a route ends up addressed in
+// the wrong plane.
+func (s *session) acct(path string) string {
+	return "/api/v1/accounts/" + s.account + path
 }
 
 // laxJar is an http.CookieJar with RFC 6265's `Secure` rule removed.
@@ -143,9 +166,14 @@ func signIn(user, password string) (*session, error) {
 
 	s := &session{user: user, client: client, jar: jar}
 	// Any GET through the management API mints the CSRF cookie; /me is the one
-	// every role may call.
-	if _, _, err := s.do(http.MethodGet, "/api/v1/me", nil); err != nil {
+	// every role may call — and it also answers which account the session was
+	// placed in, which every route below needs in its path.
+	status, raw, err := s.do(http.MethodGet, "/api/v1/me", nil)
+	if err != nil {
 		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("GET /api/v1/me as %s: got %d: %s", user, status, strings.TrimSpace(string(raw)))
 	}
 	for _, ck := range jar.Cookies(mustURL(consoleURL)) {
 		if ck.Name == oidcauth.CSRFCookieName {
@@ -155,6 +183,23 @@ func signIn(user, password string) (*session, error) {
 	if s.csrf == "" {
 		return nil, fmt.Errorf("no %s cookie after GET /api/v1/me", oidcauth.CSRFCookieName)
 	}
+
+	var me struct {
+		SelectedAccountID *string `json:"selectedAccountId"`
+	}
+	if err := json.Unmarshal(raw, &me); err != nil {
+		return nil, fmt.Errorf("decoding /api/v1/me: %w", err)
+	}
+	if me.SelectedAccountID == nil || *me.SelectedAccountID == "" {
+		// Not a state this edition reaches: one account exists and sign-in
+		// selects it. Reaching here means either the bootstrap scope could not
+		// be resolved (an empty accounts table) or this stack is no longer the
+		// single-account edition the suite is written against.
+		return nil, fmt.Errorf("signed in as %s but no account is selected — "+
+			"the internal edition selects its single account at sign-in (design P19); "+
+			"is the accounts table seeded?", user)
+	}
+	s.account = *me.SelectedAccountID
 	return s, nil
 }
 
