@@ -98,7 +98,7 @@ internal aliases, and the cost is a second delegation rather than a second desig
 ### U3. Authentication is delegated to the identity provider in both editions, and the seam stays for one reason
 
 `internal/oidcauth` is the only authentication implementation. Both editions authenticate against
-the same self-hosted identity provider at `auth.acmealias.de`, differing in which of its tenants — its
+the same self-hosted identity provider at `auth.acmealias.com`, differing in which of its tenants — its
 brand, its enrollment flow, its user directory — they point at. There is no `internal/localauth`.
 
 The contract is unchanged in substance: authentication produces a server-side session, and everything
@@ -182,7 +182,7 @@ dependency is the cheaper of the two, especially when it already exists for staf
 
 ### U12. One identity provider instance, and separation inside it is policy rather than isolation
 
-Staff and customers authenticate against the same authentik instance at `auth.acmealias.de`. The
+Staff and customers authenticate against the same authentik instance at `auth.acmealias.com`. The
 alternative — a second instance, or authentik's own multi-tenancy feature — is rejected: the feature
 is experimental, and a second instance doubles the thing this design just decided was cheap precisely
 because it already exists.
@@ -390,10 +390,10 @@ The deployment's names, decided alongside the nameserver names in `dns-records` 
 
 | Name | Serves |
 | --- | --- |
-| `www.acmealias.de` | the marketing site — static, no session, its own pipeline |
-| `console.acmealias.de` | the authenticated console and the public API |
-| `admin.acmealias.de` | the staff surface of `staff-plane` |
-| `auth.acmealias.de` | the identity provider |
+| `www.acmealias.com` | the marketing site — static, no session, its own pipeline |
+| `console.acmealias.com` | the authenticated console and the public API |
+| `admin.acmealias.com` | the staff surface of `staff-plane` |
+| `auth.acmealias.com` | the identity provider |
 
 One domain, not two. An earlier version split the nameservers across two domains in two top-level
 domains at two registrars, so that one lapsed registration could not take every customer's DNS down at once.
@@ -401,7 +401,7 @@ That reasoning belonged to a product that hosted customers' zones; this one does
 domain costs now is that certificate renewals stop working until somebody notices — with roughly
 thirty days of slack — rather than every customer's website and mail going dark within a TTL.
 
-The name is also no longer a compromise. `acmealias.de` says what the service does: it holds the
+The name is also no longer a compromise. `acmealias.com` says what the service does: it holds the
 alias a customer's `_acme-challenge` CNAME points at. `edgedns` was bought for the DNS product that
 no longer exists.
 
@@ -409,8 +409,31 @@ no longer exists.
 staff routes are served on the same listener (`staff-plane` S9), and the separate hostname is what
 lets network-level restriction be applied to the staff surface without touching the customer one.
 
+A path under `console` was reconsidered and rejected again, and the reason is worth keeping. It would
+work for the restriction — Traefik matches on path as readily as on host, so an address allowlist on
+`PathPrefix(/admin)` is entirely expressible — but it would put the staff surface on the **same
+browser origin** as the customer console, and origin is what the browser enforces. Same origin means
+one cookie jar, one `localStorage`, and one blast radius: a cross-site scripting flaw in the customer
+console would run with the staff surface's origin, and could drive it in the browser of a staff member
+signed in to both. The separate OIDC client and user type below stop a customer's *token* from being a
+staff token; they do nothing about a script already running on the staff origin. A hostname is the one
+boundary the browser enforces for free.
+
+**The hostname only restricts anything if the ingress refuses staff paths on the customer name.** Both
+names resolve to the same listener, and the listener routes by path — so `console.acmealias.com` will
+serve `/api/admin/**` perfectly happily unless something in front says otherwise, and the address
+allowlist on `admin.acmealias.com` is then decorative. The ingress therefore carries two rules and
+neither is optional:
+
+- `admin.acmealias.com` — address allowlist, forwards the staff tree and the staff console.
+- `console.acmealias.com` — no allowlist, and **refuses `/api/admin/**` outright**.
+
+This is the sort of arrangement that works on the day it is written and quietly stops working when
+somebody simplifies the ingress, so it belongs in a test rather than only in a runbook: the staff tree
+must answer 404 through the customer hostname regardless of who is asking.
+
 One dependency this arrangement creates and which should be an operational decision rather than an
-accident: `console`, `www`, `admin` and `auth` all live inside `acmealias.de`, which is also a parent of
+accident: `console`, `www`, `admin` and `auth` all live inside `acmealias.com`, which is also a parent of
 two of the fleet's nameservers. If that zone is served by the fleet itself, then a fleet-wide failure
 takes down the console and the marketing site along with customers' DNS — including the pages a
 customer would visit to find out what is happening.

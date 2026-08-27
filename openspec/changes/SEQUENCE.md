@@ -64,7 +64,7 @@ health checks steering those answers. That is gone.
   renewals stop until someone notices, with weeks of slack.
 - **DNSSEC stopped being a problem in any form** — no delegation, no delegation signer, no
   `SERVFAIL` for a customer who followed the instructions.
-- **The nameservers stopped needing to be diverse.** One domain, `acmealias.de`, rather than two at
+- **The nameservers stopped needing to be diverse.** One domain, `acmealias.com`, rather than two at
   two registrars. The name says what the service does, which the old one did not.
 - **Quorum, hysteresis, fail-open and failover answers went** — every one existed because check
   results changed what the internet was told.

@@ -40,7 +40,7 @@ must be openable both by the browser on the developer's machine and by the `api`
 CoreDNS answers it from `development/dns/hosts`. Both routes land on the development Traefik, which
 forwards the name onward. `auth.localhost` is chosen over keeping `keycloak.localhost` because a
 hostname naming the wrong product is a trap for the next reader, and over `authentik.localhost`
-because the production design already uses `auth.acmealias.de` and the development name should
+because the production design already uses `auth.acmealias.com` and the development name should
 rhyme with it.
 
 ## K1a. Rejected: Pocket ID, evaluated properly and turned down on one property

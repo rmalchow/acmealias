@@ -82,7 +82,7 @@ and explicitly rejected running an identity provider for public customers as "th
 new security-sensitive code in the change.
 
 The rejection assumed the identity provider would be *additional*. It is not: one is being run
-anyway, at `auth.acmealias.de`, for staff and for the internal edition. Adding customers to it is a
+anyway, at `auth.acmealias.com`, for staff and for the internal edition. Adding customers to it is a
 second tenant, not a second system. The second half of the rejection — that registration through
 someone else's screens cedes the part of onboarding worth owning — was also wrong, because the
 screens can be themed, and the part of onboarding that actually matters happens *after* sign-in:

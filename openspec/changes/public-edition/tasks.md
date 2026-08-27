@@ -7,10 +7,12 @@
 
 ## 2. Delegated authentication
 
-- [ ] 2.1 Point both editions at the identity provider at `auth.acmealias.de`, differing only in the tenant they authenticate against (design U3)
+- [ ] 2.1 Point both editions at the identity provider at `auth.acmealias.com`, differing only in the tenant they authenticate against (design U3)
 - [ ] 2.2 Configure one instance with two applications — console and staff — each bound to its own group; register customers as external users; give the staff application no enrolment flow (design U12)
 - [ ] 2.2a Verify the issuing application when validating a token, rather than accepting any validly signed one; assert a console token is refused on the staff surface
 - [ ] 2.2b Separate the hostnames by brand so customer enrolment and recovery are unreachable from the staff name
+- [ ] 2.2c Write the two ingress rules the hostname split depends on: an address allowlist on `admin.acmealias.com`, and a refusal of `/api/admin/**` on `console.acmealias.com`. Both names reach the same listener and it routes by path, so without the second rule the first one restricts nothing (design U7)
+- [ ] 2.2d Test that the staff tree answers 404 through the customer hostname regardless of the caller. The arrangement above works the day it is written and stops working the day somebody simplifies the ingress, which is not a thing a runbook catches
 - [ ] 2.2c Restrict provider administrator access to a small group with mandatory multi-factor authentication
 - [ ] 2.3 Configure the customer enrolment flow with an email-verification stage, and assert no usable session is issued without it
 - [ ] 2.4 Configure the recovery flow with email verification, and assert enrolment and recovery responses do not reveal whether an address has a user

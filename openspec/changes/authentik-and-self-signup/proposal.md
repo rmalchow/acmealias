@@ -36,7 +36,7 @@ plain OpenID Connect and names no provider anywhere outside a comment.
 ### The one path we cannot afford to get wrong is the one path we never exercise
 
 `public-edition`'s design decision **U12** already commits production to authentik, at
-`auth.acmealias.de`, and works the consequences out at length: customers are `external` users and
+`auth.acmealias.com`, and works the consequences out at length: customers are `external` users and
 staff are `internal`; two applications each bound to a group; the staff application has no enrolment
 flow at all, "not a disabled one — none"; brands separate the hostnames.
 
@@ -92,7 +92,7 @@ judged and changed.
 
 - **No service code.** `backend/` keeps every line it has. The Keycloak mentions in it are six
   comments, and they are corrected as prose, not as behaviour.
-- **No production deployment.** There is no authentik instance at `auth.acmealias.de` and this change
+- **No production deployment.** There is no authentik instance at `auth.acmealias.com` and this change
   does not create one. It changes what `./scripts/dev.sh up` runs and what `docs/` describes.
 - **No invitations, no account membership, no payment.** Those are `account-invitations` and
   `public-edition`. A self-registered user in this edition can sign in to the identity provider and
