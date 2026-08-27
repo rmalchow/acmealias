@@ -23,7 +23,7 @@ import { LOGOUT_URL, SessionService } from '@acme/shared';
   template: `
     <header class="bar">
       <div class="mark">
-        <span class="dot"></span>
+        <span class="mark-box"><img src="brand/logo.svg" alt="" /></span>
         <strong>acmeservice</strong>
         <span class="tag">staff</span>
       </div>
@@ -71,11 +71,21 @@ import { LOGOUT_URL, SessionService } from '@acme/shared';
         align-items: center;
         gap: 0.6rem;
       }
-      .dot {
-        inline-size: 0.6rem;
-        block-size: 0.6rem;
-        border-radius: 50%;
-        background: #faad14;
+      /* Same box as the customer shell, in the staff accent. The mark is a stroked
+         outline with no fill, so it needs a ground to read against at bar size. */
+      .mark-box {
+        display: grid;
+        place-items: center;
+        inline-size: 1.85rem;
+        block-size: 1.85rem;
+        border: 1px solid rgb(250 173 20 / 35%);
+        border-radius: 4px;
+        background: rgb(250 173 20 / 8%);
+      }
+      .mark-box img {
+        inline-size: 1.05rem;
+        block-size: auto;
+        display: block;
       }
       .tag {
         font-size: 0.75rem;

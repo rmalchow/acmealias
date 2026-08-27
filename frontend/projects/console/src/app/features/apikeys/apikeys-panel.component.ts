@@ -6,7 +6,7 @@ import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, LBNode, LoadBalancer, SessionService, apiErrorMessage, confirmAction, may } from '@acme/shared';
+import { ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, LBNode, LoadBalancer, NOT_PERMITTED, SessionService, apiErrorMessage, confirmAction, may } from '@acme/shared';
 import { openApiKeyCreateModal } from './apikey-create.modal';
 import { openApiKeyRevealModal } from './apikey-reveal.modal';
 
@@ -23,12 +23,18 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
   template: `
     <div class="panel-head">
       <h2>API keys</h2>
-      @if (canWrite()) {
-        <button nz-button nzType="primary" nzSize="small" (click)="create()">
-          <span nz-icon nzType="plus"></span>
-          New API key
-        </button>
-      }
+      <button
+        nz-button
+        nzType="primary"
+        nzSize="small"
+        [disabled]="!canWrite()"
+        nz-tooltip
+        [nzTooltipTitle]="canWrite() ? null : NOT_PERMITTED"
+        (click)="create()"
+      >
+        <span nz-icon nzType="plus"></span>
+        New API key
+      </button>
     </div>
 
     <p class="ac-hint">
@@ -98,11 +104,32 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
               }
             </td>
             <td>
-              @if (canWrite()) {
-                <button nz-button nzType="link" nzSize="small" (click)="rotate(k)">Rotate</button>
-                @if (!k.disabledAt) {
-                  <button nz-button nzType="link" nzDanger nzSize="small" (click)="revoke(k)">Revoke</button>
-                }
+              <button
+                nz-button
+                nzType="link"
+                nzSize="small"
+                [disabled]="!canWrite()"
+                nz-tooltip
+                [nzTooltipTitle]="canWrite() ? null : NOT_PERMITTED"
+                (click)="rotate(k)"
+              >
+                Rotate
+              </button>
+              @if (!k.disabledAt) {
+                <!-- Still conditional, and deliberately: a revoked key has nothing to revoke.
+                     That is a fact about the key, not about the caller. -->
+                <button
+                  nz-button
+                  nzType="link"
+                  nzDanger
+                  nzSize="small"
+                  [disabled]="!canWrite()"
+                  nz-tooltip
+                  [nzTooltipTitle]="canWrite() ? null : NOT_PERMITTED"
+                  (click)="revoke(k)"
+                >
+                  Revoke
+                </button>
               }
             </td>
           </tr>
@@ -147,6 +174,7 @@ export class ApiKeysPanelComponent implements OnChanges {
    * caller's role. The panel is handed the row it belongs to, so the answer travels with it.
    */
   readonly canWrite = computed(() => may(this.loadBalancer(), CAN_WRITE_KEYS));
+  protected readonly NOT_PERMITTED = NOT_PERMITTED;
 
   ngOnChanges(): void {
     this.load();

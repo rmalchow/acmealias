@@ -1,9 +1,12 @@
 <header class="shell-bar">
   <div class="ac-page bar-inner">
-    <a class="brand" routerLink="/projects">acmeservice</a>
+    <a class="brand" routerLink="/projects" aria-label="acmeservice — projects">
+      <span class="brand-box"><img src="brand/logo.svg" alt="" /></span>
+      acmeservice
+    </a>
 
     <nav>
-      @for (item of nav(); track item.path) {
+      @for (item of nav; track item.path) {
         <a [routerLink]="item.path" routerLinkActive="active">{{ item.label }}</a>
       }
     </nav>

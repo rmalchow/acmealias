@@ -5,7 +5,7 @@ import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAN_WRITE, LoadBalancer, PageHeaderComponent, Project, SessionService, apiErrorMessage, confirmAction, may, openNameSlugModal } from '@acme/shared';
+import { ApiService, CAN_WRITE, LoadBalancer, PageHeaderComponent, Project, SessionService, apiErrorMessage, confirmAction, may, openNameSlugModal , NOT_PERMITTED} from '@acme/shared';
 import { ProjectInventoryPanelComponent } from '../reporting/project-inventory-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
 /** 19.1 — a project's load balancers; create and delete offered only to `ADMIN`. */
@@ -40,12 +40,18 @@ import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.com
     />
 
     <div class="ac-filters">
-      @if (canWrite()) {
-        <button class="ac-spacer" nz-button nzType="primary" (click)="createLoadBalancer()">
-          <span nz-icon nzType="plus"></span>
-          New load balancer
-        </button>
-      }
+      <button
+        class="ac-spacer"
+        nz-button
+        nzType="primary"
+        [disabled]="!canWrite()"
+        nz-tooltip
+        [nzTooltipTitle]="canWrite() ? null : NOT_PERMITTED"
+        (click)="createLoadBalancer()"
+      >
+        <span nz-icon nzType="plus"></span>
+        New load balancer
+      </button>
     </div>
 
     @if (error(); as msg) {
@@ -77,20 +83,19 @@ import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.com
             <td>{{ lb.nodes.length }}</td>
             <td>{{ lb.domains?.length ?? 0 }}</td>
             <td class="row-actions">
-              @if (canWrite()) {
-                <button
-                  nz-button
-                  nzType="text"
-                  nzDanger
-                  nzSize="small"
-                  nz-tooltip
-                  nzTooltipTitle="Delete load balancer"
-                  aria-label="Delete load balancer"
-                  (click)="deleteLoadBalancer(lb)"
-                >
-                  <span nz-icon nzType="delete"></span>
-                </button>
-              }
+              <button
+                nz-button
+                nzType="text"
+                nzDanger
+                nzSize="small"
+                [disabled]="!canWrite()"
+                nz-tooltip
+                [nzTooltipTitle]="canWrite() ? 'Delete load balancer' : NOT_PERMITTED"
+                aria-label="Delete load balancer"
+                (click)="deleteLoadBalancer(lb)"
+              >
+                <span nz-icon nzType="delete"></span>
+              </button>
             </td>
           </tr>
         }
@@ -123,6 +128,7 @@ export class ProjectDetailComponent implements OnChanges {
    * question the permission model exists to stop asking.
    */
   readonly canWrite = computed(() => may(this.project(), CAN_WRITE));
+  protected readonly NOT_PERMITTED = NOT_PERMITTED;
   readonly loadBalancers = signal<LoadBalancer[]>([]);
   readonly error = signal<string | null>(null);
 

@@ -20,12 +20,34 @@
 /* The product name is the wordmark, so it is set in the wordmark's face: Barlow Condensed at
  * weight 700, the same cut as `material/word.svg`. Running text stays Barlow. */
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   font-family: "Barlow Condensed", Barlow, sans-serif;
   font-weight: 700;
   font-size: 1.15rem;
   letter-spacing: 0.01em;
   color: rgb(255 255 255 / 85%);
   text-decoration: none;
+}
+
+/* The mark sits in a box of its own rather than floating against the bar. The logo is a stroked
+ * outline with no fill, so at bar size it needs a ground to read against — and the box is what
+ * gives the corner a fixed shape whatever the mark inside it becomes. */
+.brand-box {
+  display: grid;
+  place-items: center;
+  inline-size: 1.85rem;
+  block-size: 1.85rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.brand-box img {
+  inline-size: 1.05rem;
+  block-size: auto;
+  display: block;
 }
 
 nav {

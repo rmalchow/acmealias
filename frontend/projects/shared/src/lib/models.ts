@@ -214,3 +214,21 @@ export const CAN_READ_PLAN = 'dns.plan';
 export function may(o: { permittedActions?: string[] } | null | undefined, action: string): boolean {
   return o?.permittedActions?.includes(action) ?? false;
 }
+
+/**
+ * What a control says when the caller may not use it.
+ *
+ * A PERMISSION DISABLES A CONTROL; IT DOES NOT HIDE ONE. Hiding is the tempting
+ * default and it is worse in both directions. Someone who cannot do a thing
+ * learns nothing from its absence — they cannot tell an unavailable feature from
+ * one they lack the rights for, so the question that reaches support is "where is
+ * the button" rather than "who can give me this". And someone comparing two
+ * accounts sees two different-shaped screens with no way to know why.
+ *
+ * A disabled control with a reason answers both: the capability exists, here is
+ * where it lives, and you need a grant for it.
+ *
+ * This is presentation only. The server refuses the action regardless of what the
+ * console renders — a disabled button is a courtesy, never the enforcement.
+ */
+export const NOT_PERMITTED = 'Your permissions do not allow this.';

@@ -6,13 +6,11 @@ import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzMenuModule } from 'ng-zorro-antd/menu';
 import { NzModalModule } from 'ng-zorro-antd/modal';
 import { AccountSwitcherComponent } from './features/accounts/account-switcher.component';
-import { Role, SessionService } from '@acme/shared';
+import { SessionService } from '@acme/shared';
 
 interface NavItem {
   path: string;
   label: string;
-  /** Empty means every signed-in user. Hiding only — the server checks again. */
-  roles: Role[];
 }
 
 /**
@@ -21,14 +19,14 @@ interface NavItem {
  * neither is part of an operator's work — see the note in app.routes.ts.
  */
 export const NAV: NavItem[] = [
-  { path: '/projects', label: 'Projects', roles: [] },
-  { path: '/challenges', label: 'Live challenges', roles: [] },
-  { path: '/audit', label: 'Audit log', roles: [] },
+  { path: '/projects', label: 'Projects' },
+  { path: '/challenges', label: 'Live challenges' },
+  { path: '/audit', label: 'Audit log' },
   // Roles and membership are an account administering itself. Reading the roster
   // needs no grant; changing it is refused by the service for anyone who is not
   // an unrestricted member, so the link is offered to everyone and the screen
   // says what they may do.
-  { path: '/roles', label: 'Roles', roles: [] },
+  { path: '/roles', label: 'Roles' },
 ];
 
 @Component({
@@ -49,5 +47,8 @@ export const NAV: NavItem[] = [
 })
 export class AppComponent {
   readonly session = inject(SessionService);
-  readonly nav = computed(() => NAV.filter((item) => this.session.hasAnyRole(item.roles)));
+  // Every item, for everybody. Navigation is not filtered by permission: a link
+  // that vanishes teaches nothing, and a screen that refuses with a reason teaches
+  // what to ask for. Each destination says what this caller may do once there.
+  readonly nav = NAV;
 }

@@ -7,7 +7,7 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAN_WRITE, CheckResult, DNSPlan, Domain, LBNode, LoadBalancer, PageHeaderComponent, Project, SessionService, VerificationResult, apiErrorMessage, confirmAction, may } from '@acme/shared';
+import { ApiService, CAN_WRITE, CheckResult, DNSPlan, Domain, LBNode, LoadBalancer, PageHeaderComponent, Project, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { InteractionsPanelComponent } from './interactions-panel.component';
@@ -50,12 +50,18 @@ import { domainStatus as computeDomainStatus } from './domain-status';
     <section>
       <div class="panel-head">
         <h2>Nodes</h2>
-        @if (canWrite()) {
-          <button nz-button nzType="primary" nzSize="small" (click)="createNode()">
-            <span nz-icon nzType="plus"></span>
-            Add node
-          </button>
-        }
+        <button
+          nz-button
+          nzType="primary"
+          nzSize="small"
+          [disabled]="!canWrite()"
+          nz-tooltip
+          [nzTooltipTitle]="canWrite() ? null : NOT_PERMITTED"
+          (click)="createNode()"
+        >
+          <span nz-icon nzType="plus"></span>
+          Add node
+        </button>
       </div>
 
       <nz-table
@@ -81,31 +87,31 @@ import { domainStatus as computeDomainStatus } from './domain-status';
               <td class="ac-mono">{{ n.ipv4 || '—' }}</td>
               <td class="ac-mono">{{ n.ipv6 || '—' }}</td>
               <td class="row-actions">
-                @if (canWrite()) {
-                  <button
-                    nz-button
-                    nzType="text"
-                    nzSize="small"
-                    nz-tooltip
-                    nzTooltipTitle="Edit addresses"
-                    aria-label="Edit addresses"
-                    (click)="editNode(n)"
-                  >
-                    <span nz-icon nzType="edit"></span>
-                  </button>
-                  <button
-                    nz-button
-                    nzType="text"
-                    nzDanger
-                    nzSize="small"
-                    nz-tooltip
-                    nzTooltipTitle="Delete node"
-                    aria-label="Delete node"
-                    (click)="deleteNode(n)"
-                  >
-                    <span nz-icon nzType="delete"></span>
-                  </button>
-                }
+                <button
+                  nz-button
+                  nzType="text"
+                  nzSize="small"
+                  [disabled]="!canWrite()"
+                  nz-tooltip
+                  [nzTooltipTitle]="canWrite() ? 'Edit addresses' : NOT_PERMITTED"
+                  aria-label="Edit addresses"
+                  (click)="editNode(n)"
+                >
+                  <span nz-icon nzType="edit"></span>
+                </button>
+                <button
+                  nz-button
+                  nzType="text"
+                  nzDanger
+                  nzSize="small"
+                  [disabled]="!canWrite()"
+                  nz-tooltip
+                  [nzTooltipTitle]="canWrite() ? 'Delete node' : NOT_PERMITTED"
+                  aria-label="Delete node"
+                  (click)="deleteNode(n)"
+                >
+                  <span nz-icon nzType="delete"></span>
+                </button>
               </td>
             </tr>
           }
@@ -116,12 +122,18 @@ import { domainStatus as computeDomainStatus } from './domain-status';
     <section>
       <div class="panel-head">
         <h2>Domains</h2>
-        @if (canWrite() && loadBalancer()) {
-          <button nz-button nzType="primary" nzSize="small" (click)="addDomain()">
-            <span nz-icon nzType="plus"></span>
-            Add domain
-          </button>
-        }
+        <button
+          nz-button
+          nzType="primary"
+          nzSize="small"
+          [disabled]="!canWrite() || !loadBalancer()"
+          nz-tooltip
+          [nzTooltipTitle]="canWrite() ? null : NOT_PERMITTED"
+          (click)="addDomain()"
+        >
+          <span nz-icon nzType="plus"></span>
+          Add domain
+        </button>
       </div>
 
       <nz-table
@@ -163,20 +175,19 @@ import { domainStatus as computeDomainStatus } from './domain-status';
                 }
               </td>
               <td class="row-actions">
-                @if (canWrite()) {
-                  <button
-                    nz-button
-                    nzType="text"
-                    nzDanger
-                    nzSize="small"
-                    nz-tooltip
-                    nzTooltipTitle="Delete domain"
-                    aria-label="Delete domain"
-                    (click)="deleteDomain(d)"
-                  >
-                    <span nz-icon nzType="delete"></span>
-                  </button>
-                }
+                <button
+                  nz-button
+                  nzType="text"
+                  nzDanger
+                  nzSize="small"
+                  [disabled]="!canWrite()"
+                  nz-tooltip
+                  [nzTooltipTitle]="canWrite() ? 'Delete domain' : NOT_PERMITTED"
+                  aria-label="Delete domain"
+                  (click)="deleteDomain(d)"
+                >
+                  <span nz-icon nzType="delete"></span>
+                </button>
               </td>
             </tr>
           }
@@ -327,6 +338,7 @@ export class LoadBalancerDetailComponent implements OnChanges {
    * rather than a set of buttons that turn out to be refused.
    */
   readonly canWrite = computed(() => may(this.loadBalancer(), CAN_WRITE));
+  protected readonly NOT_PERMITTED = NOT_PERMITTED;
 
   readonly subtitle = () => {
     const p = this.loadBalancer();

@@ -7,7 +7,8 @@ import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule, NzTableQueryParams } from 'ng-zorro-antd/table';
-import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionService, apiErrorMessage, may, openNameSlugModal } from '@acme/shared';
+import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
+import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionService, apiErrorMessage, may, openNameSlugModal , NOT_PERMITTED} from '@acme/shared';
 /** 19.1 — the project list: filter, page, and create through a modal (creation is ADMIN-only, D10). */
 @Component({
   selector: 'app-project-list',
@@ -20,6 +21,7 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
     NzIconModule,
     NzInputModule,
     NzTableModule,
+    NzToolTipModule,
   ],
   template: `
     <app-page-header [crumbs]="[{ label: 'Projects' }]" title="Projects" [subtitle]="subtitle()" />
@@ -42,12 +44,18 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
         </button>
       </ng-template>
 
-      @if (canCreateProjects()) {
-        <button class="ac-spacer" nz-button nzType="primary" (click)="create()">
-          <span nz-icon nzType="plus"></span>
-          New project
-        </button>
-      }
+      <button
+        class="ac-spacer"
+        nz-button
+        nzType="primary"
+        [disabled]="!canCreateProjects()"
+        nz-tooltip
+        [nzTooltipTitle]="canCreateProjects() ? null : NOT_PERMITTED_PROJECT"
+        (click)="create()"
+      >
+        <span nz-icon nzType="plus"></span>
+        New project
+      </button>
     </div>
 
     @if (error(); as msg) {
@@ -128,6 +136,15 @@ export class ProjectListComponent implements OnInit {
     if (rows.length > 0) return may(rows[0], CAN_ADMIN_PROJECT);
     return this.session.me()?.permissions?.includes(CAN_ADMIN_PROJECT) ?? false;
   });
+
+  /**
+   * A different sentence from the generic one, because this refusal has a different cause and a
+   * different remedy: creating a project needs MEMBERSHIP of the account's unrestricted role
+   * (design P14), which no grant can confer. Telling someone their permissions are short would
+   * send them asking for a grant that cannot exist.
+   */
+  protected readonly NOT_PERMITTED_PROJECT =
+    'Only an unrestricted member of this account can create projects.';
   readonly total = signal(0);
   readonly pageIndex = signal(1);
   readonly pageSize = signal(25);
