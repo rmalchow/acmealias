@@ -50,6 +50,14 @@ fi
 say "building the marketing site"
 "$REPO_DIR/site/build.sh"
 
+# BEFORE `compose up`, not after. Compose creates containers from whatever image
+# exists at the moment it runs, so building afterwards leaves the containers on
+# the PREVIOUS image — and the new one only takes effect at the next recreate.
+# The symptom is an environment variable added to a Dockerfile that is simply not
+# there in the running container, which is a confusing thing to debug.
+say "building the dev images"
+compose build api frontend-install
+
 say "starting containers"
 compose up -d --remove-orphans
 

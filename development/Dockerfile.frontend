@@ -1,0 +1,34 @@
+# Development image for the two Angular applications.
+#
+# Thin on purpose. It pins the Node the stack builds with and nothing else: the
+# Angular CLI is NOT baked in, because the workspace pins its own version in
+# frontend/package.json and `npx ng` resolves that one. A globally installed CLI
+# in the image would be a second, invisible version that shadows the pinned one
+# whenever node_modules is cold — which is exactly the class of "works on my
+# machine" this image exists to remove.
+#
+# Debian rather than alpine, deliberately. Several of the toolchain's optional
+# native dependencies ship prebuilt glibc binaries and fall back to a slow source
+# build (or fail) against musl, and the minutes that costs land on every fresh
+# `npm ci`. The image is larger and the install is faster and more predictable.
+#
+# node_modules and the npm cache both live on mounts from ./data (see
+# compose.yaml), so nothing this image installs is what a developer ends up
+# running — it only has to be able to run npm.
+FROM node:22-bookworm-slim
+
+# npm defaults its cache to $HOME/.npm, which is inside the container layer and
+# is therefore thrown away every time compose recreates the container. Point it
+# at the mount instead, so a rebuild re-uses what the last one downloaded.
+ENV npm_config_cache=/npm-cache
+# As for the Go image: the container runs as the invoking developer, who has no
+# home inside it, and npm writes several things relative to $HOME.
+ENV HOME=/tmp
+
+# curl for compose healthchecks: the dev server is "up" only once it answers,
+# and a container that is running is not the same thing.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app

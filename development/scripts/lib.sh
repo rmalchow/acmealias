@@ -20,7 +20,7 @@ cd "$DEV_DIR"
 # A first up.sh after a destroy.sh is therefore slow: empty module cache,
 # empty build cache, full `npm ci`. A warm one is fast. If it is not,
 # something is writing outside these mounts and that is worth finding.
-DATA_DIRS=(postgres authentik_media redis mailpit go_mod go_build air_tmp node_modules ng_cache_console ng_cache_admin pebble traefik_lb)
+DATA_DIRS=(postgres authentik_media redis mailpit go_mod go_build air_tmp node_modules npm_cache ng_cache_console ng_cache_admin pebble traefik_lb)
 
 # The API key handoff: seed.sh writes HTTPREQ_USERNAME/HTTPREQ_PASSWORD here
 # and traefik-lb reads it as an env_file. Compose refuses to run at all when
@@ -43,6 +43,15 @@ die()  { printf '\033[1;31merror\033[0m %s\n' "$*" >&2; exit 1; }
 # Profile handling. `compose` runs with whatever profiles up.sh turned on;
 # `compose_all` always includes `acme`, so down/destroy/logs/status reach the
 # opt-in containers whether or not this shell is the one that started them.
+# Compose interpolates these into the services that run our code, so the caches
+# under data/ belong to the developer instead of to root.
+#
+# DEV_UID rather than UID: bash makes UID readonly, so assigning it aborts the
+# script with "readonly variable" — and it does not export it either, so compose
+# would never have seen it. GID is not a bash variable at all.
+export DEV_UID="${DEV_UID:-$(id -u)}"
+export DEV_GID="${DEV_GID:-$(id -g)}"
+
 COMPOSE_PROFILE_ARGS=()
 compose()     { docker compose -f "$DEV_DIR/compose.yaml" ${COMPOSE_PROFILE_ARGS[@]+"${COMPOSE_PROFILE_ARGS[@]}"} "$@"; }
 compose_all() { docker compose -f "$DEV_DIR/compose.yaml" --profile acme "$@"; }

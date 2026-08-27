@@ -29,6 +29,52 @@ name: acmeservice-dev
 # under a profile would break name resolution for everyone whenever the
 # profile is off.
 
+# ---------------------------------------------------------------------------
+# Shared templates
+# ---------------------------------------------------------------------------
+
+# Every container that runs OUR code runs as the invoking user. Without it the
+# caches under data/ (node_modules, the Go module and build caches) are written
+# by root, and deleting them needs a throwaway root container — which is why
+# lib.sh has one. Postgres and the off-the-shelf images keep their own users:
+# the postgres entrypoint chowns PGDATA itself and refuses to be told otherwise.
+#
+# The :-0 fallbacks keep a bare `docker compose` working for anyone who runs it
+# without going through development/scripts, which export these. That falls back
+# to today's behaviour (root) rather than to a wrong uid. They are DEV_UID/DEV_GID
+# rather than UID/GID because bash makes UID readonly and exports neither.
+x-runs-our-code: &runs-our-code
+  user: "${DEV_UID:-0}:${DEV_GID:-0}"
+  restart: unless-stopped
+  dns: ["172.28.0.53"]
+
+# The two Angular dev servers differ in three things — project, port and
+# hostname — and agreed on everything else by being copied from one another,
+# which is how they drifted apart the first time. One template now.
+x-ng-service: &ng-service
+  <<: *runs-our-code
+  image: acmeservice-frontend-dev:latest
+  # Built locally; never published, so compose must not try to pull it.
+  pull_policy: never
+  working_dir: /app
+  volumes:
+    - ../frontend:/app
+    - ./data/node_modules:/app/node_modules
+    - ./data/npm_cache:/npm-cache
+  depends_on:
+    frontend-install:
+      condition: service_completed_successfully
+
+# Probe often while the application is still compiling, so it is marked healthy
+# within seconds of actually answering — and do not count those early probes as
+# failures. A first `ng serve` on a cold cache is minutes.
+x-ng-healthcheck: &ng-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 300s
+  start_interval: 2s
+
 networks:
   default:
     name: acmeservice-dev
@@ -268,11 +314,12 @@ services:
   # `poll = true` in backend/.air.toml. Do not turn it on here; it burns CPU
   # for nothing on Linux.
   api:
+    <<: *runs-our-code
+    image: acmeservice-go-dev:latest
     build:
       context: .
-      dockerfile: Dockerfile.api
-    restart: unless-stopped
-    dns: ["172.28.0.53"]
+      dockerfile: Dockerfile.go
+    pull_policy: never
     networks:
       default:
         ipv4_address: 172.28.0.10
@@ -284,7 +331,7 @@ services:
     volumes:
       - ../backend:/src
       - ./data/go_mod:/go/pkg/mod
-      - ./data/go_build:/root/.cache/go-build
+      - ./data/go_build:/gocache
       - ./data/air_tmp:/src/tmp
     depends_on:
       postgres: {condition: service_healthy}
@@ -338,32 +385,47 @@ services:
   # hide anything the image installed, and this way the container's dependency
   # tree and a developer's host-side frontend/node_modules never touch each
   # other. It starts out empty, hence the `npm ci` guard.
+  # ONE install, not two racing. Both dev servers share ../frontend and its
+  # node_modules mount, and a `[ -d node_modules/@angular/cli ] || npm ci` guard
+  # in each of them is a race when they start together against an empty mount:
+  # two `npm ci` processes writing one tree. This one-shot runs first and the
+  # servers wait for it to EXIT SUCCESSFULLY, which is a thing compose knows how
+  # to express and a polling loop in a shell command is not.
+  frontend-install:
+    <<: *runs-our-code
+    image: acmeservice-frontend-dev:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    pull_policy: never
+    restart: "no"
+    working_dir: /app
+    volumes:
+      - ../frontend:/app
+      - ./data/node_modules:/app/node_modules
+      - ./data/npm_cache:/npm-cache
+    # `npm ci` on every start would delete and refetch node_modules each time.
+    # The guard makes this idempotent: present means a previous run finished.
+    command: sh -c '[ -d node_modules/@angular/cli ] || npm ci'
+
   # Two applications, two dev servers, two origins. `ng serve` builds one project
   # at a time, so the customer console and the staff console each get their own
   # container — which also mirrors production, where they are two bundles chosen
   # by hostname rather than one bundle with a staff section in it.
   #
-  # They share node_modules — one workspace, one install — but NOT the Angular
-  # build cache, and that distinction is load-bearing rather than tidy. Two
-  # concurrent `ng serve` processes writing one .angular/cache serve each other's
-  # bundles: the symptom is console.localhost answering with the staff
-  # application, which looks like a routing mistake and is not. Found exactly
-  # that way.
-  #
-  # Only web-console installs. The `[ -d node_modules/@angular/cli ]` guard is a
-  # race when two containers start together against an empty mount, so web-admin
-  # waits for the install instead of joining it.
+  # They share node_modules and the npm cache — one workspace, one install — but
+  # NOT the Angular build cache. Two concurrent `ng serve` processes writing one
+  # .angular/cache serve each other's bundles: the symptom is console.localhost
+  # answering with the staff application, which looks like a routing mistake and
+  # is not. Found exactly that way.
   web-console:
-    image: node:22-alpine
-    restart: unless-stopped
-    dns: ["172.28.0.53"]
-    working_dir: /app
-    command:
-      - sh
-      - -c
-      - >-
-        [ -d node_modules/@angular/cli ] || npm ci;
-        exec npx ng serve console --host 0.0.0.0 --disable-host-check --port 4200
+    <<: *ng-service
+    command: npx ng serve console --host 0.0.0.0 --disable-host-check --port 4200
+    volumes:
+      - ../frontend:/app
+      - ./data/node_modules:/app/node_modules
+      - ./data/npm_cache:/npm-cache
+      - ./data/ng_cache_console:/app/.angular/cache
     labels:
       traefik.enable: "true"
       # The catch-all for the customer origin: everything the admin-api router
@@ -373,34 +435,27 @@ services:
       traefik.http.routers.spa-console.priority: "1"
       traefik.http.routers.spa-console.entrypoints: web
       traefik.http.services.spa-console.loadbalancer.server.port: "4200"
+    healthcheck:
+      <<: *ng-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://localhost:4200/"]
+
+  web-admin:
+    <<: *ng-service
+    command: npx ng serve admin --host 0.0.0.0 --disable-host-check --port 4201
     volumes:
       - ../frontend:/app
       - ./data/node_modules:/app/node_modules
-      - ./data/ng_cache_console:/app/.angular/cache
-
-  web-admin:
-    image: node:22-alpine
-    restart: unless-stopped
-    dns: ["172.28.0.53"]
-    working_dir: /app
-    command:
-      - sh
-      - -c
-      - >-
-        while [ ! -d node_modules/@angular/cli ]; do
-          echo "waiting for web-console to finish npm ci..."; sleep 3;
-        done;
-        exec npx ng serve admin --host 0.0.0.0 --disable-host-check --port 4201
+      - ./data/npm_cache:/npm-cache
+      - ./data/ng_cache_admin:/app/.angular/cache
     labels:
       traefik.enable: "true"
       traefik.http.routers.spa-admin.rule: "Host(`admin.localhost`)"
       traefik.http.routers.spa-admin.priority: "1"
       traefik.http.routers.spa-admin.entrypoints: web
       traefik.http.services.spa-admin.loadbalancer.server.port: "4201"
-    volumes:
-      - ../frontend:/app
-      - ./data/node_modules:/app/node_modules
-      - ./data/ng_cache_admin:/app/.angular/cache
+    healthcheck:
+      <<: *ng-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://localhost:4201/"]
 
   # Dev-only reverse proxy. It presents the console and its admin API at one
   # origin, http://console.localhost — design D12 explains why one origin
