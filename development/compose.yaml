@@ -15,7 +15,7 @@ name: acmeservice-dev
 # frontend/. See development/scripts/lib.sh, DATA_DIRS.
 #
 # Two profiles:
-#   (default)   postgres, keycloak, coredns, api, web, traefik  — the dev loop.
+#   (default)   postgres, keycloak, mailpit, coredns, api, web, traefik — the dev loop.
 #   acme        pebble, traefik-lb, whoami — a fake CA and a customer-like load
 #               balancer that really obtains a certificate over DNS-01.
 #               Opt in with: development/scripts/up.sh --acme
@@ -102,6 +102,53 @@ services:
       interval: 3s
       timeout: 3s
       retries: 40
+
+  # Where every mail the stack sends ends up, and where none of it leaves from.
+  #
+  # An identity provider that can enrol people sends mail — a verification link,
+  # a password reset — and `account-invitations` will send more. In development
+  # all of it has to go somewhere that is NOT a real mailbox: a stack that can
+  # reach a real SMTP relay is a stack that can mail a real person from a test,
+  # and the addresses in development/authentik/blueprints/acmeservice.yaml are
+  # `@acmeservice.internal` precisely so that nothing would arrive if it tried.
+  #
+  # mailpit is an SMTP server that accepts everything, delivers nothing, and
+  # shows what it caught in a web interface at http://mail.localhost. It is one
+  # small Go binary with no database.
+  #
+  # Two ports, and the distinction matters when configuring a sender:
+  #   1025  SMTP, reachable inside the network as `mailpit:1025` — this is what
+  #         goes in an identity provider's mail settings, NOT the hostname
+  #         below, because SMTP does not go through the HTTP overlay.
+  #   8025  the web interface, routed by Traefik as http://mail.localhost.
+  #
+  # No credentials and no TLS: it accepts anything, which is the point, and it
+  # is bound to the stack's own network rather than published to the host.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    environment:
+      # Keep what it caught across a restart, so a link captured before a
+      # `dev.sh restart` is still clickable afterwards.
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: "500"
+      # It is behind the overlay and reachable by anyone who can reach the
+      # stack; saying so explicitly stops it from also being an open relay to
+      # the outside, which is the one way a mail sink can do harm.
+      MP_SMTP_BIND_ADDR: "0.0.0.0:1025"
+    volumes:
+      - ./data/mailpit:/data
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.mailpit.rule: "Host(`mail.localhost`)"
+      traefik.http.routers.mailpit.entrypoints: web
+      traefik.http.services.mailpit.loadbalancer.server.port: "8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
   # The fake internet's DNS. Authoritative for example.com (RFC 2606 reserves
   # it, so hijacking it is safe), forwards our own zone to the api container's
@@ -263,6 +310,7 @@ services:
           - acme-api.localhost
           - acme-challenge.localhost
           - keycloak.localhost
+          - mail.localhost
     command:
       - "--configFile=/etc/traefik/traefik.yaml"
     volumes:

@@ -20,7 +20,7 @@ cd "$DEV_DIR"
 # A first up.sh after a destroy.sh is therefore slow: empty module cache,
 # empty build cache, full `npm ci`. A warm one is fast. If it is not,
 # something is writing outside these mounts and that is worth finding.
-DATA_DIRS=(postgres keycloak go_mod go_build air_tmp node_modules ng_cache pebble traefik_lb)
+DATA_DIRS=(postgres keycloak mailpit go_mod go_build air_tmp node_modules ng_cache pebble traefik_lb)
 
 # The API key handoff: seed.sh writes HTTPREQ_USERNAME/HTTPREQ_PASSWORD here
 # and traefik-lb reads it as an env_file. Compose refuses to run at all when

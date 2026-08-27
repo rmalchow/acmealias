@@ -24,6 +24,7 @@ printf '  admin API (same origin)    %s\n' "http://acme-console.localhost/api/v1
 printf '  admin API (own hostname)   %s\n' "http://acme-api.localhost/api/v1   # curl/adminctl, not the browser session"
 printf '  challenge API              %s\n' "http://acme-challenge.localhost   # lego httpreq; API-key auth"
 printf '  keycloak                   %s\n' "${KC_HOSTNAME}"
+printf '  mail (everything sent)     %s\n' "http://mail.localhost   # mailpit; senders use mailpit:1025 over SMTP"
 printf '  postgres                   %s\n' "localhost:5432/${POSTGRES_DB}"
 printf '  (:80 and :443 are bound on ALL interfaces — a second machine on the\n'
 printf '   LAN can reach them, given the hostnames in its own /etc/hosts)\n'
