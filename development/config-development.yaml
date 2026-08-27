@@ -1,0 +1,51 @@
+# The development overlay (design G1, G4).
+#
+# It is layered on top of the repository's config.yaml and states only how this
+# stack differs from it — the settings that are facts about the fake internet
+# rather than about the service. Everything it does not mention comes from the
+# base file beneath it, which is the point: this file is short because most of
+# the configuration is not deployment-specific.
+#
+# It is reached because the api service sets ACME_PROFILES=development and
+# ACME_CONFIG_FILE=/src/config.yaml, and an overlay is named after the base:
+# config.yaml + "development" is config-development.yaml, mounted beside it.
+#
+# What is NOT here, and why:
+#
+#   - Secrets. `.env` keeps them, because a committed file is the wrong place
+#     for a password even a throwaway one — the habit is what matters.
+#   - Addresses. The listen ports, the database URL, the trusted CIDRs, the
+#     resolver, the two OIDC issuer/redirect URLs and the staff hostname are
+#     all container-network facts, and `.env` is the one place both the stack
+#     and the host scripts that print them can read.
+#   - The four role-group names. development/scripts/status.sh reads them from
+#     the host shell to print the sign-in table, and it cannot read YAML.
+#
+# The environment still wins over everything here (G1), so anything below can
+# be overridden from `.env` without editing this file.
+
+zone:
+  name:           dev.acmeservice.internal.
+  soa_primary_ns: ns1.dev.acmeservice.internal.
+  soa_hostmaster: hostmaster@dev.acmeservice.internal
+
+  # Two nameservers, as the runbook publishes. A list REPLACES the one beneath
+  # it rather than adding to it (G3), which is why both are named here even
+  # though the base file names none.
+  ns_names:
+    - ns1.dev.acmeservice.internal.
+    - ns2.dev.acmeservice.internal.
+
+# One issuer, two OIDC applications: the customer console and the staff
+# console are separate clients at authentik, so a token minted for one is not
+# a token for the other. Only the client ids are here; each secret stays in
+# `.env`, and each issuer and redirect URL is an address.
+oidc:
+  client_id: acmeservice-console
+
+staff:
+  oidc:
+    client_id: acmeservice-admin
+
+log:
+  level: debug

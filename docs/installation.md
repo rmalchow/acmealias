@@ -127,10 +127,18 @@ supported, tested identity provider, and the rest of this page assumes it.*
 
 ## 3 · Configuration
 
-Everything is environment variables, in `/opt/acmeservice/.env`. That one file does
-double duty: Compose reads it for `${...}` interpolation in
-`compose.yaml`, and passes it to the container as `env_file`. Mode
-`0600` — it holds the database password and the OIDC client secret.
+Everything below can be set as an environment variable, in
+`/opt/acmeservice/.env`. That one file does double duty: Compose reads it for
+`${...}` interpolation in `compose.yaml`, and passes it to the container as
+`env_file`. Mode `0600` — it holds the database password and the OIDC client
+secret.
+
+Environment variables are shown here because they are the shortest way to get a
+deployment running and because they take precedence over everything else. Once
+more than one environment exists, most of these belong in a `config.yaml` and a
+per-environment overlay instead, with only the secrets left here — see
+[the configuration reference](#configuration-reference) for the equivalent path
+of every variable.
 
 A minimal but complete production configuration:
 
@@ -387,54 +395,169 @@ Then set up the monitoring that actually matters — see
 
 ## Configuration reference
 
-### Zone
+Configuration comes in layers. Lowest to highest:
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ACME_ZONE` | *required* | The delegated zone this server is authoritative for. |
-| `ACME_SOA_PRIMARY_NS` | *required* | Primary nameserver name in the SOA record. |
-| `ACME_SOA_HOSTMASTER` | *required* | Contact address, written normally; encoded into the SOA form. |
-| `ACME_NS_NAMES` | *required* | Comma-separated NS set served at the apex. Must match the parent zone. |
-| `ACME_SOA_MINIMUM` | `30s` | Negative caching TTL. Keep low; see [why](dns-zone-setup.md#step-3-configure-the-zone-on-the-service). |
-| `ACME_CHALLENGE_TTL` | `30s` | TTL on challenge TXT answers. |
+1. the defaults compiled into the binary;
+2. the base file, `config.yaml`, or whatever `ACME_CONFIG_FILE` names;
+3. one overlay per name in `ACME_PROFILES`, applied in that order — `config.yaml`
+   plus the profile `staging` means `config-staging.yaml`, beside the base;
+4. the `ACME_*` environment.
 
-### Listeners
+**The environment is last and therefore wins.** A deployment configured entirely
+by `ACME_*`, which is what every deployment looked like before the file existed,
+behaves exactly as it always did — the tables below name the variable for every
+setting, and setting one still overrides whatever a file said. Nothing has to
+move.
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ACME_DNS_LISTEN` | `:53` | UDP and TCP. Bind to the dedicated address on a multi-homed host. |
-| `ACME_LISTEN` | `:8080` | Every HTTP path group: management API, staff tree, challenge protocol, console, health, metrics. |
+**With one exception: an empty value means "unset", not "empty".**
+`ACME_LOG_LEVEL=` is read as though the variable were not there at all, so the
+environment can *replace* a value a file set but cannot *blank* it. This is
+deliberate — Compose writes an empty string for any variable it cannot
+interpolate, and the alternative silently turns `migrate_on_start` off and
+`groups_claim` into nothing on a stack with a stray blank line. A setting you
+want empty is emptied by removing it from the file, not by assigning nothing to
+the variable. Files follow the same rule: a key that resolves to nothing (an
+unset `${VAR}` with no fallback) is dropped rather than merged, so an overlay
+mentioning a placeholder nobody filled in leaves the base file's value standing.
 
-### Database and lifecycle
+**Two spellings reach the same setting.** Every variable in the tables below is
+the historical name and is what you should use. The loader also accepts the
+variable formed from the path itself — `ACME_ZONE_NAME`, `ACME_LISTENERS_HTTP`,
+`ACME_DATABASE_MIGRATE_ON_START` — because the mapping is derived from the
+configuration structure rather than from a list. It is the same setting either
+way; the historical name is the documented one, and a name matching neither is
+ignored rather than guessed at.
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ACME_DATABASE_URL` | *required* | PostgreSQL DSN. |
-| `ACME_MIGRATE_ON_START` | `true` | Apply migrations before opening listeners. |
-| `ACME_CHALLENGE_LIFETIME` | `1h` | How long an uncleaned challenge record survives. Far longer than an issuance needs, short enough that a crashed client leaves nothing lingering. |
-| `ACME_VIEW_REFRESH_INTERVAL` | `30s` | Safety-net reload of the in-memory zone view. Writes update it immediately; this catches changes made behind the service's back. |
-| `ACME_SWEEP_INTERVAL` | `5m` | Deletion of expired rows. Expired values stop being answered immediately regardless, so this is housekeeping, not correctness. |
-| `ACME_ALIAS_USE_DOMAIN` | `false` | Derive each new alias label from the domain (`demo-example-com`) instead of generating a random one. Readable in a log line, but computable by anyone, so the served zone will answer "is this domain a customer?" for free — set it only for a deployment serving one organisation. It governs aliases created afterwards; an existing alias is never re-labelled, so decide before onboarding domains. |
-| `ACME_SHUTDOWN_GRACE` | `15s` | Drain period on SIGTERM. |
+**A missing overlay is fine; a missing base file that you configured is not.** An
+overlay names a way this deployment differs, and most deployments differ in no
+way at all. A base file you pointed `ACME_CONFIG_FILE` at and that is not there
+means something is wrong with the deployment, and starting anyway would run on
+defaults nobody chose. The service logs which layers it read, and which
+configured files were absent, on its first few lines.
 
-### Trust, identity and sessions
+**Structures merge; lists replace.** An overlay that sets one value of a block
+leaves the rest of the block alone. An overlay that sets `zone.ns_names` replaces
+the whole list rather than appending to it — a merged nameserver set is a set
+nobody wrote, and a merged `challenge.trusted_proxy_cidrs` is an allowlist
+somebody widened by accident.
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ACME_TRUSTED_PROXY_CIDRS` | *empty* | Peers whose forwarding headers are believed. Required if any API key is address-restricted. |
-| `ACME_VERIFY_RESOLVER` | *system resolver* | Resolver used to check customer records. Prefer a public resolver over an internal one with a split-horizon view. |
-| `ACME_OIDC_ISSUER` | *required* | Discovery base URL. |
-| `ACME_OIDC_CLIENT_ID` / `_SECRET` | *required* | Confidential client credentials. |
-| `ACME_OIDC_REDIRECT_URL` | *required* | Must exactly match what the IdP has registered. |
-| `ACME_OIDC_GROUPS_CLAIM` | `groups` | Claim carrying group membership. |
-| `ACME_OIDC_GROUP_PREFIX` | *empty* | Stripped from each group value — useful when the IdP emits path-style names. |
-| `ACME_ADMIN_GROUP` | *required* | Keycloak group granting the seeded `ADMIN` role. A group naming a role that does not exist grants nothing, and is reported at startup. |
-| `ACME_CONFIG_ADMIN_GROUP` | *required* | Keycloak group granting the seeded `CONFIG_ADMIN` role. A group naming a role that does not exist grants nothing, and is reported at startup. |
-| `ACME_KEY_ROTATION_GROUP` | *required* | Keycloak group granting the seeded `KEY_ROTATION` role. A group naming a role that does not exist grants nothing, and is reported at startup. |
-| `ACME_READ_ONLY_GROUP` | *required* | Keycloak group granting the seeded `READ_ONLY` role. A user in none of the configured groups has no access at all. |
-| `ACME_SESSION_IDLE_TIMEOUT` | `8h` | Idle expiry. |
-| `ACME_SESSION_MAX_LIFETIME` | `24h` | Absolute expiry. Also bounds how stale a user's group list can be. |
-| `ACME_LOG_LEVEL` | `info` | `debug` logs each expiry sweep and every DNS decision. |
+**Files can refer to the environment.** `"${ACME_LOG_LEVEL:info}"` is the
+variable when it is set and `info` when it is not, which is how the shipped
+`config.yaml` shows you every default in the file instead of hiding it in the
+source. Write `${ACME_OIDC_CLIENT_SECRET}` with no fallback for a secret: unset,
+it arrives empty and startup refuses it rather than coming up blank. Quote these
+values — substitution happens before the YAML is parsed, so a secret containing
+`: ` would otherwise break the document. Use **single** quotes: double quotes are
+a YAML escape context, so a password containing `\t`, `\n`, `\\` or `\u` would be
+altered without any error, where inside single quotes nothing is escaped and a
+value carrying a `'` fails the parse loudly. `$${...}` is a literal
+dollar-brace.
+
+The shipped `config.yaml` is not copied into the image. Mount it if you want it:
+
+```yaml
+services:
+  acmeservice:
+    volumes:
+      - ./config.yaml:/etc/acmeservice/config.yaml:ro
+      - ./config-prod.yaml:/etc/acmeservice/config-prod.yaml:ro
+    environment:
+      ACME_CONFIG_FILE: /etc/acmeservice/config.yaml
+      ACME_PROFILES: prod
+```
+
+### `zone` — what this server is authoritative for
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `zone.name` | `ACME_ZONE` | *required* | The delegated zone this server is authoritative for. |
+| `zone.soa_primary_ns` | `ACME_SOA_PRIMARY_NS` | *required* | Primary nameserver name in the SOA record. |
+| `zone.soa_hostmaster` | `ACME_SOA_HOSTMASTER` | *required* | Contact address, written normally; encoded into the SOA form. |
+| `zone.ns_names` | `ACME_NS_NAMES` | *empty* | NS set served at the apex; must match the parent zone. A list in the file, comma-separated in the variable. |
+| `zone.soa_serial` | `ACME_SOA_SERIAL` | `1` | Fixed, and deliberately not derived from data: publishing a challenge record must not bump it. |
+| `zone.soa_refresh` | `ACME_SOA_REFRESH` | `1h` | SOA REFRESH. |
+| `zone.soa_retry` | `ACME_SOA_RETRY` | `15m` | SOA RETRY. |
+| `zone.soa_expire` | `ACME_SOA_EXPIRE` | `168h` | SOA EXPIRE. |
+| `zone.soa_minimum` | `ACME_SOA_MINIMUM` | `30s` | Negative caching TTL. Keep low; see [why](dns-zone-setup.md#step-3-configure-the-zone-on-the-service). |
+| `zone.caa_issuers` | `ACME_CAA_ISSUER` | *empty* | CA identifiers the published CAA records authorize, e.g. `letsencrypt.org`. Empty emits no CAA rows at all. |
+| `zone.view_refresh_interval` | `ACME_VIEW_REFRESH_INTERVAL` | `30s` | Safety-net reload of the in-memory zone view. Writes update it immediately; this catches changes made behind the service's back. |
+
+### `listeners`
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `listeners.dns` | `ACME_DNS_LISTEN` | `:53` | UDP and TCP. Bind to the dedicated address on a multi-homed host. |
+| `listeners.http` | `ACME_LISTEN` | `:8080` | Every HTTP path group: management API, staff tree, challenge protocol, console, health, metrics. |
+| `listeners.shutdown_grace` | `ACME_SHUTDOWN_GRACE` | `15s` | Drain period on SIGTERM. |
+
+### `database`
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `database.url` | `ACME_DATABASE_URL` | *required* | PostgreSQL DSN. |
+| `database.migrate_on_start` | `ACME_MIGRATE_ON_START` | `true` | Apply migrations before opening listeners. |
+| `database.role` | `ACME_DB_ROLE` | *empty* | The unprivileged application role. Read by the bootstrap that creates it, not by the binary, which sees only the DSN above. |
+| `database.password` | `ACME_DB_PASSWORD` | *empty* | Its password. Same: bootstrap only, and never given a fallback in a committed file. |
+
+### `oidc` — the console's sign-in, and what it decides
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `oidc.issuer` | `ACME_OIDC_ISSUER` | *required* | Discovery base URL. |
+| `oidc.client_id` | `ACME_OIDC_CLIENT_ID` | *required* | Confidential client id. |
+| `oidc.client_secret` | `ACME_OIDC_CLIENT_SECRET` | *required* | Its secret. Never give this a fallback in a file. |
+| `oidc.redirect_url` | `ACME_OIDC_REDIRECT_URL` | *required* | Must exactly match what the IdP has registered. |
+| `oidc.groups_claim` | `ACME_OIDC_GROUPS_CLAIM` | `groups` | Claim carrying group membership. |
+| `oidc.group_prefix` | `ACME_OIDC_GROUP_PREFIX` | *empty* | Stripped from each group value — useful when the IdP emits path-style names. |
+| `oidc.admin_group` | `ACME_ADMIN_GROUP` | *empty* | Group granting the seeded `ADMIN` role. |
+| `oidc.config_admin_group` | `ACME_CONFIG_ADMIN_GROUP` | *empty* | Group granting the seeded `CONFIG_ADMIN` role. |
+| `oidc.key_rotation_group` | `ACME_KEY_ROTATION_GROUP` | *empty* | Group granting the seeded `KEY_ROTATION` role. |
+| `oidc.read_only_group` | `ACME_READ_ONLY_GROUP` | *empty* | Group granting the seeded `READ_ONLY` role. |
+| `oidc.session_idle_timeout` | `ACME_SESSION_IDLE_TIMEOUT` | `1h` | Idle expiry. |
+| `oidc.session_max_lifetime` | `ACME_SESSION_MAX_LIFETIME` | `8h` | Absolute expiry. Also bounds how stale a user's group list can be. |
+
+Each of the four group settings is **optional and defaults to empty, meaning
+nobody holds that role** — startup does not refuse a deployment that has not
+mapped them, it only warns. In practice you want all four: a user in none of the
+configured groups has no access at all. A group naming a role that does not exist
+grants nothing, and is reported at startup.
+
+### `staff` — the second sign-in surface
+
+One deployment, two hostnames, two applications at the identity provider, so a
+token minted for one is not a token for the other. `staff.oidc` has the same
+shape as `oidc` above, because it is the same idea; three of its fields are wired
+today, and the staff plane shares the console's issuer and group mapping. The
+other three — `staff.oidc.issuer`, `staff.oidc.groups_claim`,
+`staff.oidc.group_prefix` — exist in the schema and are read by nothing: setting
+one is accepted and has no effect.
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `staff.host` | `ACME_STAFF_HOST` | *empty* | The staff hostname. Empty means this deployment has no staff surface, and everything answers as the customer plane. |
+| `staff.oidc.client_id` | `ACME_STAFF_OIDC_CLIENT_ID` | *empty* | The staff application's client id. |
+| `staff.oidc.client_secret` | `ACME_STAFF_OIDC_CLIENT_SECRET` | *empty* | Its secret. |
+| `staff.oidc.redirect_url` | `ACME_STAFF_OIDC_REDIRECT_URL` | *empty* | Its callback, on the staff hostname — the session cookie is host-only, so a callback landing on the wrong hostname sets the cookie for the wrong surface. |
+
+### `challenge` — validation records and who is believed about them
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `challenge.ttl` | `ACME_CHALLENGE_TTL` | `30s` | TTL on challenge TXT answers. |
+| `challenge.lifetime` | `ACME_CHALLENGE_LIFETIME` | `1h` | How long an uncleaned challenge record survives. Far longer than an issuance needs, short enough that a crashed client leaves nothing lingering. |
+| `challenge.sweep_interval` | `ACME_SWEEP_INTERVAL` | `5m` | Deletion of expired rows. Expired values stop being answered immediately regardless, so this is housekeeping, not correctness. |
+| `challenge.interaction_retention` | `ACME_INTERACTION_RETENTION` | `0s` | How long a closed interaction row is kept; `0` means forever. These rows hold a customer load balancer's client IP, so nothing is deleted until you say so. `4320h` — two Let's Encrypt renewal cycles — is the recommendation on record. |
+| `challenge.trusted_proxy_cidrs` | `ACME_TRUSTED_PROXY_CIDRS` | *empty* | Peers whose forwarding headers are believed. Required if any API key is address-restricted. A list in the file, comma-separated in the variable. |
+| `challenge.verify_resolver` | `ACME_VERIFY_RESOLVER` | *system resolver* | Resolver used to check customer records. Prefer a public resolver over an internal one with a split-horizon view. |
+| `challenge.alias_use_domain` | `ACME_ALIAS_USE_DOMAIN` | `false` | Derive each new alias label from the domain (`demo-example-com`) instead of generating a random one. Readable in a log line, but computable by anyone, so the served zone will answer "is this domain a customer?" for free — set it only for a deployment serving one organisation. It governs aliases created afterwards; an existing alias is never re-labelled, so decide before onboarding domains. |
+
+### `limits` and `log`
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `limits.allow_account_creation` | `ACME_ALLOW_ACCOUNT_CREATION` | `false` | Opens account creation to any authenticated person. Creating an account creates a tenant, so a deployment authenticating a whole organisation usually wants this off. |
+| `limits.projects_per_personal_account` | *(file only)* | `5` | How many projects one personal account may hold. Team accounts have no project quota; credit is their limit. **Not enforced yet** — the value is loaded and nothing reads it, so setting it changes no behaviour until the change that enforces the quota lands. |
+| `log.level` | `ACME_LOG_LEVEL` | `info` | `debug` logs each expiry sweep and every DNS decision. |
 
 ## Operating it
 

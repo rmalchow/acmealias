@@ -1,0 +1,207 @@
+# acmeservice — the base configuration (design G7).
+#
+# This file is the shape of the configuration and the home of every default.
+# Before it existed, a default lived in Go, inside the call that read the
+# variable, and "what is this deployment actually doing" could only be answered
+# by reading .env and the source together. Every default below is the one the
+# binary carries; the file restates them so that reading this file is enough.
+#
+# Layers, lowest to highest (G1):
+#
+#   1. the defaults compiled into the binary
+#   2. this file
+#   3. config-<profile>.yaml, one per name in ACME_PROFILES, in that order
+#   4. the ACME_* environment
+#
+# The environment is LAST and therefore wins. That is deliberate: it is how a
+# container platform injects configuration, and it is what lets a deployment
+# configured entirely by ACME_* — which is every deployment today — keep
+# behaving exactly as it did.
+#
+# ${ACME_FOO:fallback} takes the environment variable when it is set and the
+# fallback when it is not. Every such value is QUOTED (G2, task 3.2):
+# substitution happens before this document is parsed, so an unquoted secret
+# containing ": " would produce either invalid YAML or valid YAML meaning
+# something else. Write $${...} for a literal dollar-brace.
+#
+# The quotes are SINGLE, and that is not a style choice. Double quotes are a
+# YAML escape context, so a password containing \t, \n, \\ or \u would be
+# silently ALTERED and the service would start with a credential nobody typed —
+# the one failure this mechanism could not report. Inside single quotes there
+# are no escapes, and the only character that needs care is the quote itself,
+# which fails the parse loudly.
+#
+# What quoting costs, since nothing else records it: a quoted placeholder is a
+# STRING, so `soa_serial: '1'` is not typed by the YAML parser the way G2's
+# unquoted `port: ${ACME_PORT:8080}` would be. The loader converts every value
+# an ACME_* variable can reach back to its declared type and reports a bad one
+# by name, which it has to do regardless — an environment value is always a
+# string. G2's typing therefore buys nothing in THIS file and everything in a
+# file that writes its placeholders bare; both are supported, and this file
+# prefers the safety.
+#
+# A secret is written ${ACME_...} with NO fallback, so an unset one arrives
+# empty and startup refuses it, rather than the service coming up with a blank
+# password and failing somewhere less obvious.
+#
+# An unset placeholder with no fallback does NOT erase the layer beneath it: it
+# resolves to nothing, and a key with no value is dropped before the merge. The
+# same rule applies to the environment, which is the one exception to "the
+# environment wins": ACME_LOG_LEVEL= means "unset", not "empty", so a setting is
+# blanked by removing it from the file rather than by assigning nothing to the
+# variable.
+#
+# This file is NOT copied into the production image. A deployment that wants it
+# mounts it and points ACME_CONFIG_FILE at it; one that does not keeps the
+# built-in defaults, which are the same ones written here.
+
+# The zone this service is authoritative for, and what it answers at the apex.
+zone:
+  name:           '${ACME_ZONE:}'            # required; there is no sensible default
+  soa_primary_ns: '${ACME_SOA_PRIMARY_NS:}'  # required
+  soa_hostmaster: '${ACME_SOA_HOSTMASTER:}'  # required
+
+  # The serial is a configured constant, not derived from data: publishing a
+  # challenge record must not bump it.
+  soa_serial:  '${ACME_SOA_SERIAL:1}'
+  soa_refresh: '${ACME_SOA_REFRESH:1h}'
+  soa_retry:   '${ACME_SOA_RETRY:15m}'
+  soa_expire:  '${ACME_SOA_EXPIRE:168h}'
+
+  # Also the negative-cache TTL (design D7).
+  soa_minimum: '${ACME_SOA_MINIMUM:30s}'
+
+  # How often the in-memory zone view reloads on its own. A write refreshes it
+  # synchronously regardless.
+  view_refresh_interval: '${ACME_VIEW_REFRESH_INTERVAL:30s}'
+
+  # Lists REPLACE rather than merge (G3): an overlay that names one nameserver
+  # means one nameserver, not one added to these. Both default to nothing at
+  # all — publishing no NS rows, and no CAA rows — so they are left out here
+  # rather than written as an empty list, which is a different value.
+  #
+  # ns_names:    [ns1.example.com., ns2.example.com.]   # ACME_NS_NAMES
+  # caa_issuers: [letsencrypt.org]                      # ACME_CAA_ISSUER
+
+listeners:
+  # UDP and TCP. Production binds :53; a container without
+  # CAP_NET_BIND_SERVICE has to use a high port.
+  dns: '${ACME_DNS_LISTEN::53}'
+
+  # One HTTP listener (design P16), serving the management API, the staff
+  # tree, the challenge protocol, the console, and health and metrics,
+  # separated by path prefix. What is exposed to the outside is the reverse
+  # proxy's decision, not this one's.
+  http: '${ACME_LISTEN::8080}'
+
+  # How long in-flight work gets to finish on SIGTERM before a forced exit.
+  shutdown_grace: '${ACME_SHUTDOWN_GRACE:15s}'
+
+database:
+  url: '${ACME_DATABASE_URL}'  # required, and a secret: the DSN carries the password
+
+  # Read by the deployment's bootstrap (development/postgres-init), not by the
+  # binary, which only ever sees the assembled url above. They are here so that
+  # this file shows all of the database settings rather than half of them.
+  #
+  # The service connects as an ordinary role and never as a superuser: a
+  # superuser is exempt from every row-level security policy, so tenant
+  # isolation would be silently absent. The binary refuses to start as one.
+  role:     '${ACME_DB_ROLE:}'
+  password: '${ACME_DB_PASSWORD}'  # secret: no fallback
+
+  # Migrations run before anything binds. Setting this false makes startup
+  # check the schema version instead; either way a database AHEAD of the
+  # binary is refused.
+  migrate_on_start: '${ACME_MIGRATE_ON_START:true}'
+
+# The customer console's OIDC application, and what the identity provider is
+# used to decide (design D10).
+oidc:
+  issuer:        '${ACME_OIDC_ISSUER:}'         # required, absolute URL
+  client_id:     '${ACME_OIDC_CLIENT_ID:}'      # required
+  client_secret: '${ACME_OIDC_CLIENT_SECRET}'   # secret: no fallback
+  redirect_url:  '${ACME_OIDC_REDIRECT_URL:}'   # required, absolute URL
+
+  groups_claim: '${ACME_OIDC_GROUPS_CLAIM:groups}'
+  group_prefix: '${ACME_OIDC_GROUP_PREFIX:}'    # stripped from each group value
+
+  # Which group grants each global role. Unset means nobody holds it — a role
+  # nobody holds is a role nobody can use, which is the right default for a
+  # deployment that has not decided yet.
+  admin_group:        '${ACME_ADMIN_GROUP:}'
+  config_admin_group: '${ACME_CONFIG_ADMIN_GROUP:}'
+  key_rotation_group: '${ACME_KEY_ROTATION_GROUP:}'
+  read_only_group:    '${ACME_READ_ONLY_GROUP:}'
+
+  session_idle_timeout: '${ACME_SESSION_IDLE_TIMEOUT:1h}'
+  session_max_lifetime: '${ACME_SESSION_MAX_LIFETIME:8h}'
+
+# The staff surface (public-edition U7): one deployment, two hostnames, two
+# applications at the identity provider, so a token minted for one is not a
+# token for the other. `oidc` below is the same shape as the block above,
+# which is the point — they are the same idea twice, and until now the only
+# thing saying so was two prefixes that rhymed.
+#
+# An empty host means this deployment has no staff surface at all, and
+# everything answers as the customer plane.
+staff:
+  host: '${ACME_STAFF_HOST:}'
+  oidc:
+    client_id:     '${ACME_STAFF_OIDC_CLIENT_ID:}'
+    client_secret: '${ACME_STAFF_OIDC_CLIENT_SECRET}'  # secret: no fallback
+    redirect_url:  '${ACME_STAFF_OIDC_REDIRECT_URL:}'
+
+challenge:
+  # TTL on published TXT answers, and how long a published value is answered
+  # before the sweep may remove it.
+  ttl:      '${ACME_CHALLENGE_TTL:30s}'
+  lifetime: '${ACME_CHALLENGE_LIFETIME:1h}'
+
+  sweep_interval: '${ACME_SWEEP_INTERVAL:5m}'
+
+  # How long a CLOSED interaction row is kept. Zero means keep forever, and
+  # that is the default on purpose: the rows hold a customer load balancer's
+  # client IP and nobody has signed off on a retention period for it. The
+  # recommendation on record, pending that, is 4320h — two Let's Encrypt
+  # renewal cycles.
+  interaction_retention: '${ACME_INTERACTION_RETENTION:0s}'
+
+  # Whose X-Forwarded-For is believed. A merged allowlist is an allowlist
+  # somebody widened by accident, so an overlay replacing this replaces all of
+  # it (G3). Empty by default: nothing is trusted until it is named.
+  #
+  # trusted_proxy_cidrs: [10.0.0.0/8]   # ACME_TRUSTED_PROXY_CIDRS
+
+  # Resolver used to verify customer records, host:port. Empty means the
+  # system resolver.
+  verify_resolver: '${ACME_VERIFY_RESOLVER:}'
+
+  # False derives nothing: alias labels are randomly generated. Setting it true
+  # derives the label from the challenge name, which is readable in a log line
+  # and equally computable by anyone, so it turns the served zone into a
+  # membership oracle — for single-organisation deployments only. It governs
+  # only aliases created afterwards; an existing one is never re-labelled.
+  alias_use_domain: '${ACME_ALIAS_USE_DOMAIN:false}'
+
+limits:
+  # A personal account may hold this many projects. It is configuration and
+  # not a constant because it is a pricing decision, and pricing changes on a
+  # different clock from deployments. Team accounts have no project quota at
+  # all — credit is their limit — so this does not apply to them.
+  #
+  # Nothing reads it yet. The quota is declared here so the file states the
+  # policy, but this change adds no setting (see the proposal) and so wires it
+  # to nothing: the change that ENFORCES the quota is the one that carries it
+  # into the runtime config and names its override. Until then it is loaded and
+  # discarded, and the schema's nested form ACME_LIMITS_PROJECTS_PER_PERSONAL_
+  # ACCOUNT reaches it and is equally inert.
+  projects_per_personal_account: 5
+
+  # False, and that is the important half: creating an account creates a
+  # tenant, and a deployment authenticating a whole organisation does not want
+  # every member of it able to do that.
+  allow_account_creation: '${ACME_ALLOW_ACCOUNT_CREATION:false}'
+
+log:
+  level: '${ACME_LOG_LEVEL:info}'  # debug, info, warn or error

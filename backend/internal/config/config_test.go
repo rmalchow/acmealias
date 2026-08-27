@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -204,5 +206,34 @@ func TestAliasUseDomainDefaultsToGenerated(t *testing.T) {
 	}
 	if !cfg.AliasUseDomain {
 		t.Error("ACME_ALIAS_USE_DOMAIN=true should mean derived labels, got generated")
+	}
+}
+
+// A malformed value is reported against the place the operator can go and fix
+// it. The variable when they set it — the contract the old loader had, and the
+// error strings the runbook quotes — and the PATH when the value came out of a
+// file, because naming ACME_CHALLENGE_TTL for a `ttl:` somebody typed into
+// config.yaml sends them hunting for a variable nobody exported.
+func TestMalformedValueIsReportedAgainstItsOrigin(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, DefaultFile)
+	if err := os.WriteFile(file, []byte("challenge:\n  ttl: \"5 minutes\"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := load(Options{File: file, Environ: []string{}})
+	if err == nil {
+		t.Fatal("a malformed duration in a file was accepted")
+	}
+	if strings.Contains(err.Error(), "ACME_CHALLENGE_TTL") || !strings.Contains(err.Error(), "challenge.ttl") {
+		t.Errorf("file-borne error = %v, want it to name the path challenge.ttl", err)
+	}
+
+	_, err = load(Options{File: file, Environ: []string{"ACME_CHALLENGE_TTL=5 minutes"}})
+	if err == nil {
+		t.Fatal("a malformed duration in the environment was accepted")
+	}
+	if !strings.Contains(err.Error(), "ACME_CHALLENGE_TTL") {
+		t.Errorf("environment error = %v, want it to name ACME_CHALLENGE_TTL", err)
 	}
 }

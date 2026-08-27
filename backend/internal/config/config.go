@@ -1,16 +1,27 @@
-// Package config reads acmeservice's settings from the environment and
-// validates them before any listener opens. There is no file overlay: the
-// deployment and the dev compose stack already know how to set environment
-// variables, and a config library would be more code than the settings we
-// have (design D1).
+// Package config reads acmeservice's settings and validates them before any
+// listener opens.
+//
+// Settings come from layers: built-in defaults, then a base YAML file, then one
+// overlay per active profile, then the ACME_* environment (design G1). The
+// environment sits on top rather than underneath, which is what makes the file
+// mechanism a migration and not a cutover — a deployment configured entirely by
+// ACME_*, as every deployment is today, behaves exactly as it did.
+//
+// Two shapes live here. Config, below, is the runtime type every other package
+// sees: flat, and unchanged by this. fileConfig in schema.go is what a
+// configuration FILE looks like — eight blocks, design G7 — and the mapping
+// between them is one function, fileConfig.toConfig.
 package config
 
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/knadh/koanf/v2"
 )
 
 // Config is the service's complete runtime configuration. Every
@@ -192,130 +203,189 @@ func (e loadErrors) errOrNil() error {
 	return fmt.Errorf("invalid configuration:\n  %s", strings.Join(e, "\n  "))
 }
 
-// Load reads Config from the environment. It applies defaults for every
-// setting that has one and reports a parse error, naming the setting, for
-// any variable whose value is present but malformed (e.g. an unparsable
-// duration or boolean). It does not check that required values are present
-// or make any network call; call Validate for that.
-func Load() (Config, error) {
+// Load reads Config from the configuration layers described in the package
+// comment. It applies defaults for every setting that has one and reports a
+// parse error, naming the setting, for any value that is present but malformed
+// (e.g. an unparsable duration or boolean). It does not check that required
+// values are present or make any network call; call Validate for that.
+//
+// The signature is the one it has always had, so no caller moves (task 4.1).
+func Load() (Config, error) { return load(Options{}) }
+
+// load is Load with the loader's knobs exposed, so a test can point at a
+// specific file and a specific environment instead of the process's own.
+func load(opts Options) (Config, error) {
 	var errs loadErrors
 
-	dur := func(name string, def time.Duration) time.Duration {
-		v, ok := os.LookupEnv(name)
-		if !ok || v == "" {
-			return def
-		}
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			errs.add(name, err)
-			return def
-		}
-		return d
+	f, sources, err := loadWithSources[fileConfig](withDefaults(opts, &errs))
+	if err != nil {
+		// A layer that cannot be read at all — a configured base file that is
+		// absent (G4), or a file that is not YAML — is fatal and has no
+		// per-setting story to tell, so it short-circuits rather than joining
+		// the accumulated list.
+		return Config{}, err
 	}
-	boolean := func(name string, def bool) bool {
-		v, ok := os.LookupEnv(name)
-		if !ok || v == "" {
-			return def
-		}
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			errs.add(name, err)
-			return def
-		}
-		return b
+
+	// Reported here rather than by the caller because Load is the only place
+	// that knows what it read. It goes to the default logger, which at this
+	// point is still the standard one writing to stderr: Load runs before
+	// obs.NewLogger, since the log level is one of the settings being read
+	// (see cmd/acmeservice.serve, which reports configuration failures the
+	// same way and for the same reason).
+	logSources(sources)
+
+	return f.toConfig(), errs.errOrNil()
+}
+
+// withDefaults fills in the two options this package always sets. The schema
+// does the environment mapping wherever a variable's name already spells its
+// path — ACME_OIDC_CLIENT_ID reaches oidc.client_id unaided — and the aliases
+// cover the rest, derived from the binding table rather than written out so
+// the two cannot drift (G5, task 2.4).
+func withDefaults(opts Options, errs *loadErrors) Options {
+	opts.EnvAliases = envAliases()
+	opts.Inspect = typeCheck(errs, isSetIn(opts))
+	return opts
+}
+
+// isSetIn reports, per variable, whether the environment this load reads
+// actually sets it. typeCheck needs it to name the right thing: see there.
+//
+// It asks Options.Lookup, not Options.Environ, because Lookup is the view that
+// can answer a question about one name — and normalize() makes the two the
+// same environment, so the answer matches what envProvider overlaid. Empty
+// counts as unset, which is envProvider's rule too.
+func isSetIn(opts Options) func(string) bool {
+	lookup := opts.Lookup
+	if lookup == nil && opts.Environ == nil {
+		lookup = os.LookupEnv
 	}
-	str := func(name, def string) string {
-		v, ok := os.LookupEnv(name)
-		if !ok || v == "" {
-			return def
-		}
-		return v
+	if lookup == nil {
+		lookup = lookupFrom(opts.Environ)
 	}
-	uint32Val := func(name string, def uint32) uint32 {
-		v, ok := os.LookupEnv(name)
-		if !ok || v == "" {
-			return def
-		}
-		n, err := strconv.ParseUint(v, 10, 32)
-		if err != nil {
-			errs.add(name, err)
-			return def
-		}
-		return uint32(n)
+	return func(name string) bool {
+		v, ok := lookup(name)
+		return ok && v != ""
 	}
-	csv := func(name string) []string {
-		v := os.Getenv(name)
-		if strings.TrimSpace(v) == "" {
-			return nil
-		}
-		var out []string
-		for _, part := range strings.Split(v, ",") {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				out = append(out, part)
+}
+
+// typeCheck reads back every leaf an ACME_* variable can reach and converts
+// the ones that arrived as text. It is the Inspect hook of the loader, and it
+// exists for two things the unmarshaller cannot do.
+//
+// It names WHERE THE VALUE CAME FROM. mapstructure would report `cannot parse
+// 'challenge.ttl'`, which is a path in a file the deployment may not even
+// have; the old loader reported `ACME_CHALLENGE_TTL: time: invalid duration
+// "5 minutes"`, error strings the runbook and cmd/acmeservice quote by name,
+// and that contract is kept here — but only for a value the environment
+// actually set. Naming the variable unconditionally gets it exactly as wrong
+// in the other direction: `ttl: "5 minutes"` typed into config.yaml would send
+// the operator hunting for an ACME_CHALLENGE_TTL nobody exported. So isSet
+// decides, and a file-borne value is reported against its path, which is the
+// thing the operator can go and find.
+//
+// And it treats an empty value as absent, restoring the default. Every setting
+// behaved that way before this change; a file written as
+// `level: "${ACME_LOG_LEVEL:info}"` cannot produce an empty string, but one
+// written as `level: ""` can, and the two should not mean different things.
+// A secret is the deliberate exception: it has no default, so empty stays
+// empty and Validate is what refuses to start.
+//
+// A malformed value keeps the default rather than the zero value, so the
+// returned Config is still usable for anything the caller does before it
+// looks at the error — which is what the old loader promised by returning the
+// struct alongside it.
+func typeCheck(errs *loadErrors, isSet func(string) bool) func(*koanf.Koanf) error {
+	defaults := map[string]any{}
+	collectDefaults(reflect.TypeOf(fileConfig{}), "", defaults)
+
+	return func(k *koanf.Koanf) error {
+		var setErr error
+		reset := func(path string, zero any) {
+			v, ok := defaults[path]
+			if !ok {
+				v = zero
+			}
+			if err := k.Set(path, v); err != nil && setErr == nil {
+				setErr = fmt.Errorf("config: reset %q: %w", path, err)
 			}
 		}
-		return out
+		set := func(path string, v any) {
+			if err := k.Set(path, v); err != nil && setErr == nil {
+				setErr = fmt.Errorf("config: set %q: %w", path, err)
+			}
+		}
+
+		for _, b := range envBindings {
+			// Anything that is not text is already the type it should be: a
+			// YAML scalar the parser typed (G2), or a Go default.
+			raw, ok := k.Get(b.path).(string)
+			if !ok {
+				continue
+			}
+
+			// The name an error is reported against: the variable when the
+			// operator set it, the path when the value came from a file.
+			setting := b.path
+			if isSet(b.env) {
+				setting = b.env
+			}
+
+			switch b.kind {
+			case kindString:
+				if raw == "" {
+					reset(b.path, "")
+				}
+			case kindBool:
+				if raw == "" {
+					reset(b.path, false)
+					continue
+				}
+				v, err := strconv.ParseBool(raw)
+				if err != nil {
+					errs.add(setting, err)
+					reset(b.path, false)
+					continue
+				}
+				set(b.path, v)
+			case kindDuration:
+				if raw == "" {
+					reset(b.path, time.Duration(0))
+					continue
+				}
+				v, err := time.ParseDuration(raw)
+				if err != nil {
+					errs.add(setting, err)
+					reset(b.path, time.Duration(0))
+					continue
+				}
+				set(b.path, v)
+			case kindUint32:
+				if raw == "" {
+					reset(b.path, uint32(0))
+					continue
+				}
+				v, err := strconv.ParseUint(raw, 10, 32)
+				if err != nil {
+					errs.add(setting, err)
+					reset(b.path, uint32(0))
+					continue
+				}
+				set(b.path, uint32(v))
+			case kindList:
+				// A list written as one string — from a placeholder, or from
+				// an operator who typed the environment form into a file.
+				// Left alone, mapstructure's weak typing wraps it in a
+				// ONE-ELEMENT slice, so "ns1,ns2" becomes the single
+				// nameserver "ns1,ns2" and the zone answers with a name
+				// nobody configured.
+				if v := splitList(raw); v != nil {
+					set(b.path, v)
+				} else {
+					reset(b.path, []string(nil))
+				}
+			}
+		}
+		return setErr
 	}
-
-	cfg := Config{
-		Zone: str("ACME_ZONE", ""),
-
-		SOAMName:   str("ACME_SOA_PRIMARY_NS", ""),
-		SOARName:   str("ACME_SOA_HOSTMASTER", ""),
-		SOASerial:  uint32Val("ACME_SOA_SERIAL", 1),
-		SOARefresh: dur("ACME_SOA_REFRESH", time.Hour),
-		SOARetry:   dur("ACME_SOA_RETRY", 15*time.Minute),
-		SOAExpire:  dur("ACME_SOA_EXPIRE", 7*24*time.Hour),
-		SOAMinimum: dur("ACME_SOA_MINIMUM", 30*time.Second),
-
-		NSNames: csv("ACME_NS_NAMES"),
-
-		DNSListenAddr: str("ACME_DNS_LISTEN", ":53"),
-		ListenAddr:    str("ACME_LISTEN", ":8080"),
-
-		DatabaseURL:          str("ACME_DATABASE_URL", ""),
-		AllowAccountCreation: boolean("ACME_ALLOW_ACCOUNT_CREATION", false),
-		MigrateOnStart:       boolean("ACME_MIGRATE_ON_START", true),
-
-		AliasUseDomain: boolean("ACME_ALIAS_USE_DOMAIN", false),
-
-		ChallengeTTL:            dur("ACME_CHALLENGE_TTL", 30*time.Second),
-		ChallengeLifetime:       dur("ACME_CHALLENGE_LIFETIME", time.Hour),
-		ZoneViewRefreshInterval: dur("ACME_VIEW_REFRESH_INTERVAL", 30*time.Second),
-		SweepInterval:           dur("ACME_SWEEP_INTERVAL", 5*time.Minute),
-		InteractionRetention:    dur("ACME_INTERACTION_RETENTION", 0),
-
-		TrustedProxyCIDRs: csv("ACME_TRUSTED_PROXY_CIDRS"),
-
-		VerificationResolver: str("ACME_VERIFY_RESOLVER", ""),
-
-		OIDCIssuer:       str("ACME_OIDC_ISSUER", ""),
-		OIDCClientID:     str("ACME_OIDC_CLIENT_ID", ""),
-		OIDCClientSecret: str("ACME_OIDC_CLIENT_SECRET", ""),
-		OIDCRedirectURL:  str("ACME_OIDC_REDIRECT_URL", ""),
-		OIDCGroupClaim:   str("ACME_OIDC_GROUPS_CLAIM", "groups"),
-		OIDCGroupPrefix:  str("ACME_OIDC_GROUP_PREFIX", ""),
-
-		StaffHost:             str("ACME_STAFF_HOST", ""),
-		StaffOIDCClientID:     str("ACME_STAFF_OIDC_CLIENT_ID", ""),
-		StaffOIDCClientSecret: str("ACME_STAFF_OIDC_CLIENT_SECRET", ""),
-		StaffOIDCRedirectURL:  str("ACME_STAFF_OIDC_REDIRECT_URL", ""),
-
-		AdminGroup:       str("ACME_ADMIN_GROUP", ""),
-		ConfigAdminGroup: str("ACME_CONFIG_ADMIN_GROUP", ""),
-		KeyRotationGroup: str("ACME_KEY_ROTATION_GROUP", ""),
-		ReadOnlyGroup:    str("ACME_READ_ONLY_GROUP", ""),
-
-		SessionIdleTimeout: dur("ACME_SESSION_IDLE_TIMEOUT", time.Hour),
-		SessionMaxLifetime: dur("ACME_SESSION_MAX_LIFETIME", 8*time.Hour),
-
-		CAAIssuers: csv("ACME_CAA_ISSUER"),
-
-		LogLevel: str("ACME_LOG_LEVEL", "info"),
-
-		ShutdownGracePeriod: dur("ACME_SHUTDOWN_GRACE", 15*time.Second),
-	}
-
-	return cfg, errs.errOrNil()
 }

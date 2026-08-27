@@ -326,10 +326,21 @@ services:
     env_file: [.env]
     environment:
       CGO_ENABLED: "0"
+      # The base file, named explicitly: an explicitly configured base that is
+      # absent is a startup error (design G4), which is what turns a broken
+      # mount into a loud failure instead of a stack quietly running on
+      # defaults nobody chose. The overlay is found beside it, by name —
+      # config.yaml + the profile below.
+      ACME_CONFIG_FILE: /src/config.yaml
+      ACME_PROFILES: development
     working_dir: /src
     command: ["air", "-c", ".air.toml"]
     volumes:
       - ../backend:/src
+      # Mounted over the bind above rather than copied into backend/, because
+      # the base file belongs to the repository and not to the Go module.
+      - ../config.yaml:/src/config.yaml:ro
+      - ./config-development.yaml:/src/config-development.yaml:ro
       - ./data/go_mod:/go/pkg/mod
       - ./data/go_build:/gocache
       - ./data/air_tmp:/src/tmp
