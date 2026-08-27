@@ -140,12 +140,18 @@ produce. A fake that writes different state teaches nothing.
 
 ## What this does not solve, and should be read as a decision
 
-- **There is no way to move a project between accounts.** A person who outgrows
-  their personal account creates a team account and starts again in it. Moving
-  one would mean rewriting the materialized `account_id` on every load balancer,
-  node, domain, alias and key of that project, underneath the composite foreign
-  keys of P2 that exist precisely to stop such a write disagreeing with its
-  parent. That is a change of its own and this is not it.
+- **There is no first-class way to move a project between accounts**, and this is
+  a deferral rather than a refusal. Doing it inside the platform would mean
+  rewriting the materialized `account_id` on every load balancer, node, domain,
+  alias and key of that project, underneath the composite foreign keys of P2 that
+  exist precisely to stop such a write disagreeing with its parent.
+
+  What makes deferring it acceptable is that the workaround is mechanical: every
+  object here is API-addressable, so re-creating a project in another account is a
+  script a customer runs against us, not data they retype. The one thing it does
+  NOT carry across is the alias label — a new domain gets a new alias, so the
+  customer-side CNAME has to be republished, which is the same one-time step they
+  did when they onboarded. Worth building properly later; not MVP.
 - **The credit ledger is not here.** Nothing spends the balance yet. This change
   adds the number, the way to increase it, and what happens when it is zero.
   `metering-and-credits` adds what draws it down.

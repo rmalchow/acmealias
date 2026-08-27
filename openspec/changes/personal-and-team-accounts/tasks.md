@@ -30,7 +30,7 @@
 - [ ] 3.1a Derive its name from the user; it is not slug-addressable and not renameable by the tenant, since there is nothing to disambiguate (C1)
 - [ ] 3.1b Creating a team account goes through checkout (group 5) and does not exist until the first credit lands
 - [ ] 3.2 Seed a new team account with the default roles and its owner as an unrestricted member
-- [ ] 3.3 A personal account has no roles, no memberships and no invitations — the routes refuse rather than returning empty, so a client learns the difference (C9)
+- [ ] 3.3 A personal account has no roles, no memberships and no invitations — the API routes refuse rather than returning empty, so a client learns the difference. The CONSOLE still shows them, disabled: refusing at the API and hiding in the interface are different questions (C9, C11)
 - [ ] 3.4 KEEP the grant model live in personal accounts for API keys, including the subset rule. A key narrower than its holder is good practice in an account of one, and this is the task most likely to be deleted by accident (C9)
 - [ ] 3.5 Enforce the project quota per account, as a quota and not as a permission: a refusal says there is no room and what to do about it, not that the caller may not
 - [ ] 3.6 Transfer of ownership for team accounts, audited, with the recipient's membership established in the same transaction
@@ -59,10 +59,11 @@
 - [ ] 6.2 The suspended-account screen for an owner: the balance, and checkout. Nothing else (C5)
 - [ ] 6.3 A member of a suspended account is told the account is suspended and that its owner can restore it, which is a different sentence from "you do not have permission"
 - [ ] 6.4 The checkout flow: enter, choose an amount, return to the account with the balance visible
-- [ ] 6.5 Add a **Settings** route holding the three things that administer an account rather than its inventory: members, role assignments, and credits. They belong together because they are what an owner comes to do (C11)
+- [ ] 6.5 Add a **Settings** route holding the three things that administer an account rather than its inventory: members, role assignments, and credits. One route with a consistent shape in both kinds of account (C11)
 - [ ] 6.5a Move the existing `/roles` screen into Settings; it stops being a top-level entry
-- [ ] 6.5b Navigation follows the selected account: a personal account's Settings has no members and no roles, and shows no balance. Absent rather than empty (C9, C11)
-- [ ] 6.5c Do NOT let this leak into permission-based hiding. A control the caller lacks a grant for stays visible and disabled with a reason; a screen the account KIND does not have is absent. The test is whether any grant given to anybody would light it up (C11)
+- [ ] 6.5b NOTHING IS HIDDEN. In a personal account, Settings still shows members, roles and credits — present and disabled, each saying it belongs to a team account. A route that appears and disappears as the user switches is the same mistake as an absent button (C11)
+- [ ] 6.5c Two reasons, two sentences, and they must not be interchanged: "you are not permitted to do this" is fixed by somebody granting it; "this does not exist in a personal account" is fixed by a different kind of account. Telling a personal-account owner they lack permission sends them looking for whoever can grant it, and there is nobody (C11)
+- [ ] 6.5e Add the second reason string alongside NOT_PERMITTED rather than reusing it, so the two cannot drift into one message that is wrong for both
 - [ ] 6.5d Re-render the navigation on an account switch without a reload, since the switch changes what is in it
 - [ ] 6.6 Keep the grant composer in the API key dialog everywhere, personal included (C9, 3.4)
 - [ ] 6.7 Warn before zero, not at it. The refusal is soft — renewals stop and the customer has weeks — so the warning is the thing that actually protects them, and `metering-and-credits` says so itself (C4)

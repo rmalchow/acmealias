@@ -29,14 +29,23 @@ being omitted, since the owner is the only person who can restore it.
 The console's navigation SHALL reflect the capabilities of the selected account,
 and SHALL change when the selection changes without requiring a reload.
 
-A screen for a capability the account kind does not have SHALL be absent. A
-control the caller merely lacks authority for SHALL remain visible and disabled
-with a reason.
+A capability the selected account does not have SHALL NOT be hidden. It SHALL be
+presented and disabled, stating that it does not exist in this kind of account.
 
-#### Scenario: A personal account offers no member management
+That statement SHALL be distinct from the one used where a caller lacks
+authority. A refusal that a grant would lift and a refusal that only a different
+kind of account would lift SHALL NOT share wording, because they do not share a
+remedy.
+
+#### Scenario: A personal account shows what it does not have
 
 - **WHEN** a personal account is selected
-- **THEN** no members or roles screen is offered
+- **THEN** member and role management are shown, disabled, and state that they belong to a team account
+
+#### Scenario: The two refusals do not share wording
+
+- **WHEN** a control is unavailable because the account kind lacks the capability
+- **THEN** it does not say the caller lacks permission
 
 #### Scenario: Switching accounts changes the navigation
 

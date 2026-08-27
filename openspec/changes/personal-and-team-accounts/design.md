@@ -37,8 +37,12 @@ members? Then "free" and "suspended" are the same state wearing two labels, and
 the free tier becomes a place accounts land rather than a place they start. Two
 kinds that never convert have no such state.
 
-The cost is real and is recorded in the proposal: somebody who outgrows personal
-starts again inside a team account, because there is no project migration.
+The cost is real and smaller than it first looks. Somebody who outgrows their
+personal account builds their inventory again inside a team account — and because
+everything here is API-addressable, that is a script they can run against us
+rather than data they have to retype. A first-class migration is worth having and
+is not MVP; what makes deferring it acceptable is that the workaround is
+mechanical rather than manual.
 
 **A personal account's owner never changes.** Not "changes rarely" — the column
 is immutable and the service refuses a transfer. The account is the user's own
@@ -214,37 +218,43 @@ So: no roles UI, no memberships, no invitations in a personal account; the key
 dialog keeps its grant composer everywhere. Anyone deleting the roles machinery
 along with the roles screen will break key scoping.
 
-## C11. Navigation follows the account, and this is not the hiding that was just removed
+## C11. Nothing is hidden. Two reasons, two sentences
 
-Switching accounts changes what is in the navigation, because the two kinds of
-account genuinely have different capabilities. A personal account has no members
-and no roles (C9), so it has no screen for them.
+Switching accounts changes what the console offers, because the two kinds of
+account genuinely have different capabilities. The tempting way to express that
+is to leave the missing screens out. **It is the wrong way, and for the same
+reason permission-based hiding was wrong.**
 
-**This has to be distinguished from permission-based hiding, which was removed
-deliberately.** The console now renders every permission-gated control and
-disables it with a reason, on the grounds that an absent button teaches nothing:
-somebody who cannot do a thing cannot tell an unavailable feature from one they
-lack the rights for. The two rules look contradictory and are not:
+The rule the console already follows is that a gated control says *this exists,
+but you are not allowed to use it* — because an absent button teaches nothing,
+and somebody who cannot do a thing cannot tell an unavailable feature from one
+they lack the rights for. An account-kind difference has exactly the same
+failure: a personal-account user who never sees Members does not learn that team
+accounts have them. They learn that this product does not do that.
 
-| | Hidden? | Why |
-| --- | --- | --- |
-| A control you lack the grant for | **No** — shown, disabled, with a reason | The capability exists here. You need authority for it, and the screen should say so |
-| A screen the account kind does not have | **Yes** — absent | The capability does not exist here. There is nothing to be granted |
+So nothing is hidden. What differs is the sentence:
 
-The test is whether any grant, given to anybody, would light the control up. If
-yes, show it disabled. If no — a personal account has nobody to invite, so no
-grant makes "Members" meaningful — leave it out, because a disabled Members
-screen in an account of one is a promise that cannot be kept.
+| Situation | Treatment | What it says | What fixes it |
+| --- | --- | --- | --- |
+| The caller lacks a grant | shown, disabled | you are not permitted to do this | somebody grants it |
+| The account kind has no such thing | shown, disabled | this does not exist in a personal account | a team account |
 
-**A Settings route holds the three things that administer an account rather than
-its inventory**: the people in it, the roles they hold, and its credits. Those
-belong together because they are what an *owner* comes to do, as opposed to what
-a *user of the account* comes to do, and separating them across three top-level
-entries makes the navigation about us rather than about the work.
+The distinction is not decorative. **"Forbidden" and "does not exist" have
+different remedies**, and telling somebody the wrong one wastes their time in a
+specific way: a personal-account owner told they lack permission will go looking
+for whoever can grant it, and there is nobody, because there is no grant. The
+second sentence has to name the actual remedy, which is a different kind of
+account.
 
-In a personal account, Settings still exists — the balance is not there, the
-members are not there, but a user still has an account to look at. What it holds
-in each kind is task group 6's problem, not a second route.
+It also means the console is where a customer discovers what a team account is
+for — at the moment they wanted the thing, rather than on a pricing page they
+were not reading.
+
+**Settings exists in both kinds.** It holds what administers the account rather
+than its inventory — members, the roles they hold, and credits. In a personal
+account those three are present and disabled, each saying that it belongs to a
+team account. That is one route with a consistent shape, rather than a route that
+appears and disappears under the user as they switch.
 
 ## C10. Removing the internal edition is part of this change, not a follow-up
 
