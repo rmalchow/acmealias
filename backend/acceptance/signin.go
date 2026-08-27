@@ -6,11 +6,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,41 +16,12 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/oidcauth"
 )
 
-// THIS FILE STILL SPEAKS KEYCLOAK, AND THE STACK NO LONGER RUNS IT.
-//
-// The whole acceptance suite fails at sign-in until this is rewritten, and it
-// fails with "no login form at ..." — which is accurate and reads like a stack
-// problem. It is not: authentik serves no server-rendered login form at all. Its
-// sign-in is a browser application driven by a JSON flow executor, so the
-// sequence below has to become:
-//
-//	GET  /api/v1/auth/login             -> 302 to authentik, carrying the flow slug
-//	GET/POST /api/v3/flows/executor/... -> step through the identification and
-//	                                       password components, one JSON body each
-//	GET  (followed)                     -> 302 back to /api/v1/auth/callback
-//
-// This is task 4.1 of openspec/changes/authentik-and-self-signup (design K5),
-// and it was known and named before the swap rather than discovered after it.
-//
-// Two things below survive the rewrite and must not be thrown away with the
-// form parsing: laxJar, whose doc comment explains a trap that has nothing to do
-// with which provider is running, and the account discovery in signIn.
-//
-// ---------------------------------------------------------------------------
-//
-// Browser-less sign-in against the stack's real Keycloak: discovery, PKCE, the
+// Browser-less sign-in against the stack's real authentik: discovery, PKCE, the
 // authorization code exchange, ID-token verification against real JWKS, the
-// groups claim in the shape the realm's mapper produces, the session cookie and
-// CSRF. Nothing else in the suite touches any of it.
+// groups claim in the shape the blueprint's scope mapping produces, the session
+// cookie and CSRF. Nothing else in the suite touches any of it.
 //
-// The sequence is four hops and one parse:
-//
-//	GET  /api/v1/auth/login   -> 302 to Keycloak's authorization endpoint
-//	GET  (followed)           -> Keycloak's login page
-//	POST <the form's action>  -> 302 back to /api/v1/auth/callback
-//	GET  (followed)           -> session cookie set, 302 to "/"
-//
-// The only parsing is the one `action` attribute on the login form.
+// The sequence is in signIn's own comment, because it is the interesting part.
 
 // session is a signed-in console client plus the CSRF token its state-changing
 // calls have to echo back.
@@ -148,10 +117,146 @@ func (j *laxJar) has(host, name string) bool {
 	return ok
 }
 
-// formAction pulls the `action` URL out of Keycloak's login form. Keycloak
-// renders exactly one form on that page.
-var formAction = regexp.MustCompile(`(?i)<form[^>]+action="([^"]+)"`)
+// The identity provider's own origin. Sign-in leaves the console for it and
+// comes back, and every flow-executor call below is addressed here.
+const authURL = "http://auth.localhost"
 
+// flowPathMarker is how a URL announces that authentik wants a flow walked. The
+// browser application is served at /if/flow/<slug>/ and reads its query string;
+// the executor API answers for the same slug and query.
+const flowPathMarker = "/if/flow/"
+
+// flowStep is as much of the executor's answer as this suite needs.
+//
+// `component` names what the flow wants next — an identification stage, a
+// password stage, a consent — and the sentinel `xak-flow-redirect` means it wants
+// nothing and the caller should follow `to`.
+type flowStep struct {
+	Component      string                      `json:"component"`
+	To             string                      `json:"to"`
+	ResponseErrors map[string][]flowFieldError `json:"response_errors"`
+}
+
+type flowFieldError struct {
+	String string `json:"string"`
+	Code   string `json:"code"`
+}
+
+func (s flowStep) errorText() string {
+	var out []string
+	for field, errs := range s.ResponseErrors {
+		for _, e := range errs {
+			out = append(out, field+": "+e.String)
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// executeFlow asks one flow what it wants and answers it, returning the redirect
+// it ends in.
+//
+// The GET first is not redundant: a flow that needs no input — the consent flow,
+// under implicit consent — answers the GET with the redirect directly, and
+// POSTing to it would submit an empty body to a stage that never asked for one.
+//
+// A stage that rejects what it was given re-renders ITSELF rather than returning
+// an error status, which is deliberate on authentik's part: the identification
+// stage must not reveal whether the account exists, so a wrong identifier and a
+// wrong password fail identically. Correct, and it means a failed sign-in here
+// looks like "the flow asked again" rather than like a 401.
+func executeFlow(client *http.Client, flow *url.URL, payload map[string]string) (flowStep, error) {
+	slug, _, ok := strings.Cut(strings.TrimPrefix(flow.Path, flowPathMarker), "/")
+	if !ok || slug == "" {
+		return flowStep{}, fmt.Errorf("no flow slug in %s", flow)
+	}
+	ex := fmt.Sprintf("%s/api/v3/flows/executor/%s/?query=%s", authURL, slug, url.QueryEscape(flow.RawQuery))
+
+	step, err := flowCall(client, http.MethodGet, ex, nil)
+	if err != nil {
+		return flowStep{}, err
+	}
+	if step.Component == "xak-flow-redirect" {
+		return step, nil
+	}
+
+	step, err = flowCall(client, http.MethodPost, ex, payload)
+	if err != nil {
+		return flowStep{}, err
+	}
+	if step.Component != "xak-flow-redirect" {
+		msg := step.errorText()
+		if msg == "" {
+			// The anti-enumeration re-render: no error is reported because
+			// reporting one would say whether the account exists.
+			msg = "the stage re-rendered without saying why, which is what a wrong identifier or a wrong password looks like"
+		}
+		return flowStep{}, fmt.Errorf("flow %s stopped at %q: %s", slug, step.Component, msg)
+	}
+	return step, nil
+}
+
+// flowCall is one request to the executor. `Accept: application/json` is what
+// separates the API from the browser application: without it the same URL serves
+// the HTML shell and the decode fails on a `<`.
+func flowCall(client *http.Client, method, ex string, payload map[string]string) (flowStep, error) {
+	var body io.Reader
+	if payload != nil {
+		enc, err := json.Marshal(payload)
+		if err != nil {
+			return flowStep{}, err
+		}
+		body = bytes.NewReader(enc)
+	}
+	req, err := http.NewRequest(method, ex, body)
+	if err != nil {
+		return flowStep{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return flowStep{}, fmt.Errorf("%s %s: %w", method, ex, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return flowStep{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return flowStep{}, fmt.Errorf("%s %s: got %d: %s", method, ex, resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var step flowStep
+	if err := json.Unmarshal(raw, &step); err != nil {
+		return flowStep{}, fmt.Errorf("decoding the flow step from %s: %w", ex, err)
+	}
+	return step, nil
+}
+
+// signIn completes a browser-less sign-in against authentik and returns a session
+// the management API accepts.
+//
+// THE SHAPE OF THIS IS NOT A FORM POST, AND THAT IS THE WHOLE REASON IT IS LONG.
+// authentik serves no server-rendered login form: its sign-in is a browser
+// application driven by a JSON flow executor, so the only way in without a
+// browser is to walk the flows the way that application does.
+//
+//	GET  /api/v1/auth/login          -> 302 chain, landing on /if/flow/<slug>/?…
+//	GET  /api/v3/flows/executor/…    -> what does this flow want?
+//	POST /api/v3/flows/executor/…    -> identifier and password, TOGETHER
+//	     (the identification stage renders the password field itself, so this is
+//	     one submission rather than two — see the blueprint, which sets
+//	     password_stage to close a username oracle)
+//	follow `to`                      -> which may land on ANOTHER flow
+//	…                                -> until it lands somewhere that is not one
+//	                                    (the callback), and the session exists
+//
+// The second flow is the part that is easy to miss: authorization hands off to a
+// consent flow, which auto-approves under the blueprint's implicit-consent
+// setting but must still be EXECUTED. A client that stops after the password is
+// accepted gets a session cookie for authentik and none for us, and the symptom
+// is a 401 from /api/v1/me immediately after a sign-in that plainly worked.
 func signIn(user, password string) (*session, error) {
 	jar := newLaxJar()
 	client := &http.Client{Jar: jar, Timeout: 30 * time.Second}
@@ -160,30 +265,50 @@ func signIn(user, password string) (*session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("login redirect: %w", err)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
-	if err != nil {
-		return nil, err
-	}
-	m := formAction.FindSubmatch(body)
-	if m == nil {
-		return nil, fmt.Errorf("no login form at %s (status %d)", resp.Request.URL, resp.StatusCode)
-	}
-	action := html.UnescapeString(string(m[1]))
-
-	resp, err = client.PostForm(action, url.Values{
-		"username": {user}, "password": {password}, "credentialId": {""},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("credential post: %w", err)
-	}
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)) //nolint:errcheck // draining
 	resp.Body.Close()
 
+	// Where the redirect chain stopped. Go follows 302s, so this is the flow page
+	// the browser would be looking at.
+	landed := resp.Request.URL
+	if !strings.Contains(landed.Path, flowPathMarker) {
+		return nil, fmt.Errorf("expected to land on an authentik flow, got %s (status %d)", landed, resp.StatusCode)
+	}
+
+	// Only the FIRST flow is answered with credentials. Everything after it —
+	// consent, and anything a future blueprint adds — is walked with an empty
+	// body, which is what the browser sends for a stage that needs no input.
+	payload := map[string]string{"uid_field": user, "password": password}
+	for hop := 0; hop < 8; hop++ {
+		if !strings.Contains(landed.Path, flowPathMarker) {
+			break // no longer in a flow: this is the callback, and we are done
+		}
+		step, err := executeFlow(client, landed, payload)
+		if err != nil {
+			return nil, err
+		}
+		payload = nil
+
+		next, err := landed.Parse(step.To)
+		if err != nil {
+			return nil, fmt.Errorf("flow redirect %q: %w", step.To, err)
+		}
+		r, err := client.Get(next.String())
+		if err != nil {
+			return nil, fmt.Errorf("following the flow to %s: %w", next, err)
+		}
+		io.Copy(io.Discard, io.LimitReader(r.Body, 1<<20)) //nolint:errcheck // draining
+		r.Body.Close()
+		landed = r.Request.URL
+	}
+	if strings.Contains(landed.Path, flowPathMarker) {
+		return nil, fmt.Errorf("still walking flows after 8 hops, last at %s — a stage is asking for something this suite does not answer", landed)
+	}
+
 	if !jar.has("console.localhost", oidcauth.SessionCookieName) {
-		return nil, fmt.Errorf("no %s cookie after signing in as %s (last status %d, at %s) — "+
-			"wrong password, or the flow failed before the callback",
-			oidcauth.SessionCookieName, user, resp.StatusCode, resp.Request.URL)
+		return nil, fmt.Errorf("no %s cookie after signing in as %s (landed on %s) — "+
+			"the flows completed but our callback did not establish a session",
+			oidcauth.SessionCookieName, user, landed)
 	}
 
 	s := &session{user: user, client: client, jar: jar}
