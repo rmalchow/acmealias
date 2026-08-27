@@ -35,16 +35,22 @@ the bottom.
    did it right. Without it the failure is silent for weeks and then arrives as an expired
    certificate. It depends on nothing above it — the check is already built and merely hidden — so
    its position here is about when it is NEEDED, not what it needs.
-6. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+6. **`domain-activation`** — a domain is offline until we have seen its delegation, then stays
+   online. This is the third of the three controls that make the abuse model manageable, alongside
+   five projects on a personal account and per-domain billing on a team one; it is the one that
+   makes the other two mean anything, because without it a domain nobody controls is
+   indistinguishable from one somebody does. It pairs with the change above — that one tells a
+   customer what is wrong, this one decides whether we do any work for them at all.
+7. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-7. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+8. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-8. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+9. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-9. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
+10. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
 
 `staff-plane` sits outside the numbering. Its suspension button and blocklists are needed **before
 the first customer we do not know personally**, wherever that falls; its support-access machinery
