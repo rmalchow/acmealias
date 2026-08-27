@@ -365,37 +365,50 @@ accounts is fine — they are ours. A listing of all *domains* is not, and is no
 offered: domains are reachable only by supplying one. The difference is that the
 first is a fact about our business and the second is a map of our customers'.
 
-### S17. One box, because support pastes rather than chooses
+### S17. One filter, split on spaces, every part a substring of something
 
-An account has three identifiers and is about to have a fourth, and which one is
-usable depends on what kind of account it is:
-
-| Handle | Unique | Speakable on a call | Works for a personal account |
-| --- | --- | --- | --- |
-| id (UUIDv7) | yes | **no** — 36 characters of hex | yes |
-| slug | yes | yes | **no** — C1 makes a personal account not slug-addressable |
-| name | no | yes | derived from the user |
-| owner email | yes — one personal account per user | yes | **yes, and it is the natural key** |
-
-So there is no single answer, and the handle differs by kind: a team account is
-found by its slug, and a personal account has none but its owner's email — which
-is fitting, since a personal account *is* its user.
-
-**The search takes one box, not four labelled fields.** A support engineer has
-something in their clipboard that a customer gave them and does not know, and
-should not have to decide, which of our four categories it belongs to. Four
-inputs makes that their problem; one makes it ours, and ours is trivial because
-the shapes barely overlap:
+The account list has a single filter box. Its contents are split on whitespace,
+and **every part must be a substring of at least one of** the account's owner
+email, its slug, or its id. Parts are ANDed; which field each part matched is not
+required to be the same one.
 
 ```
-  contains @        →  owner email
-  36 chars, dashes  →  account id
-  contains a dot    →  domain name
-  otherwise         →  slug, then account name, then project name
+  "acme ruben"   →  keeps accounts where "acme"  is in the email, slug or id
+                    AND                  "ruben" is in the email, slug or id
 ```
 
-**Rejected: four fields.** It reads as more precise and is worse in the only
-moment that matters, which is somebody pasting a string mid-conversation.
+**Why this rather than deciding what each part is.** An earlier draft sniffed the
+shape of the input — an `@` means an email, thirty-six characters means an id —
+which is clever, brittle, and solves a problem nobody has. A support engineer
+pasting `ruben@example.com` does not care whether we classified it; they care
+that the right account is on screen. Substring-of-anything gets there without a
+taxonomy, and it degrades gracefully: a half-remembered fragment still narrows.
+
+**Why AND rather than OR.** More typing must mean fewer results, or the filter
+punishes the person for knowing more. OR does the opposite — a second word makes
+the list longer — which is the behaviour that trains people to type one word and
+scroll.
+
+**Case-insensitive**, because an email is and a slug may as well be. Nobody
+retypes a filter in another case on purpose.
+
+**The ceiling, stated rather than discovered.** Substring matching is
+`ILIKE '%…%'`, which no ordinary index serves — every query is a scan of the
+accounts table. That is correct for a staff tool over a business's worth of
+accounts and stops being correct at some size, at which point the answer is a
+trigram index rather than a different interface. Worth knowing before somebody
+concludes the design was wrong.
+
+**Which fields, and one that is deliberately missing.** Owner email, slug and id.
+Account *name* is not among them, and that is worth a second look: a company name
+is often exactly what a customer says on the phone. It is left out because a slug
+is chosen by the customer and a name is free text — but if support finds itself
+asking "what is your slug?", the name belongs in the list, and adding it is one
+more `OR` rather than a redesign.
+
+Note what this means for a personal account: it has no slug (C1), so it is found
+by its owner's email or its id, which is the same conclusion S18 reaches from the
+other direction.
 
 ### S18. There is deliberately no account number yet, and a constraint for when there is
 
