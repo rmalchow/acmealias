@@ -218,43 +218,73 @@ So: no roles UI, no memberships, no invitations in a personal account; the key
 dialog keeps its grant composer everywhere. Anyone deleting the roles machinery
 along with the roles screen will break key scoping.
 
-## C11. Nothing is hidden. Two reasons, two sentences
+## C11. One affordance carries the message, not a row of disabled ones
 
-Switching accounts changes what the console offers, because the two kinds of
-account genuinely have different capabilities. The tempting way to express that
-is to leave the missing screens out. **It is the wrong way, and for the same
-reason permission-based hiding was wrong.**
+Two rules that look contradictory, and the line between them is *where* the thing
+sits rather than *why* it is unavailable.
 
-The rule the console already follows is that a gated control says *this exists,
-but you are not allowed to use it* — because an absent button teaches nothing,
-and somebody who cannot do a thing cannot tell an unavailable feature from one
-they lack the rights for. An account-kind difference has exactly the same
-failure: a personal-account user who never sees Members does not learn that team
-accounts have them. They learn that this product does not do that.
+**Inside a screen, nothing is hidden.** A control the caller lacks a grant for is
+shown and disabled and says so, because an absent button teaches nothing: someone
+who cannot do a thing cannot tell an unavailable feature from one they lack the
+rights for. That rule is already in force and does not change.
 
-So nothing is hidden. What differs is the sentence:
+**In the navigation, a screen the account does not have is not listed.** An
+earlier draft of this decision said to list them disabled, for symmetry. That is
+wrong, and the reason is that navigation is not a set of controls — it is the map
+of the product. A map with four greyed-out destinations does not read as "you
+could go here"; it reads as clutter, on every screen, forever, for a customer who
+may never want any of them.
 
-| Situation | Treatment | What it says | What fixes it |
-| --- | --- | --- | --- |
-| The caller lacks a grant | shown, disabled | you are not permitted to do this | somebody grants it |
-| The account kind has no such thing | shown, disabled | this does not exist in a personal account | a team account |
+What the disabled-control rule is actually protecting is the *remedy*: somebody
+must be able to learn that the capability exists and what would unlock it. In
+navigation that is served better by **one affordance that names the remedy** than
+by four that describe the lack:
 
-The distinction is not decorative. **"Forbidden" and "does not exist" have
-different remedies**, and telling somebody the wrong one wastes their time in a
-specific way: a personal-account owner told they lack permission will go looking
-for whoever can grant it, and there is nobody, because there is no grant. The
-second sentence has to name the actual remedy, which is a different kind of
-account.
+```
+  PERSONAL                          TEAM (funded)
+  ────────                          ─────────────
+  Projects                          Projects
+  Upgrade  ◀── the whole message    Audit
+                                    Settings
+                                    (Live challenges — later)
+```
 
-It also means the console is where a customer discovers what a team account is
-for — at the moment they wanted the thing, rather than on a pricing page they
-were not reading.
+`Upgrade` is not a disabled `Settings`. It is the positive form of the same
+sentence, pointing at what to do rather than at what is missing, and it costs one
+entry instead of several.
 
-**Settings exists in both kinds.** It holds what administers the account rather
-than its inventory — members, the roles they hold, and credits. In a personal
-account those three are present and disabled, each saying that it belongs to a
-team account. That is one route with a consistent shape, rather than a route that
-appears and disappears under the user as they switch.
+The distinction to hold on to: **"forbidden" and "does not exist" still have
+different remedies, and must never share wording.** A personal-account owner told
+they lack permission goes looking for whoever can grant it, and there is nobody.
+What changes here is only that the second sentence is delivered once, by
+`Upgrade`, rather than repeated by every screen that is not there.
+
+## C12. The account switcher is a search box with a way to buy the next one
+
+The navbar carries a searchable select of the accounts a user may act in, and an
+**Add account** action beside it.
+
+- **Searchable**, because a user who pays for several accounts will have several,
+  and a dropdown that requires scrolling is a dropdown that gets the wrong one
+  picked.
+- **Inert with one account.** A user with only their personal account sees the
+  control showing that account and nothing to choose. It is present rather than
+  absent so the navbar does not change shape the moment they buy their second —
+  and it is inert rather than disabled, because there is nothing wrong.
+- **Add account is the buy flow.** A team account is created by paying (C1), so
+  "add" and "buy" are the same act. It opens an explanation of what a team account
+  is and a **Buy now** that enters checkout (C8).
+
+`Upgrade` in a personal account's navigation and `Add account` beside the switcher
+reach the same place. That is deliberate rather than redundant: one is found by a
+person looking at what this account cannot do, the other by a person looking at
+which account they are in. They are two entrances to one room, and neither is
+where the other person would look.
+
+**Live challenges is deferred**, not dropped. It is the only screen that shows
+what the service is doing *right now*, which is worth having when something is
+wrong and worth nothing the rest of the time. It stays out of the first
+navigation and is reconsidered when somebody has actually wanted it.
 
 ## C10. Removing the internal edition is part of this change, not a follow-up
 

@@ -30,7 +30,7 @@
 - [ ] 3.1a Derive its name from the user; it is not slug-addressable and not renameable by the tenant, since there is nothing to disambiguate (C1)
 - [ ] 3.1b Creating a team account goes through checkout (group 5) and does not exist until the first credit lands
 - [ ] 3.2 Seed a new team account with the default roles and its owner as an unrestricted member
-- [ ] 3.3 A personal account has no roles, no memberships and no invitations — the API routes refuse rather than returning empty, so a client learns the difference. The CONSOLE still shows them, disabled: refusing at the API and hiding in the interface are different questions (C9, C11)
+- [ ] 3.3 A personal account has no roles, no memberships and no invitations — the API routes refuse rather than returning empty, so a client learns the difference from an account that merely has none yet (C9)
 - [ ] 3.4 KEEP the grant model live in personal accounts for API keys, including the subset rule. A key narrower than its holder is good practice in an account of one, and this is the task most likely to be deleted by accident (C9)
 - [ ] 3.5 Enforce the project quota per account, as a quota and not as a permission: a refusal says there is no room and what to do about it, not that the caller may not
 - [ ] 3.6 Transfer of ownership for team accounts, audited, with the recipient's membership established in the same transaction
@@ -54,19 +54,27 @@
 
 ## 6. The console
 
-- [ ] 6.1 The account picker shows the personal account as a distinct entry — "Personal", not a named row among the team ones — and it is always present (C1)
-- [ ] 6.1a The picker shows a suspended team account as suspended rather than omitting it: the owner has to be able to reach it to pay for it (C4)
-- [ ] 6.2 The suspended-account screen for an owner: the balance, and checkout. Nothing else (C5)
-- [ ] 6.3 A member of a suspended account is told the account is suspended and that its owner can restore it, which is a different sentence from "you do not have permission"
-- [ ] 6.4 The checkout flow: enter, choose an amount, return to the account with the balance visible
-- [ ] 6.5 Add a **Settings** route holding the three things that administer an account rather than its inventory: members, role assignments, and credits. One route with a consistent shape in both kinds of account (C11)
+- [ ] 6.1 The account switcher is a **searchable** select in the navbar, with an **Add account** action beside it (C12)
+- [ ] 6.1a With one account it is inert — present, showing that account, nothing to choose. Present rather than absent so the navbar does not change shape the moment a second account is bought (C12)
+- [ ] 6.1b A suspended team account is listed and shown as suspended rather than omitted: the owner has to reach it to pay for it (C4)
+- [ ] 6.1c **Add account** opens an explanation of what a team account is, with a **Buy now** that enters checkout. Creating and buying are the same act (C1, C12)
+
+- [ ] 6.2 Navigation for a **personal** account: `Projects` and `Upgrade`. Nothing else (C11)
+- [ ] 6.2a Navigation for a **team** account: `Projects`, `Audit`, `Settings` (C11)
+- [ ] 6.2b `Upgrade` and `Add account` reach the same place. Two entrances to one room — one found by someone looking at what this account cannot do, the other by someone looking at which account they are in (C12)
+- [ ] 6.2c Re-render the navigation on an account switch without a reload, since the switch changes what is in it
+- [ ] 6.2d `Live challenges` stays OUT of the first navigation. Deferred rather than dropped, and reconsidered when somebody has wanted it (C12)
+
+- [ ] 6.3 THE NAVIGATION IS THE ONE PLACE THINGS ARE LEFT OUT. Inside a screen, a control the caller lacks a grant for stays visible and disabled with a reason — that rule does not change, and this task exists because the two look contradictory and are not (C11)
+- [ ] 6.4 Keep "forbidden" and "does not exist" as different sentences with different remedies, wherever both can occur. A personal-account owner told they lack permission goes looking for whoever can grant it, and there is nobody (C11)
+
+- [ ] 6.5 **Settings**, in a team account only: members, role assignments, and credits. What administers the account, as opposed to the inventory it holds
 - [ ] 6.5a Move the existing `/roles` screen into Settings; it stops being a top-level entry
-- [ ] 6.5b NOTHING IS HIDDEN. In a personal account, Settings still shows members, roles and credits — present and disabled, each saying it belongs to a team account. A route that appears and disappears as the user switches is the same mistake as an absent button (C11)
-- [ ] 6.5c Two reasons, two sentences, and they must not be interchanged: "you are not permitted to do this" is fixed by somebody granting it; "this does not exist in a personal account" is fixed by a different kind of account. Telling a personal-account owner they lack permission sends them looking for whoever can grant it, and there is nobody (C11)
-- [ ] 6.5e Add the second reason string alongside NOT_PERMITTED rather than reusing it, so the two cannot drift into one message that is wrong for both
-- [ ] 6.5d Re-render the navigation on an account switch without a reload, since the switch changes what is in it
-- [ ] 6.6 Keep the grant composer in the API key dialog everywhere, personal included (C9, 3.4)
-- [ ] 6.7 Warn before zero, not at it. The refusal is soft — renewals stop and the customer has weeks — so the warning is the thing that actually protects them, and `metering-and-credits` says so itself (C4)
+- [ ] 6.6 The suspended-account screen for an owner: the balance, and checkout. Nothing else (C5)
+- [ ] 6.7 A member of a suspended account is told the account is suspended and that its owner can restore it — a different sentence from "you do not have permission"
+- [ ] 6.8 The checkout flow: enter, choose an amount, return to the account with the balance visible
+- [ ] 6.9 Keep the grant composer in the API key dialog everywhere, personal included (C9, 3.4)
+- [ ] 6.10 Warn before zero, not at it. The refusal is soft — renewals stop and the customer has weeks — so the warning is what actually protects them, and `metering-and-credits` says so itself (C4)
 
 ## 7. What the removal breaks, and proving it does not
 

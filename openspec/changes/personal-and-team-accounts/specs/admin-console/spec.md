@@ -6,13 +6,23 @@ The console SHALL present the accounts a user may act in, and that list SHALL
 always include their personal account. The personal account SHALL be presented as
 a distinct entry rather than as one named account among the team ones.
 
+The picker SHALL be searchable, and SHALL be present but inert for a user with a
+single account, so that the navigation does not change shape when a second
+account is obtained. It SHALL be accompanied by an action that obtains a new team
+account, which SHALL lead to the same place as any other offer to obtain one.
+
 A suspended team account SHALL appear in the picker for its owner rather than
 being omitted, since the owner is the only person who can restore it.
 
 #### Scenario: A new user has somewhere to go
 
 - **WHEN** a user with no team accounts opens the picker
-- **THEN** their personal account is offered
+- **THEN** their personal account is offered, and the picker offers nothing to switch to
+
+#### Scenario: Obtaining an account is reachable from the picker
+
+- **WHEN** a user opens the action beside the picker
+- **THEN** they are told what a team account is and offered a way to buy one
 
 #### Scenario: A suspended account is reachable by its owner
 
@@ -29,22 +39,30 @@ being omitted, since the owner is the only person who can restore it.
 The console's navigation SHALL reflect the capabilities of the selected account,
 and SHALL change when the selection changes without requiring a reload.
 
-A capability the selected account does not have SHALL NOT be hidden. It SHALL be
-presented and disabled, stating that it does not exist in this kind of account.
+Navigation SHALL list only the screens the selected account has. Where an account
+kind lacks capabilities, the console SHALL offer a single affordance naming what
+would unlock them, rather than listing the absent screens.
 
-That statement SHALL be distinct from the one used where a caller lacks
-authority. A refusal that a grant would lift and a refusal that only a different
-kind of account would lift SHALL NOT share wording, because they do not share a
-remedy.
+Within a screen, a control the caller merely lacks authority for SHALL remain
+visible and disabled, stating why.
 
-#### Scenario: A personal account shows what it does not have
+Where both refusals can occur, they SHALL NOT share wording: a refusal a grant
+would lift and a refusal only a different kind of account would lift do not share
+a remedy.
+
+#### Scenario: A personal account's navigation names the remedy once
 
 - **WHEN** a personal account is selected
-- **THEN** member and role management are shown, disabled, and state that they belong to a team account
+- **THEN** the navigation offers its projects and a single way to obtain a team account, and does not list the screens a team account would have
+
+#### Scenario: A control inside a screen is not removed
+
+- **WHEN** a caller lacks the grant for a control on a screen the account does have
+- **THEN** the control is shown, disabled, and states why
 
 #### Scenario: The two refusals do not share wording
 
-- **WHEN** a control is unavailable because the account kind lacks the capability
+- **WHEN** a capability is unavailable because of the account kind
 - **THEN** it does not say the caller lacks permission
 
 #### Scenario: Switching accounts changes the navigation
