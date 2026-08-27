@@ -51,6 +51,7 @@ account at the bottom. It is two different objects:
 | Other people in it | none | invited, and given roles |
 | Roles | none — there is nobody to give one to | the whole role and grant model |
 | Cost | free | credits |
+| Projects | five | unlimited — credit is the only limit |
 | Works when | always | only while `credits > 0` |
 
 The personal account is not a trial of the team account and does not become one.
@@ -137,6 +138,42 @@ middle step.
 The one property it must keep is that **the credit is a real charge**: the same
 row, the same audit entry, the same balance change that a real payment will
 produce. A fake that writes different state teaches nothing.
+
+## What Changes
+
+- **Two kinds of account.** `personal`, implicit and free and limited to five
+  projects; `team`, created by paying, with no project limit because credit is
+  its limit.
+- **An owner**, singular, per account — immutable on a personal account,
+  transferable on a team one.
+- **A credit balance**, and a checkout that raises it without a payment
+  processor.
+- **Suspension at zero**: members cannot select the account, the challenge API
+  refuses with 402, and the owner sees the balance and a way to fix it.
+- **Roles become a team feature**; the grant model stays live everywhere, because
+  it is also how API keys are scoped.
+- **The internal edition is removed** — the bootstrap scope, automatic account
+  selection, the group-to-role mapping, derived membership, the four global roles
+  and Constraint 1.
+- **The console's navigation follows the account**: `Projects` and `Upgrade` in a
+  personal account, `Projects`, `Audit` and `Settings` in a team one, with a
+  searchable account switcher and an "add account" that is the buy flow.
+
+## Capabilities
+
+- `accounts-and-tenancy` — what an account is, what limits it, and what funds it.
+- `identity-and-roles` — roles become per-account data in team accounts only.
+- `acme-challenge-api` — challenges are refused for an account that is not usable.
+- `admin-console` — the picker, the navigation, and Settings.
+
+## Impact
+
+- Removes `store.ScopeForBootstrap`, `authz.Mapping`, the `ACME_*_GROUP` settings
+  and automatic account selection in `internal/oidcauth`.
+- Rewrites the acceptance suite's fixtures: there is no shared account and no
+  group-derived role.
+- `account-invitations` depends on this change; team accounts are the only thing
+  anyone is invited into.
 
 ## What this does not solve, and should be read as a decision
 

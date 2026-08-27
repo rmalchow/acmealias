@@ -259,6 +259,38 @@ they lack permission goes looking for whoever can grant it, and there is nobody.
 What changes here is only that the second sentence is delivered once, by
 `Upgrade`, rather than repeated by every screen that is not there.
 
+## C13. Five projects in a personal account. In a team account, credit is the only limit
+
+A personal account holds **five projects**. A team account has **no project
+quota at all** — what limits it is the balance.
+
+That asymmetry is the point rather than an inconsistency. A team account is
+metered: what it does draws the balance down, and running more projects costs
+more. Capping projects on top of that would charge twice for the same growth,
+once in money and once in permission, and the second charge buys nothing — a
+customer who is paying for what they use has already answered the question a
+quota exists to ask.
+
+The free account is the one that needs a number, because nothing else limits it.
+Five is that number.
+
+**It is configuration, not a literal in the code.** The number is a pricing
+decision wearing an engineering hat, pricing changes on a different clock from
+deployments, and the first time somebody wants one customer to have six is the
+day a constant becomes a migration.
+
+It is also **a quota and not a permission**, which the console has to keep
+straight (C11 has the same shape for a different pair):
+
+| | Permission | Quota |
+| --- | --- | --- |
+| The question | *may* this caller do it | is there *room* |
+| Refused with | 403, until somebody grants it | 409, until you delete one or move to a team account |
+| Fixed by | a grant | deleting a project, or paying |
+
+Collapsing them means "upgrade to add a project" and "ask an administrator for a
+grant" become the same error, and no single message is right for both.
+
 ## C12. The account switcher is a search box with a way to buy the next one
 
 The navbar carries a searchable select of the accounts a user may act in, and an

@@ -32,7 +32,9 @@
 - [ ] 3.2 Seed a new team account with the default roles and its owner as an unrestricted member
 - [ ] 3.3 A personal account has no roles, no memberships and no invitations — the API routes refuse rather than returning empty, so a client learns the difference from an account that merely has none yet (C9)
 - [ ] 3.4 KEEP the grant model live in personal accounts for API keys, including the subset rule. A key narrower than its holder is good practice in an account of one, and this is the task most likely to be deleted by accident (C9)
-- [ ] 3.5 Enforce the project quota per account, as a quota and not as a permission: a refusal says there is no room and what to do about it, not that the caller may not
+- [ ] 3.5 Enforce a project quota of **five** on personal accounts. Team accounts have NO project quota — credit is their only limit, and capping projects on top of metering charges twice for the same growth (C13)
+- [ ] 3.5a The limit is CONFIGURATION, not a constant in the code. It is a pricing decision, pricing changes on a different clock from deployments, and the first time one customer needs six is the day a constant becomes a migration (C13)
+- [ ] 3.5b Refuse over-quota as a QUOTA, not as a permission: 409 and "there is no room, here is what to do", never 403 and "you may not". Collapsing the two makes one message that is wrong for both (C13, C11)
 - [ ] 3.6 Transfer of ownership for team accounts, audited, with the recipient's membership established in the same transaction
 
 ## 4. Funded, and what suspension means

@@ -74,6 +74,31 @@ Adding credit SHALL NOT lift a staff suspension.
 - **WHEN** credit is added to an account suspended by staff
 - **THEN** the balance increases and the account remains suspended
 
+### Requirement: A personal account is limited by a project quota; a team account is limited by its balance
+
+A personal account SHALL hold no more than a configured number of projects. The
+limit SHALL be configuration rather than a compiled-in constant.
+
+A team account SHALL NOT be subject to a project quota.
+
+Exceeding the quota SHALL be refused as a lack of room rather than as a lack of
+authority, and the refusal SHALL state what would resolve it.
+
+#### Scenario: A personal account fills up
+
+- **WHEN** a personal account at its limit creates another project
+- **THEN** it is refused, and the refusal says there is no room rather than that the caller may not
+
+#### Scenario: The refusal is not a permission error
+
+- **WHEN** the refusal above is returned to a caller who holds every grant
+- **THEN** it is still refused, and still on grounds of room
+
+#### Scenario: A team account has no project limit
+
+- **WHEN** a funded team account creates projects beyond the personal limit
+- **THEN** they are created
+
 ### Requirement: Credit is added through a checkout that records a real charge
 
 The service SHALL provide a checkout that credits an account by an amount chosen
