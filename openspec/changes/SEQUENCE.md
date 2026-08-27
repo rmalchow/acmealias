@@ -16,18 +16,24 @@ the bottom.
    database through a fresh migration chain — which is what finally showed that four cross-account
    reads had been silently emptied by row-level security, one of them stopping certificate issuance
    altogether. See task 11.4.*
-2. **`account-invitations`** — the entry path. While self-registration is closed, an invitation is
-   the only way a person becomes a user.
-3. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+2. **`personal-and-team-accounts`** — what an account IS, and what makes one work. Every user gets
+   an implicit personal account; a team account is created by paying and works only while funded.
+   It also removes the internal edition, which is why it comes before everything rather than
+   alongside it: "every user has their own account" and "everybody shares the one account created
+   at migration time" cannot both be true, so there is no order in which this is optional.
+3. **`account-invitations`** — the entry path into a TEAM account. While self-registration is
+   closed, an invitation is the only way a person joins one. It now depends on the change above,
+   because team accounts do not exist without it.
+4. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-4. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+5. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-5. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+6. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-6. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
+7. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
 
 `staff-plane` sits outside the numbering. Its suspension button and blocklists are needed **before
 the first customer we do not know personally**, wherever that falls; its support-access machinery
@@ -45,7 +51,9 @@ answering challenges for the first customers, who are people we know and enrol b
 ## Triggers, not dates
 
 - **`metering-and-credits`** waits until manual credit grants stop being reasonable — a count of
-  customers, not a date.
+  customers, not a date. Note that the BALANCE arrives earlier, with
+  `personal-and-team-accounts`: that change adds the number, the checkout that raises it and what
+  happens at zero. What waits is the ledger that draws it down.
 - **`public-edition`'s registration switch** and payment integration wait until strangers arrive.
   Both are built and inert by then, so opening them is configuration.
 - **`staff-plane`'s suspension path** must exist before the first stranger. Discovering it is
