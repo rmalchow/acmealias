@@ -5,7 +5,8 @@
 # Everything runs in containers, including the Go binary (air) and the Angular
 # dev server (ng serve) — both live-reload off the bind-mounted source.
 #
-#   up.sh            postgres, keycloak, coredns, api, web, dev traefik
+#   up.sh            postgres, authentik, mailpit, www, coredns, api, the two
+#                    Angular dev servers, dev traefik
 #   up.sh --acme     the above plus the `acme` profile: pebble (a fake CA),
 #                    a customer-like traefik-lb and a whoami behind it, so a
 #                    real DNS-01 issuance can be driven end to end.
@@ -43,11 +44,22 @@ if [ "$want_acme" = 1 ]; then
   fi
 fi
 
+# The marketing site is served from build output, so it has to exist before the
+# container that mounts it starts — a missing directory becomes a root-owned one
+# created by Docker, and then an empty site.
+say "building the marketing site"
+"$REPO_DIR/site/build.sh"
+
 say "starting containers"
 compose up -d --remove-orphans
 
 wait_healthy postgres
-wait_healthy keycloak
+# The server answering is not the same thing as the stack being configured: the
+# WORKER applies the blueprint, and it does so after the server is healthy. A
+# sign-in attempted in that window fails with "client not found", which reads as
+# a configuration mistake and is a race (design K2).
+wait_healthy authentik-server
+wait_blueprint
 
 migrate_up
 

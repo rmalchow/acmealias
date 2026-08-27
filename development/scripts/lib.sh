@@ -20,7 +20,7 @@ cd "$DEV_DIR"
 # A first up.sh after a destroy.sh is therefore slow: empty module cache,
 # empty build cache, full `npm ci`. A warm one is fast. If it is not,
 # something is writing outside these mounts and that is worth finding.
-DATA_DIRS=(postgres keycloak mailpit go_mod go_build air_tmp node_modules ng_cache pebble traefik_lb)
+DATA_DIRS=(postgres authentik_media redis mailpit go_mod go_build air_tmp node_modules ng_cache_console ng_cache_admin pebble traefik_lb)
 
 # The API key handoff: seed.sh writes HTTPREQ_USERNAME/HTTPREQ_PASSWORD here
 # and traefik-lb reads it as an env_file. Compose refuses to run at all when
@@ -140,7 +140,7 @@ wait_running() {
 # wait_healthy <service> [timeout-seconds]
 # Blocks until compose reports the service healthy. Both services define a
 # healthcheck, so "running" is not good enough: postgres accepts TCP well
-# before it accepts queries, and keycloak serves a port for tens of seconds
+# before it accepts queries, and authentik serves a port for tens of seconds
 # before the realm is importable.
 wait_healthy() {
   local svc="$1" timeout="${2:-180}" waited=0 state
@@ -152,6 +152,31 @@ wait_healthy() {
       unhealthy) printf '\n'; die "$svc reported unhealthy — try: development/scripts/logs.sh $svc" ;;
     esac
     [ "$waited" -ge "$timeout" ] && { printf '\n'; die "$svc not healthy after ${timeout}s — try: development/scripts/logs.sh $svc"; }
+    sleep 2; waited=$((waited + 2)); printf '.'
+  done
+}
+
+# wait_blueprint blocks until the identity provider is actually CONFIGURED, which
+# is a later moment than it being healthy.
+#
+# authentik's worker applies blueprints in the background after the server starts
+# answering. In that window the server is up, the hostname resolves, and every
+# sign-in fails with "client not found" — which reads as a wrong client id and is
+# a race. What is waited on is the thing the service itself needs: the console
+# application's discovery document (design K2).
+wait_blueprint() {
+  local timeout="${1:-180}" waited=0
+  # The issuer comes from .env, which up.sh has no other reason to have loaded.
+  [ -n "${ACME_OIDC_ISSUER:-}" ] || load_env
+  printf '    waiting for the authentik blueprint '
+  while :; do
+    if curl -fsS --max-time 3 "${ACME_OIDC_ISSUER%/}/.well-known/openid-configuration" >/dev/null 2>&1; then
+      printf ' ok\n'; return 0
+    fi
+    [ "$waited" -ge "$timeout" ] && {
+      printf '\n'
+      die "the console application never appeared at ${ACME_OIDC_ISSUER} — blueprints are applied by the WORKER, so try: development/scripts/logs.sh authentik-worker"
+    }
     sleep 2; waited=$((waited + 2)); printf '.'
   done
 }

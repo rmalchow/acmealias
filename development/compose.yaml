@@ -15,7 +15,8 @@ name: acmeservice-dev
 # frontend/. See development/scripts/lib.sh, DATA_DIRS.
 #
 # Two profiles:
-#   (default)   postgres, keycloak, mailpit, coredns, api, web, traefik — the dev loop.
+#   (default)   postgres, authentik (server+worker+redis), mailpit, www, coredns,
+#               api, web-console, web-admin, traefik — the dev loop.
 #   acme        pebble, traefik-lb, whoami — a fake CA and a customer-like load
 #               balancer that really obtains a certificate over DNS-01.
 #               Opt in with: development/scripts/up.sh --acme
@@ -65,43 +66,101 @@ services:
       timeout: 2s
       retries: 30
 
-  # Reachable as `http://keycloak.localhost` from BOTH sides, which is the
-  # whole reason for the odd hostname: the OIDC issuer string has to be one
-  # URL that the browser on the host and the api container can each open. The
-  # host resolves any *.localhost name to loopback (RFC 6761; systemd-resolved
-  # and every current browser do this), and inside the network CoreDNS answers
-  # it from development/dns/hosts — in both cases with the dev Traefik's
-  # address, which routes the name on to this container's :8082.
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+  # The identity provider (design K1). Reachable as `http://auth.localhost` from
+  # BOTH sides, which is the whole reason for the odd hostname: the OIDC issuer
+  # string has to be one URL that the browser on the host and the api container
+  # can each open, because go-oidc requires the issuer it discovers to match the
+  # one it was configured with.
+  #
+  # Three containers where Keycloak was one. The server answers HTTP, the worker
+  # runs the background tasks INCLUDING blueprint application, and Redis is the
+  # queue between them. Its database lives in the postgres container this stack
+  # already runs (postgres-init/03-create-authentik-db.sh), not a second server.
+  #
+  # AUTHENTIK_BOOTSTRAP_* seeds the initial admin on the first start, so nobody
+  # has to walk the out-of-box setup flow to get a usable stack.
+  authentik-server:
+    image: ghcr.io/goauthentik/server:2024.10
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    command: server
+    networks:
+      default:
+        ipv4_address: 172.28.0.20
+    environment: &authentik-env
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_DB_NAME}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_DB_ROLE}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD}
+      AUTHENTIK_REDIS__HOST: redis
+      # Behind the overlay on plain HTTP. Without this authentik builds its
+      # redirect and issuer URLs from its own :9000 and every sign-in bounces to
+      # a URL the browser cannot reach.
+      AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: 172.28.0.0/24
+      AUTHENTIK_COOKIE_DOMAIN: localhost
+      AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
+      # Everything it sends goes to the stack's mail sink. The service name, not
+      # mail.localhost: SMTP does not traverse the HTTP overlay.
+      AUTHENTIK_EMAIL__HOST: mailpit
+      AUTHENTIK_EMAIL__PORT: "1025"
+      AUTHENTIK_EMAIL__USE_TLS: "false"
+      AUTHENTIK_EMAIL__FROM: no-reply@acmeservice.internal
+    volumes:
+      - ./authentik/blueprints:/blueprints/custom:ro
+      - ./data/authentik_media:/media
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.authentik.rule: "Host(`auth.localhost`)"
+      traefik.http.routers.authentik.entrypoints: web
+      traefik.http.services.authentik.loadbalancer.server.port: "9000"
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  # Same image, same environment, different command. The worker is what APPLIES
+  # BLUEPRINTS — so a stack whose worker is unhealthy comes up with an identity
+  # provider that has no groups, no users and no clients, and the failure looks
+  # like a login problem rather than a worker problem.
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2024.10
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    command: worker
+    environment: *authentik-env
+    volumes:
+      - ./authentik/blueprints:/blueprints/custom:ro
+      - ./data/authentik_media:/media
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  # The queue between the two above, and nothing else uses it.
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped
     dns: ["172.28.0.53"]
     networks:
       default:
-        ipv4_address: 172.28.0.20
-    command: start-dev --import-realm
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-      KC_HOSTNAME: ${KC_HOSTNAME}
-      KC_HTTP_PORT: ${KC_HTTP_PORT}
-      # Behind the overlay, so build redirect/issuer URLs from the forwarded
-      # host and scheme rather than from this container's own :8082.
-      KC_PROXY_HEADERS: xforwarded
-      KC_HEALTH_ENABLED: "true"
+        ipv4_address: 172.28.0.21
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     volumes:
-      - ./data/keycloak:/opt/keycloak/data
-      - ./realm:/opt/keycloak/data/import:ro
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.keycloak.rule: "Host(`keycloak.localhost`)"
-      traefik.http.routers.keycloak.entrypoints: web
-      traefik.http.services.keycloak.loadbalancer.server.port: "8082"
+      - ./data/redis:/data
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nhost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 3s
       timeout: 3s
-      retries: 40
+      retries: 20
 
   # The marketing site, at http://www.localhost.
   #
@@ -228,7 +287,11 @@ services:
       # The admin API under the CONSOLE's own origin. Higher priority than the
       # SPA's catch-all on the same hostname, so `/api` can never be shadowed
       # by it.
-      traefik.http.routers.admin-api.rule: "Host(`acme-console.localhost`) && PathPrefix(`/api`)"
+      # Both console origins. Each Angular application calls /api on its OWN
+      # origin, because the session and CSRF cookies are host-only: a call from
+      # admin.localhost to console.localhost would carry no session, and no CORS
+      # header can put one back.
+      traefik.http.routers.admin-api.rule: "(Host(`console.localhost`) || Host(`admin.localhost`)) && PathPrefix(`/api`)"
       traefik.http.routers.admin-api.priority: "100"
       traefik.http.routers.admin-api.entrypoints: web
       traefik.http.routers.admin-api.service: admin-api
@@ -239,7 +302,7 @@ services:
       # The console must keep calling its own origin's /api rather than this
       # one. The session and CSRF cookies are host-only and `SameSite=Lax`,
       # and browsers compute "same site" from the registrable domain —
-      # `localhost` is not a public suffix, so `acme-console.localhost` and
+      # `localhost` is not a public suffix, so `console.localhost` and
       # `acme-api.localhost` are two different sites, not two hosts of one
       # site. An XHR between them would carry no session cookie, and no CORS
       # header can put it back: SameSite is a browser rule, not a server one.
@@ -268,7 +331,22 @@ services:
   # hide anything the image installed, and this way the container's dependency
   # tree and a developer's host-side frontend/node_modules never touch each
   # other. It starts out empty, hence the `npm ci` guard.
-  web:
+  # Two applications, two dev servers, two origins. `ng serve` builds one project
+  # at a time, so the customer console and the staff console each get their own
+  # container — which also mirrors production, where they are two bundles chosen
+  # by hostname rather than one bundle with a staff section in it.
+  #
+  # They share node_modules — one workspace, one install — but NOT the Angular
+  # build cache, and that distinction is load-bearing rather than tidy. Two
+  # concurrent `ng serve` processes writing one .angular/cache serve each other's
+  # bundles: the symptom is console.localhost answering with the staff
+  # application, which looks like a routing mistake and is not. Found exactly
+  # that way.
+  #
+  # Only web-console installs. The `[ -d node_modules/@angular/cli ]` guard is a
+  # race when two containers start together against an empty mount, so web-admin
+  # waits for the install instead of joining it.
+  web-console:
     image: node:22-alpine
     restart: unless-stopped
     dns: ["172.28.0.53"]
@@ -278,26 +356,50 @@ services:
       - -c
       - >-
         [ -d node_modules/@angular/cli ] || npm ci;
-        exec npx ng serve admin --host 0.0.0.0 --disable-host-check --port 4200
+        exec npx ng serve console --host 0.0.0.0 --disable-host-check --port 4200
     labels:
       traefik.enable: "true"
-      # The catch-all for the console origin: everything the admin-api router
+      # The catch-all for the customer origin: everything the admin-api router
       # above did not claim, HMR websocket included — Traefik forwards
       # `Upgrade`/`Connection` on any matched route by default.
-      traefik.http.routers.spa.rule: "Host(`acme-console.localhost`)"
-      traefik.http.routers.spa.priority: "1"
-      traefik.http.routers.spa.entrypoints: web
-      traefik.http.services.spa.loadbalancer.server.port: "4200"
+      traefik.http.routers.spa-console.rule: "Host(`console.localhost`)"
+      traefik.http.routers.spa-console.priority: "1"
+      traefik.http.routers.spa-console.entrypoints: web
+      traefik.http.services.spa-console.loadbalancer.server.port: "4200"
     volumes:
       - ../frontend:/app
       - ./data/node_modules:/app/node_modules
-      - ./data/ng_cache:/app/.angular/cache
+      - ./data/ng_cache_console:/app/.angular/cache
+
+  web-admin:
+    image: node:22-alpine
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - >-
+        while [ ! -d node_modules/@angular/cli ]; do
+          echo "waiting for web-console to finish npm ci..."; sleep 3;
+        done;
+        exec npx ng serve admin --host 0.0.0.0 --disable-host-check --port 4201
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.spa-admin.rule: "Host(`admin.localhost`)"
+      traefik.http.routers.spa-admin.priority: "1"
+      traefik.http.routers.spa-admin.entrypoints: web
+      traefik.http.services.spa-admin.loadbalancer.server.port: "4201"
+    volumes:
+      - ../frontend:/app
+      - ./data/node_modules:/app/node_modules
+      - ./data/ng_cache_admin:/app/.angular/cache
 
   # Dev-only reverse proxy. It presents the console and its admin API at one
-  # origin, http://acme-console.localhost — design D12 explains why one origin
+  # origin, http://console.localhost — design D12 explains why one origin
   # matters (session cookie SameSite=Lax + CSRF, no dev-only CORS branch) — and
   # additionally gives the API and the IdP hostnames of their own,
-  # http://acme-api.localhost and http://keycloak.localhost. See the labels on
+  # http://acme-api.localhost and http://auth.localhost. See the labels on
   # the `api` service for why the console must NOT call the api hostname.
   #
   # Static address: the *.localhost names above are answered inside the stack
@@ -330,10 +432,11 @@ services:
         # definition (RFC 6761), and loopback:80 is this container's
         # published port. One URL, both sides.
         aliases:
-          - acme-console.localhost
+          - console.localhost
+          - admin.localhost
           - acme-api.localhost
           - acme-challenge.localhost
-          - keycloak.localhost
+          - auth.localhost
           - www.localhost
           - mail.localhost
     command:
@@ -348,7 +451,7 @@ services:
       # that only the *port* is open that way; the hostnames still have to
       # resolve, so a visitor needs the names in their own hosts file.
       - "80:80"
-    depends_on: [api, web, keycloak]
+    depends_on: [api, web-console, web-admin, authentik-server]
 
   # ---------------------------------------------------------------------------
   # profile: acme — the DNS-01 rehearsal rig (design D14, in miniature)

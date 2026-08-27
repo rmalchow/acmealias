@@ -19,24 +19,30 @@ fi
 
 echo
 printf '\033[1murls\033[0m\n'
-printf '  console (via dev traefik)  %s\n' "http://acme-console.localhost"
-printf '  admin API (same origin)    %s\n' "http://acme-console.localhost/api/v1"
+printf '  console (customer)         %s\n' "http://console.localhost"
+printf '  console (staff)            %s\n' "http://admin.localhost"
+printf '  admin API (same origin)    %s\n' "http://console.localhost/api/v1"
 printf '  admin API (own hostname)   %s\n' "http://acme-api.localhost/api/v1   # curl/adminctl, not the browser session"
 printf '  challenge API              %s\n' "http://acme-challenge.localhost   # lego httpreq; API-key auth"
-printf '  keycloak                   %s\n' "${KC_HOSTNAME}"
+printf '  identity provider          %s\n' "http://auth.localhost   # admin UI at /if/admin/"
+printf '  marketing site             %s\n' "http://www.localhost"
 printf '  mail (everything sent)     %s\n' "http://mail.localhost   # mailpit; senders use mailpit:1025 over SMTP"
 printf '  postgres                   %s\n' "localhost:5432/${POSTGRES_DB}"
 printf '  (:80 and :443 are bound on ALL interfaces — a second machine on the\n'
 printf '   LAN can reach them, given the hostnames in its own /etc/hosts)\n'
 
 echo
-printf '\033[1msign-in (realm %s)\033[0m\n' "acmeservice"
-printf '  %-20s %-22s %s\n' USER GROUP ROLE
-printf '  %-20s %-22s %s\n' admin-user         "$ACME_ADMIN_GROUP"         ADMIN
-printf '  %-20s %-22s %s\n' config-admin-user  "$ACME_CONFIG_ADMIN_GROUP"  CONFIG_ADMIN
-printf '  %-20s %-22s %s\n' key-rotation-user  "$ACME_KEY_ROTATION_GROUP"  KEY_ROTATION
-printf '  %-20s %-22s %s\n' read-only-user     "$ACME_READ_ONLY_GROUP"     READ_ONLY
-printf '  all passwords: devpass       keycloak admin: %s / %s\n' "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD"
+printf '\033[1msign-in\033[0m\n'
+printf '  %-22s %-22s %s\n' USER GROUP ROLE
+printf '  %-22s %-22s %s\n' admin@example.com  "$ACME_ADMIN_GROUP"         "ADMIN     (also the staff console)"
+printf '  %-22s %-22s %s\n' user@example.com   "$ACME_READ_ONLY_GROUP"     READ_ONLY
+printf '  the four the acceptance suite uses:\n'
+printf '  %-22s %-22s %s\n' admin-user         "$ACME_ADMIN_GROUP"         ADMIN
+printf '  %-22s %-22s %s\n' config-admin-user  "$ACME_CONFIG_ADMIN_GROUP"  CONFIG_ADMIN
+printf '  %-22s %-22s %s\n' key-rotation-user  "$ACME_KEY_ROTATION_GROUP"  KEY_ROTATION
+printf '  %-22s %-22s %s\n' read-only-user     "$ACME_READ_ONLY_GROUP"     READ_ONLY
+printf '  all passwords: devpass       authentik admin: akadmin / %s\n' "$AUTHENTIK_BOOTSTRAP_PASSWORD"
+printf '  only acme-admin reaches http://admin.localhost — the staff application is group-restricted\n'
 
 echo
 printf '\033[1mdata\033[0m\n'

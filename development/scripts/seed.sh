@@ -132,13 +132,13 @@ if acme_running; then
 fi
 
 # --- identity provider -------------------------------------------------------
-say "verifying keycloak realm"
-if curl -fsS --max-time 5 "${ACME_OIDC_ISSUER}/.well-known/openid-configuration" >/dev/null 2>&1; then
-  say "realm ready at ${ACME_OIDC_ISSUER}"
+say "verifying the identity provider"
+if curl -fsS --max-time 5 "${ACME_OIDC_ISSUER%/}/.well-known/openid-configuration" >/dev/null 2>&1; then
+  say "console application ready at ${ACME_OIDC_ISSUER}"
 else
-  warn "realm not answering at ${ACME_OIDC_ISSUER}"
-  warn "a realm is imported only into an EMPTY keycloak data directory; after editing"
-  warn "realm/*.json run development/scripts/reset.sh, not up.sh"
+  warn "the console application is not answering at ${ACME_OIDC_ISSUER}"
+  warn "blueprints are applied by the WORKER, not the server, so look there first:"
+  warn "  development/scripts/logs.sh authentik-worker"
 fi
 
 echo

@@ -39,7 +39,7 @@ import (
 // development/scripts/seed.sh; if any of them changes, this list changes with
 // it, and that coupling is the point (design A1).
 const (
-	consoleURL   = "http://acme-console.localhost"
+	consoleURL   = "http://console.localhost"
 	challengeURL = "http://acme-challenge.localhost"
 	serviceDNS   = "127.0.0.1:8153" // the api container's authoritative listener
 	fakeNetDNS   = "127.0.0.1:8053" // CoreDNS, playing the rest of the world
@@ -114,7 +114,7 @@ func TestMain(m *testing.M) {
 		// WITHOUT --acme, so after it there is no pebble and no traefik-lb —
 		// but it does run seed.sh, which is what writes
 		// development/data/acme-key.env, the API key traefik-lb authenticates
-		// to /present with. So: reset first (database, realm, fixtures, key),
+		// to /present with. So: reset first (database, blueprint, fixtures, key),
 		// then up --acme (fake CA and customer-like load balancer, which reads
 		// that key file as an env_file at start).
 		mustRun("./scripts/dev.sh", "reset", "--yes")
@@ -145,7 +145,7 @@ func mustRun(name string, args ...string) {
 }
 
 // run executes a command from the repository root with a generous timeout: a
-// cold `reset` builds the api image, runs `npm ci` and boots Keycloak.
+// cold `reset` builds the api image, runs `npm ci` and boots authentik.
 func run(name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
@@ -170,13 +170,16 @@ func compose(t *testing.T, args ...string) string {
 // --- readiness -------------------------------------------------------------
 
 // waitUsable blocks until every published surface the suite touches answers.
-// up.sh already waits for postgres and keycloak to be healthy and applies the
+// up.sh already waits for postgres and authentik to be ready and applies the
 // migrations; what is left is the api's own listeners and the acme profile.
 func waitUsable(timeout time.Duration) error {
 	checks := map[string]func() error{
 		"admin api": func() error { return expectStatus(consoleURL+"/api/v1/me", http.StatusUnauthorized) },
-		"keycloak": func() error {
-			return expectStatus("http://keycloak.localhost/realms/acmeservice/.well-known/openid-configuration", http.StatusOK)
+		// The identity provider being CONFIGURED, not merely up: authentik's
+		// worker applies blueprints after the server starts answering, and in
+		// that window every sign-in fails with "client not found" (design K2).
+		"identity provider": func() error {
+			return expectStatus("http://auth.localhost/application/o/acmeservice-console/.well-known/openid-configuration", http.StatusOK)
 		},
 		"authoritative dns": func() error {
 			_, err := query(serviceDNS, "dev.acmeservice.internal.", dns.TypeSOA)

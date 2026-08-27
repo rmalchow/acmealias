@@ -18,6 +18,28 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/oidcauth"
 )
 
+// THIS FILE STILL SPEAKS KEYCLOAK, AND THE STACK NO LONGER RUNS IT.
+//
+// The whole acceptance suite fails at sign-in until this is rewritten, and it
+// fails with "no login form at ..." — which is accurate and reads like a stack
+// problem. It is not: authentik serves no server-rendered login form at all. Its
+// sign-in is a browser application driven by a JSON flow executor, so the
+// sequence below has to become:
+//
+//	GET  /api/v1/auth/login             -> 302 to authentik, carrying the flow slug
+//	GET/POST /api/v3/flows/executor/... -> step through the identification and
+//	                                       password components, one JSON body each
+//	GET  (followed)                     -> 302 back to /api/v1/auth/callback
+//
+// This is task 4.1 of openspec/changes/authentik-and-self-signup (design K5),
+// and it was known and named before the swap rather than discovered after it.
+//
+// Two things below survive the rewrite and must not be thrown away with the
+// form parsing: laxJar, whose doc comment explains a trap that has nothing to do
+// with which provider is running, and the account discovery in signIn.
+//
+// ---------------------------------------------------------------------------
+//
 // Browser-less sign-in against the stack's real Keycloak: discovery, PKCE, the
 // authorization code exchange, ID-token verification against real JWKS, the
 // groups claim in the shape the realm's mapper produces, the session cookie and
@@ -70,7 +92,7 @@ func (s *session) acct(path string) string {
 // marked Secure over a plain http:// URL. This service marks both the session
 // cookie (internal/oidcauth/session.go) and the CSRF cookie
 // (internal/oidcauth/csrf.go) Secure, and the dev stack speaks plain HTTP on
-// acme-console.localhost. A browser is fine with that — `*.localhost` is a
+// console.localhost. A browser is fine with that — `*.localhost` is a
 // trustworthy origin under the Secure Contexts spec — but the standard library
 // implements the plain RFC and is not. The symptom is a sign-in that looks like
 // it worked followed by a 401 with no cookie on it.
@@ -158,7 +180,7 @@ func signIn(user, password string) (*session, error) {
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)) //nolint:errcheck // draining
 	resp.Body.Close()
 
-	if !jar.has("acme-console.localhost", oidcauth.SessionCookieName) {
+	if !jar.has("console.localhost", oidcauth.SessionCookieName) {
 		return nil, fmt.Errorf("no %s cookie after signing in as %s (last status %d, at %s) — "+
 			"wrong password, or the flow failed before the callback",
 			oidcauth.SessionCookieName, user, resp.StatusCode, resp.Request.URL)

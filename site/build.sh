@@ -15,8 +15,12 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 src="$here/src"
 dist="$here/dist"
 
-rm -rf "$dist"
+# Clear the CONTENTS rather than the directory. `rm -rf "$dist"` replaces the
+# inode, and a running container that bind-mounts it keeps the old one — so the
+# site silently empties for everybody until the container is recreated. Found
+# exactly that way.
 mkdir -p "$dist"
+find "$dist" -mindepth 1 -delete
 cp -R "$src"/. "$dist"/
 
 printf 'site: built %s -> %s (%s files)\n' \

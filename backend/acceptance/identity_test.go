@@ -25,7 +25,7 @@ type meView struct {
 func TestSignInCarriesTheSession(t *testing.T) {
 	s := mustSignIn(t, adminUser, devPassword)
 
-	if !s.jar.has("acme-console.localhost", oidcauth.SessionCookieName) {
+	if !s.jar.has("console.localhost", oidcauth.SessionCookieName) {
 		t.Fatalf("no %s cookie held for the console origin", oidcauth.SessionCookieName)
 	}
 	var me meView

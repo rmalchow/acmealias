@@ -1,36 +1,26 @@
 # The development identity provider, as data.
 #
-# This is authentik's equivalent of the Keycloak realm export it replaces
-# (development/realm/acmeservice-realm.json): a description of the objects that
-# must exist, applied at start-up and re-applied when this file changes. The
-# property being preserved is the one that made the realm import worth having —
-# `./scripts/dev.sh reset` produces an identical, working identity provider from
-# an empty directory, with nobody clicking anything (design K2).
+# authentik's equivalent of the Keycloak realm export it replaces: a description
+# of the objects that must exist, applied at start-up by the WORKER and re-applied
+# when this file changes. The property being preserved is the one that made the
+# realm import worth having — `./scripts/dev.sh reset` produces an identical,
+# working identity provider from an empty directory, with nobody clicking
+# anything (design K2).
 #
-# SCOPE OF THIS FILE TODAY: groups, users, the console application and the group
-# claim — tasks 1.1 to 1.4. The enrolment flow that lets a person register
-# themselves, and the brand that makes the pages look like the product, arrive
-# with task group 5.
+# TWO APPLICATIONS, AND THAT IS THE POINT.
 #
-# ------------------------------------------------------------------------------
-# UNVALIDATED. Read this before trusting any line below.
+# `acmeservice-console` is the customer surface at console.localhost.
+# `acmeservice-admin` is the staff surface at admin.localhost. They are separate
+# applications with separate OIDC clients, so a token minted for one is not a
+# token for the other — the property public-edition U12 rests its whole
+# staff/customer separation on. In production they also carry different user
+# types (customers `external`, staff `internal`); development has no such
+# distinction to make yet and both test users are ordinary.
 #
-# This file was written from documentation, not against a running authentik, and
-# authentik's blueprint schema is version-specific in ways that are easy to get
-# wrong and awkward to debug:
-#
-#   - model names (`authentik_providers_oauth2.scopemapping` and friends) have
-#     moved between releases;
-#   - `redirect_uris` was once a newline-separated string and is now a list of
-#     objects with a `matching_mode`;
-#   - whether a password may be set inline on a user has changed;
-#   - the slugs of the built-in flows referenced by !Find below must actually
-#     exist in the image the stack pins.
-#
-# Task 1.5 is to validate this against a running instance and correct it. Until
-# that task is ticked, treat this as a draft that states the intent correctly and
-# the syntax only probably.
-# ------------------------------------------------------------------------------
+# If this file is edited and nothing changes, look at the WORKER's logs, not the
+# server's. Blueprints are applied by the worker, so a stack whose worker is
+# unhealthy comes up with an identity provider that has no groups, no users and
+# no clients — and the failure presents as a login problem.
 
 version: 1
 
@@ -42,127 +32,175 @@ metadata:
 entries:
   # --- groups -----------------------------------------------------------------
   #
-  # These four names are not decorative and must not be tidied. Each is named by
-  # a setting in development/.env (ACME_ADMIN_GROUP and its three siblings), and
-  # each is asserted by name in backend/acceptance/identity_test.go. A role whose
-  # configured group does not exist grants nothing, and the service reports that
-  # at start-up rather than failing later (design K3).
+  # These four names are not decorative and must not be tidied. Each is named by a
+  # setting in development/.env (ACME_ADMIN_GROUP and its three siblings), and each
+  # is asserted by name in backend/acceptance/identity_test.go. A role whose
+  # configured group does not exist grants nothing, and the service reports that at
+  # start-up rather than failing later (design K3).
 
   - model: authentik_core.group
     id: group-admin
-    identifiers:
-      name: acme-admin
-    attrs:
-      name: acme-admin
+    identifiers: { name: acme-admin }
+    attrs: { name: acme-admin }
 
   - model: authentik_core.group
     id: group-config-admin
-    identifiers:
-      name: acme-config-admin
-    attrs:
-      name: acme-config-admin
+    identifiers: { name: acme-config-admin }
+    attrs: { name: acme-config-admin }
 
   - model: authentik_core.group
     id: group-key-rotation
-    identifiers:
-      name: acme-key-rotation
-    attrs:
-      name: acme-key-rotation
+    identifiers: { name: acme-key-rotation }
+    attrs: { name: acme-key-rotation }
 
   - model: authentik_core.group
     id: group-read-only
-    identifiers:
-      name: acme-read-only
-    attrs:
-      name: acme-read-only
+    identifiers: { name: acme-read-only }
+    attrs: { name: acme-read-only }
 
-  # --- users ------------------------------------------------------------------
+  # --- the two people you sign in as ------------------------------------------
   #
-  # Four users, one group each, all with the password `devpass`. ./scripts/dev.sh
-  # status prints these logins to whoever brings the stack up, and the acceptance
-  # suite signs in as every one of them to prove that each resolves to exactly the
-  # role its group is configured to grant.
+  # admin@example.com holds acme-admin, so it can do everything the console
+  # offers, and it is the only one of the six that reaches the STAFF console —
+  # the staff application admits acme-admin and nothing else.
   #
-  # `type: internal` is deliberate for all four: these are the development
-  # stand-ins for staff. The `external` user type is what public-edition U12
-  # reserves for customers, and the first external users this stack sees will be
-  # the ones who register themselves in task group 5.
+  # user@example.com holds acme-read-only, which is the more useful default of
+  # the two: a surface that looks right for an administrator and wrong for
+  # everybody else is the failure this account exists to catch.
+  #
+  # Everything here uses the password `devpass`.
 
   - model: authentik_core.user
-    identifiers:
-      username: admin-user
+    identifiers: { username: admin@example.com }
+    attrs:
+      username: admin@example.com
+      name: Admin Example
+      email: admin@example.com
+      password: devpass
+      is_active: true
+      path: users
+      groups:
+        - !KeyOf group-admin
+
+  - model: authentik_core.user
+    identifiers: { username: user@example.com }
+    attrs:
+      username: user@example.com
+      name: User Example
+      email: user@example.com
+      password: devpass
+      is_active: true
+      path: users
+      groups:
+        - !KeyOf group-read-only
+
+  # --- the four the acceptance suite signs in as ------------------------------
+  #
+  # These are NOT redundant with the pair above, and deleting them breaks a test
+  # rather than tidying a fixture. backend/acceptance/identity_test.go signs in as
+  # each of the four by name and asserts it resolves to exactly one role, which is
+  # the only end-to-end proof that the group claim still maps the way the service
+  # expects. The key-rotation account is the load-bearing one: a user refused one
+  # write and allowed a different one is what proves permissions are per action
+  # rather than per "may write at all".
+  #
+  # They keep their bare usernames because the suite has them as literals.
+
+  - model: authentik_core.user
+    identifiers: { username: admin-user }
     attrs:
       username: admin-user
       name: Admin Dev
       email: admin-user@acmeservice.internal
       password: devpass
       is_active: true
-      type: internal
+      path: users
       groups:
         - !KeyOf group-admin
 
   - model: authentik_core.user
-    identifiers:
-      username: config-admin-user
+    identifiers: { username: config-admin-user }
     attrs:
       username: config-admin-user
       name: Config Admin Dev
       email: config-admin-user@acmeservice.internal
       password: devpass
       is_active: true
-      type: internal
+      path: users
       groups:
         - !KeyOf group-config-admin
 
   - model: authentik_core.user
-    identifiers:
-      username: key-rotation-user
+    identifiers: { username: key-rotation-user }
     attrs:
       username: key-rotation-user
       name: Key Rotation Dev
       email: key-rotation-user@acmeservice.internal
       password: devpass
       is_active: true
-      type: internal
+      path: users
       groups:
         - !KeyOf group-key-rotation
 
   - model: authentik_core.user
-    identifiers:
-      username: read-only-user
+    identifiers: { username: read-only-user }
     attrs:
       username: read-only-user
       name: Read Only Dev
       email: read-only-user@acmeservice.internal
       password: devpass
       is_active: true
-      type: internal
+      path: users
       groups:
         - !KeyOf group-read-only
 
+  # --- one page, and no username oracle ---------------------------------------
+  #
+  # authentik ships an identification stage that asks for the identifier, submits
+  # it, and THEN asks for a password. That two-step is an enumeration oracle: the
+  # response to step one differs depending on whether the account exists, so
+  # anyone can test an address list against this login page and learn which of
+  # them are customers. `show_matched_user` makes it worse by displaying the
+  # account it matched.
+  #
+  # Setting `password_stage` renders the password field on the SAME page as the
+  # identifier. The pair is then submitted together and a wrong identifier and a
+  # wrong password fail identically — which is the property that closes the
+  # oracle, not merely the aesthetics of one page instead of two.
+  #
+  # This modifies a stage authentik ships rather than adding one, so it stays in
+  # step with the default flow instead of forking it. Both identifier forms stay
+  # accepted: the addresses here are usernames AND emails, and a person who typed
+  # the one they remember should not be told they picked the wrong field.
+  - model: authentik_stages_identification.identificationstage
+    identifiers: { name: default-authentication-identification }
+    attrs:
+      user_fields: [email, username]
+      password_stage:
+        !Find [authentik_stages_password.passwordstage, [name, default-authentication-password]]
+      show_matched_user: false
+
   # --- the group claim --------------------------------------------------------
   #
-  # THE MOST IMPORTANT TWELVE LINES IN THIS FILE (design K3).
+  # THE MOST IMPORTANT DOZEN LINES IN THIS FILE (design K3).
   #
   # Roles are derived by comparing the `groups` claim of the identity token
   # against one setting per role. What matters is the SHAPE of that list: bare
   # names (`acme-admin`), not paths (`/acme-admin`).
   #
-  # Our service has a setting, ACME_OIDC_GROUP_PREFIX, whose entire purpose is to
-  # absorb providers that disagree about this. The decision is to emit the right
-  # shape here and leave that setting empty, so development exercises the same
-  # code path production will. A stack that needed a non-empty prefix would be
-  # testing the prefix rather than the mapping.
+  # ACME_OIDC_GROUP_PREFIX exists to absorb providers that disagree about this.
+  # The decision is to emit the right shape here and leave that setting empty, so
+  # development exercises the same code path production will; a stack needing a
+  # non-empty prefix would be testing the prefix rather than the mapping.
   #
-  # The failure this prevents is nasty because it does not look like itself: a
-  # token carrying `/acme-admin` where `acme-admin` was expected produces "you are
-  # in none of the configured groups", which reads as a permissions problem and is
-  # a claim-shape problem.
+  # The failure this prevents does not look like itself: a token carrying
+  # `/acme-admin` where `acme-admin` was expected produces "you are in none of the
+  # configured groups", which reads as a permissions problem and is a claim-shape
+  # problem.
 
   - model: authentik_providers_oauth2.scopemapping
     id: mapping-groups
-    identifiers:
-      name: acmeservice-groups
+    identifiers: { name: acmeservice-groups }
     attrs:
       name: acmeservice-groups
       scope_name: groups
@@ -170,22 +208,19 @@ entries:
       expression: |
         return [group.name for group in request.user.ak_groups.all()]
 
-  # --- the console application ------------------------------------------------
+  # --- the customer console ---------------------------------------------------
   #
-  # The client id and secret match development/.env. The secret is `dev-console-secret`
-  # in a file committed to the repository, which is correct for a stack that only
-  # ever runs on a developer's machine and is stated here so nobody mistakes it for
-  # an accident.
+  # Client id and secret match development/.env. The secret is committed to the
+  # repository, which is correct for a stack that only ever runs on a developer's
+  # machine and is said out loud here so nobody mistakes it for an accident.
   #
-  # The redirect URL must be exactly the one the service asks for. It is built
-  # from ACME_OIDC_REDIRECT_URL and is the one URL in this file that, if wrong,
-  # fails at the very last hop of sign-in with an error from authentik rather than
-  # from us.
+  # The redirect URL must be exactly what the service asks for. It is the one URL
+  # in this file that, if wrong, fails at the very last hop of sign-in with an
+  # error from authentik rather than from us.
 
   - model: authentik_providers_oauth2.oauth2provider
     id: provider-console
-    identifiers:
-      name: acmeservice-console
+    identifiers: { name: acmeservice-console }
     attrs:
       name: acmeservice-console
       client_type: confidential
@@ -194,13 +229,10 @@ entries:
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
       redirect_uris:
-        - url: http://acme-console.localhost/api/v1/auth/callback
+        - url: http://console.localhost/api/v1/auth/callback
           matching_mode: strict
       authorization_flow:
-        !Find [
-          authentik_flows.flow,
-          [slug, default-provider-authorization-implicit-consent],
-        ]
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow:
         !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       property_mappings:
@@ -209,16 +241,57 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
         - !KeyOf mapping-groups
 
-  # The application is what a user sees and what access is bound to; the provider
+  # The application is what a person sees and what access binds to; the provider
   # above is the protocol machinery behind it. The slug is load-bearing: it is the
-  # `acmeservice-console` in the issuer URL
-  # http://auth.localhost/application/o/acmeservice-console/ that
-  # ACME_OIDC_ISSUER is set to, and the issuer is validated on every token.
+  # `acmeservice-console` in
+  # http://auth.localhost/application/o/acmeservice-console/ that ACME_OIDC_ISSUER
+  # is set to, and the issuer is validated on every token.
   - model: authentik_core.application
-    identifiers:
-      slug: acmeservice-console
+    identifiers: { slug: acmeservice-console }
     attrs:
       name: acmeservice
       slug: acmeservice-console
       provider: !KeyOf provider-console
       meta_description: "Certificate challenge handling for domains whose DNS you keep where it is."
+
+  # --- the staff console ------------------------------------------------------
+  #
+  # A second application, not a second role inside the first. Its callback is on
+  # admin.localhost, so the session cookie it sets belongs to the staff origin and
+  # to nothing else.
+
+  - model: authentik_providers_oauth2.oauth2provider
+    id: provider-admin
+    identifiers: { name: acmeservice-admin }
+    attrs:
+      name: acmeservice-admin
+      client_type: confidential
+      client_id: acmeservice-admin
+      client_secret: dev-admin-secret
+      sub_mode: hashed_user_id
+      include_claims_in_id_token: true
+      redirect_uris:
+        - url: http://admin.localhost/api/admin/auth/callback
+          matching_mode: strict
+      authorization_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+        - !KeyOf mapping-groups
+
+  # Group-restricted, which the customer application deliberately is not: staff
+  # access is a small list, and the production design (U12) says the staff
+  # application admits a staff group and nothing else. Here that group is
+  # acme-admin, so user@example.com can reach the customer console and is refused
+  # by the staff one — which is the arrangement worth being able to demonstrate.
+  - model: authentik_core.application
+    identifiers: { slug: acmeservice-admin }
+    attrs:
+      name: acmeservice staff
+      slug: acmeservice-admin
+      provider: !KeyOf provider-admin
+      meta_description: "Staff surface. Address-restricted at the ingress; see public-edition U7."
