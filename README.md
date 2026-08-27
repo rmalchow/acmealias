@@ -83,13 +83,25 @@ that adds the typed name's counterpart — the wildcard of a plain name, the ape
 as a second domain against the same alias. It is opt-in at every entry point: a wildcard is never
 added to a customer's inventory unless somebody asked for it.
 
-## The three listeners
+## One listener, five path groups
 
-| Listener | Default bind | Serves | Exposure |
-| --- | --- | --- | --- |
-| challenge | `:8080` | `POST /present`, `POST /cleanup` (lego's `httpreq` contract) | public, behind Traefik |
-| admin | `:8081` | `GET /api/v1/**` and the Angular console | behind Traefik, restricted to our networks |
-| internal | `:9090` | `/healthz`, `/readyz`, `/metrics` | never exposed |
+There were three listeners, on three ports. They are now one (`ACME_LISTEN`, `:8080`), separated by
+path prefix with per-group middleware.
+
+| Path group | Serves | Exposure |
+| --- | --- | --- |
+| `/present`, `/cleanup`, `/acme/httpreq/**` | lego's `httpreq` contract; API-key auth | public, behind Traefik |
+| `/api/v1/**` | the public, versioned, OpenAPI-described management API | behind Traefik |
+| `/api/admin/**` | the staff tree — unversioned, undocumented, and empty until `staff-plane` | address-restricted at the ingress |
+| `/healthz`, `/readyz`, `/metrics` | liveness, readiness, Prometheus | should not be public |
+| `/*` | the Angular consoles, chosen by hostname | behind Traefik |
+
+The old arrangement guaranteed isolation by topology: an API key could not reach the management API
+because the management API was on a port nobody published. That guarantee now comes from the
+permission model instead — a key reaches only what its grants permit. **The trade is explicit and
+worth stating: network-level exposure control moves to the reverse proxy.** In particular `/metrics`
+and `/api/admin/**` are on the same port as everything else, so a deployment that wants them
+unreachable has to say so in front of the service rather than relying on an unpublished port.
 
 Plus the authoritative DNS listener itself (UDP+TCP 53), necessarily raw and public, answering
 TXT, SOA and NS only for the zone delegated to us.
@@ -98,15 +110,22 @@ TXT, SOA and NS only for the zone delegated to us.
 
 ```
 backend/     the Go module — DNS server, challenge/admin/internal HTTP APIs, migrations
-frontend/    the Angular workspace (project `admin`); `ng build` writes straight into
-             backend/internal/webui/dist, which is embedded into the Go binary.
+frontend/    the Angular workspace, three projects: `console` (the customer surface),
+             `admin` (the staff surface) and `shared` (what both reach — api, session,
+             guards, models). Two applications rather than one with a staff section, so
+             a customer's browser never downloads the staff bundle; `ng build` writes
+             into backend/internal/webui/dist/{console,admin}, both embedded in the Go
+             binary and chosen by hostname at request time.
              Built with ng-zorro (Ant Design), dark theme only, from its prebuilt
-             stylesheet — an npm dependency like the Roboto face, so nothing is fetched
-             from a CDN at runtime. Every list filters and pages server-side, every
-             screen opens with the same breadcrumb/headline/subheadline block, and every
-             create or delete is a modal
+             stylesheet, and set in Barlow — both are npm dependencies, so nothing is
+             fetched from a CDN at runtime. Every list filters and pages server-side,
+             every screen opens with the same breadcrumb/headline/subheadline block, and
+             every create or delete is a modal
+site/        the marketing site: hand-written HTML and CSS under src/, built to a
+             gitignored dist/ by a build that is a copy, served by busybox httpd
+material/    brand source — the wordmark and logo the consoles and the site share
 development/ everything needed to run the whole stack locally: compose file, dev-only
-             Traefik overlay, IdP realm export, seed/reset scripts
+             Traefik overlay, the authentik blueprint, seed/reset scripts
 ```
 
 ## Prerequisites

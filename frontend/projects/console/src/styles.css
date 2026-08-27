@@ -6,13 +6,17 @@
  * theme, because compact and dark are two separate prebuilt stylesheets and combining them means
  * compiling Ant's Less sources; small-size components get the same result without that build.
  *
- * Roboto is an npm package bundled by `ng build`. Ant's own font stack is system fonts, so
- * nothing here reaches the network for a face — the compiled bundle is embedded in the Go binary
- * and has to render on a host with no route to the internet.
+ * Barlow is the brand face — it is what `material/word.svg` is set in — and it arrives as an npm
+ * package bundled by `ng build`. Ant's own font stack is system fonts, so nothing here reaches the
+ * network for a face — the compiled bundle is embedded in the Go binary and has to render on a
+ * host with no route to the internet. Barlow Condensed is the wordmark's weight-700 cut and is
+ * used only where the product name is set, never for running text.
  */
-@import "@fontsource/roboto/300.css";
-@import "@fontsource/roboto/400.css";
-@import "@fontsource/roboto/500.css";
+@import "@fontsource/barlow/300.css";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow-condensed/400.css";
+@import "@fontsource/barlow-condensed/700.css";
 
 html,
 body {
@@ -21,7 +25,7 @@ body {
 
 body {
   margin: 0;
-  font-family: Roboto, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: Barlow, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
 /* The page frame.

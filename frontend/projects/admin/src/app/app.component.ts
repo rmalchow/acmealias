@@ -59,6 +59,13 @@ import { LOGOUT_URL, SessionService } from '@acme/shared';
         border-block-end: 1px solid rgb(255 255 255 / 12%);
         background: #1f1a0e;
       }
+      /* The product name is the wordmark, so it is set in the wordmark's face — Barlow Condensed
+         at weight 700, the same cut as material/word.svg. Running text stays Barlow. */
+      .mark strong {
+        font-family: 'Barlow Condensed', Barlow, sans-serif;
+        font-weight: 700;
+        font-size: 1.15rem;
+      }
       .mark {
         display: flex;
         align-items: center;
