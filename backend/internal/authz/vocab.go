@@ -72,6 +72,17 @@ const (
 	ActionAccountCreate = "account.create"
 	ActionAccountSelect = "account.select"
 
+	// Buying credit and handing an account to somebody else. Both are
+	// credential-class (below): one is money and one is who ultimately controls
+	// the tenant, and both are questions asked by the person auditing who has
+	// power here rather than by the person auditing what the setup looks like.
+	//
+	// account.checkout is recorded with the amount and the balance either side
+	// of it, because the record that has to be right on the day money is
+	// involved is the one written while none is (design C8).
+	ActionAccountCheckout = "account.checkout"
+	ActionAccountTransfer = "account.transfer"
+
 	// The two actions a challenge key performs. They are separate so a key can
 	// publish without being able to withdraw — which is what an operator wants
 	// for a load balancer that renews automatically but should never take a
@@ -112,6 +123,7 @@ var actionClasses = map[string][]string{
 		ActionRoleCreate, ActionRoleUpdate, ActionRoleDelete,
 		ActionMemberAdd, ActionMemberRemove,
 		ActionAccountCreate, ActionAccountSelect,
+		ActionAccountCheckout, ActionAccountTransfer,
 	},
 }
 

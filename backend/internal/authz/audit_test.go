@@ -33,9 +33,12 @@ func TestConsoleActorCarriesGroupsAndRoles(t *testing.T) {
 	req.RemoteAddr = "192.0.2.9:1234"
 	c := e.NewContext(req, httptest.NewRecorder())
 	c.Set(SessionContextKey, sessionIn("acme-admins", "acme-viewers"))
-	c.Set(RolesContextKey, testMapping.RolesFor([]string{"acme-admins", "acme-viewers"}))
 
-	a := ConsoleActor(c)
+	// The roles are handed in rather than read off the context: they are the
+	// ones the request was authorized against, in the account it was acting in
+	// (design C10). There is no set of roles a session holds independently of an
+	// account any more.
+	a := ConsoleActor(c, []string{"ADMIN", "READ_ONLY"})
 
 	if a.Subject != "u-1" || a.DisplayName != "Ada" {
 		t.Errorf("actor = %+v, want subject u-1 / Ada", a)
@@ -44,8 +47,8 @@ func TestConsoleActorCarriesGroupsAndRoles(t *testing.T) {
 		t.Errorf("groups = %v", a.Groups)
 	}
 	// Both halves of "how was this person allowed to do that": the groups the
-	// provider asserted, and the roles the mapping turned them into.
-	if got := a.Roles.List(); !slices.Equal(got, []string{"ADMIN", "READ_ONLY"}) {
+	// provider asserted, and the roles they actually held in the account.
+	if got := a.Roles; !slices.Equal(got, []string{"ADMIN", "READ_ONLY"}) {
 		t.Errorf("roles = %v, want [ADMIN READ_ONLY]", got)
 	}
 	if a.Source != SourceConsole || a.RequestID != "req-42" || a.ClientIP != "192.0.2.9" {
@@ -118,7 +121,7 @@ func TestIntegrationRecordWritesAnAttributableRow(t *testing.T) {
 		Subject:     "u-1",
 		DisplayName: "Ada",
 		Groups:      []string{"acme-keys"},
-		Roles:       testMapping.RolesFor([]string{"acme-keys"}),
+		Roles:       []string{"KEY_ROTATION"},
 		Source:      SourceConsole,
 		RequestID:   "req-42",
 		ClientIP:    "192.0.2.9",
@@ -229,12 +232,30 @@ func TestIntegrationRecordSystemActorHasNoIdentity(t *testing.T) {
 const testDatabaseURLEnv = "TEST_DATABASE_URL"
 
 // scopedDB is migratedDB plus the account every audit read is now confined to.
+//
+// The account is created through the production path rather than resolved from
+// a migration seed, because design C10 removed the seed's only producer. The
+// Valid check earns its place: row-level security is on, and a zero Scope reads
+// no rows and raises no error — a fixture that quietly produced one would make
+// every assertion below pass against an empty table.
 func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
 	t.Helper()
 	db := migratedDB(t)
-	sc, err := store.ScopeForBootstrap(context.Background(), db)
+	ctx := context.Background()
+	owner, err := store.FindOrCreateUser(ctx, db, "audit-fixture-owner", "Audit Fixture", "")
 	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
+		t.Fatalf("create owner: %v", err)
+	}
+	acc, err := store.CreateAccountWithOwner(ctx, db, "audit-fixture", "Audit Fixture", owner.ID, 25)
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	sc, err := store.ScopeForSelection(ctx, db, acc.ID)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if !sc.Valid() {
+		t.Fatal("fixture scope is the zero Scope; every read below would silently match nothing")
 	}
 	return db, sc
 }

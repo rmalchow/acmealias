@@ -31,8 +31,14 @@ type ErrorBody struct {
 // inventory.CreateDomain's error unchanged and get the right code.
 //
 //	inventory.ErrInvalid (== dnsname.ErrInvalid)  400
+//	store.ErrAmountNotOffered                      400
+//	store.ErrAccountSuspended                      402
 //	inventory.ErrConflict                          409
 //	inventory.ErrNotEmpty                          409
+//	inventory.ErrNoRoom                            409
+//	store.ErrPersonalAccountFixed                  409
+//	store.ErrSecondPersonalAccount                 409
+//	store.ErrPersonalAccountHasNoRoster            409
 //	gorm.ErrRecordNotFound                         404
 //	*echo.HTTPError                                its own code
 //	anything else                                  500, detail to the log only
@@ -76,6 +82,38 @@ func (a *admin) mapError(err error, c echo.Context) (int, any) {
 		// leave them retrying a request that will never work.
 		return http.StatusForbidden, ErrorBody{Message: err.Error()}
 	case errors.Is(err, store.ErrUnrestrictedRole), errors.Is(err, store.ErrLastUnrestrictedMember):
+		return http.StatusConflict, ErrorBody{Message: err.Error()}
+	case errors.Is(err, store.ErrAmountNotOffered):
+		// 400: the request named something this service does not sell. It is a
+		// malformed request rather than a refused one — there is no state in
+		// which 1000000 becomes an amount (design C8).
+		return http.StatusBadRequest, ErrorBody{Message: err.Error()}
+	case errors.Is(err, store.ErrAccountSuspended):
+		// 402 and not 403, everywhere, for the reason design C7 gives about the
+		// challenge API and which holds just as well here: nothing is wrong with
+		// the caller's authority. A 403 sends somebody to look at their
+		// permissions, or at their API key, and both are working perfectly.
+		return http.StatusPaymentRequired, ErrorBody{Message: err.Error()}
+	case errors.Is(err, inventory.ErrNoRoom):
+		// 409 and not 403 (design C13). A quota and a permission are different
+		// questions with different remedies — "there is no room, delete one or
+		// move to a team account" versus "ask whoever can grant it" — and one
+		// status for both produces a message that is wrong for whichever case
+		// it was not written for.
+		return http.StatusConflict, ErrorBody{Message: err.Error()}
+	case errors.Is(err, store.ErrPersonalAccountHasNoRoster):
+		// 409: the account is the wrong SHAPE for the request, which is the same
+		// sentence as the two below and deliberately not a 403. There is nobody
+		// to ask for the permission a 403 would send the caller looking for
+		// (design C9, C11). It is also not a 404: the route exists, and a client
+		// that got one would reasonably conclude it was talking to an older
+		// service.
+		return http.StatusConflict, ErrorBody{Message: err.Error()}
+	case errors.Is(err, store.ErrPersonalAccountFixed), errors.Is(err, store.ErrSecondPersonalAccount):
+		// 409 and not 403: nobody may do this, so there is no grant to go
+		// looking for. The account is the wrong shape for what was asked
+		// (design C1, C2) — the same distinction C13 draws between a quota and
+		// a permission.
 		return http.StatusConflict, ErrorBody{Message: err.Error()}
 	case errors.Is(err, inventory.ErrConflict), errors.Is(err, inventory.ErrNotEmpty):
 		return http.StatusConflict, ErrorBody{Message: err.Error()}

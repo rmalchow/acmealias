@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -17,13 +18,20 @@ import (
 // effective configuration. All four are reads; none of them mutates anything,
 // so none of them writes an audit entry.
 
-// meView is what the console shell renders: a name in the corner, the groups
-// behind a role, and the roles that decide which controls exist.
+// meView is what the console shell renders: a name in the corner, and what the
+// caller may do in the account they have selected.
 //
-// permissions is included so the console does not have to reimplement the
-// role matrix to decide what to grey out. It is a convenience for the client
-// and nothing more: every route checks the permission again server-side,
-// because the browser is not the enforcement point (design D11).
+// roles and permissions are answered IN THE SELECTED ACCOUNT and are empty when
+// nothing is selected — which is now the state every session starts in (design
+// P19). They used to be global, derived from the session's group claim by four
+// environment variables; there is no such thing as a role held outside an
+// account any more (design C10).
+//
+// permissions lists what the caller holds ACCOUNT-WIDE, so the console does not
+// have to evaluate grants itself to decide what to grey out in the shell. A
+// per-screen answer is a different question and comes with the objects
+// (authz.PermittedOn). Both are conveniences: every route checks again
+// server-side, because the browser is not the enforcement point (design D11).
 type meView struct {
 	SelectedAccountID *model.ID `json:"selectedAccountId"`
 	Subject           string    `json:"subject"`
@@ -37,7 +45,6 @@ type meView struct {
 
 func (a *admin) me(c echo.Context) error {
 	sess := authz.SessionFromContext(c)
-	roles := authz.RolesFromContext(c)
 	if sess == nil {
 		// Unreachable behind Authenticated; present so a rewiring that drops
 		// the middleware fails closed instead of answering with an empty user.
@@ -45,7 +52,7 @@ func (a *admin) me(c echo.Context) error {
 	}
 	v := meView{
 		Subject: sess.Subject, DisplayName: sess.DisplayName,
-		Groups: []string(sess.Groups), Roles: roles.List(),
+		Groups: []string(sess.Groups), Roles: []string{},
 		Permissions: []string{},
 		SignedInAt:  sess.CreatedAt, ExpiresAt: sess.ExpiresAt,
 		// Which account this session is acting in, so the console knows what to
@@ -56,8 +63,36 @@ func (a *admin) me(c echo.Context) error {
 	if v.Groups == nil {
 		v.Groups = []string{}
 	}
-	for _, p := range authz.Allowed(roles) {
-		v.Permissions = append(v.Permissions, string(p))
+	// No selection is not an error here, and must not become one: /me is one of
+	// the handful of routes reachable with none, and it is how the console
+	// discovers that it should render the picker. So a caller who has not chosen
+	// an account is answered with an empty authority rather than the 409
+	// a.scope() would raise.
+	if sess.SelectedAccountID != nil {
+		subj, roles, err := a.subjectWithRoles(c)
+		switch {
+		case err == nil:
+			v.Roles = roles
+			v.Permissions = authz.PermittedInAccount(subj)
+		case errors.Is(err, store.ErrAccountSuspended):
+			// A SUSPENDED selection is the second thing that must not become an
+			// error here, and it is a newer trap than the empty one above.
+			// Design C4 lets the owner of a suspended account select it — that
+			// is the only way anybody can ever pay for one — and C5 says what
+			// they then see is the balance and checkout. But the shell that
+			// renders that screen starts by asking /me who it is talking to, and
+			// subjectWithRoles goes through a.scope(), which refuses a suspended
+			// account with 402. So the owner who did the one thing the design
+			// tells them to do got a console with no identity and no navigation.
+			//
+			// The authority is left EMPTY rather than invented: there genuinely
+			// is none in a suspended account — every scoped route still refuses
+			// it — so an empty Permissions is the true answer and not a
+			// concession. The console greys everything out and offers checkout,
+			// which is the screen C5 asks for.
+		default:
+			return err
+		}
 	}
 	return c.JSON(http.StatusOK, v)
 }
@@ -79,9 +114,20 @@ type challengeView struct {
 // label, the challenge FQDN or the key that published it — the three things
 // an operator has in hand when they are chasing one renewal through a busy
 // window.
+//
+// Authorized on inventory.view, like every other read of what the account
+// holds. That check is written here rather than inherited: this handler does
+// not go through internal/inventory, so the source-reading test in that package
+// cannot see it, and the route middleware that used to refuse anyone holding no
+// role at all went away with the global roles (design C10). Without it a member
+// of a zero-grant custom role was refused GET /projects and served the live
+// challenge list — the same data, one screen apart.
 func (a *admin) listChallenges(c echo.Context) error {
 	sc, err := a.scope(c)
 	if err != nil {
+		return err
+	}
+	if err := a.authorize(c, authz.ActionViewInventory, authz.Object{Type: authz.TypeAny, AccountID: sc.AccountID()}); err != nil {
 		return err
 	}
 	page, err := readPage(c, 50, 500)
@@ -142,6 +188,15 @@ type auditView struct {
 func (a *admin) listAudit(c echo.Context) error {
 	sc, err := a.scope(c)
 	if err != nil {
+		return err
+	}
+	// inventory.view, which is what that action means — the vocabulary's own
+	// definition is "views the inventory and the audit log". It was enforced by
+	// the route middleware until design C10 removed it, and by nothing
+	// afterwards: the trail names people, addresses, object labels and grant
+	// changes, so it is the MOST disclosive read in the account, and it was the
+	// one left open to a member holding no grant at all.
+	if err := a.authorize(c, authz.ActionViewInventory, authz.Object{Type: authz.TypeAny, AccountID: sc.AccountID()}); err != nil {
 		return err
 	}
 	// Confined first, before any caller-supplied filter can narrow or widen it:
@@ -238,17 +293,34 @@ func (a *admin) listAudit(c echo.Context) error {
 
 // --- effective configuration ----------------------------------------------
 
-// getConfig renders the running configuration with secrets redacted, plus the
-// group configured for each role.
+// getConfig renders the running configuration with secrets redacted.
 //
 // The redaction is config.LogValue's, reused rather than repeated: there is
 // exactly one list of which settings are secret in this service, and a second
 // one here would eventually disagree with it — in the direction that puts a
 // client secret on a screen.
 //
-// The mapping is shown, never edited: it is four environment variables, and
-// there is deliberately no route that changes them (design D10).
+// It used to carry a roleGroups block naming the identity-provider group behind
+// each of the four global roles. Both the groups and the global roles are gone
+// (design C10), and the question that block answered — "which group grants
+// ADMIN" — has no answer to give: roles are rows in an account, and the account
+// screen that lists them is where an operator now looks.
 func (a *admin) getConfig(c echo.Context) error {
+	// It resolves a scope even though it reads no tenant data, and the scope is
+	// the entire point of the two lines: the route is mounted under
+	// /accounts/:accountId, and until now it never looked at who was asking or
+	// which account they had selected. Any authenticated session could read the
+	// deployment's effective configuration through any account identifier at
+	// all, suspended or not, member or not. a.scope is what makes the path
+	// parameter mean something (design P19), and inventory.view is the same
+	// grant the other two reads in this file now carry.
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	if err := a.authorize(c, authz.ActionViewInventory, authz.Object{Type: authz.TypeAny, AccountID: sc.AccountID()}); err != nil {
+		return err
+	}
 	out := map[string]any{}
 	for _, attr := range a.opts.Config.LogValue().Group() {
 		switch attr.Value.Kind() {
@@ -258,6 +330,5 @@ func (a *admin) getConfig(c echo.Context) error {
 			out[attr.Key] = attr.Value.Any()
 		}
 	}
-	out["roleGroups"] = a.opts.Guard.Mapping.Entries()
 	return c.JSON(http.StatusOK, out)
 }

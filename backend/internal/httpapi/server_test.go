@@ -33,7 +33,6 @@ func newServers(t *testing.T) (*Servers, *gorm.DB) {
 		Zone:               "acmeservice.example.",
 		SessionIdleTimeout: time.Hour,
 		SessionMaxLifetime: 8 * time.Hour,
-		AdminGroup:         groupAdmin,
 	}
 	m := obs.New()
 
@@ -43,7 +42,7 @@ func newServers(t *testing.T) (*Servers, *gorm.DB) {
 			Lookup: dbLookup(db), Lifetime: time.Hour, Metrics: m, Log: discard(),
 		},
 		Admin: AdminOptions{
-			DB: db, Guard: &authz.Guard{Auth: &testAuth{db: db}, Mapping: authz.MappingFromConfig(cfg), Log: discard()},
+			DB: db, Guard: &authz.Guard{Auth: &testAuth{db: db}, Log: discard()},
 			Auth: testConsoleAuth{}, Config: cfg, Log: discard(),
 		},
 		Console:   webui.Handler(cfg.StaffHost),
@@ -65,7 +64,7 @@ func signedIn(t *testing.T, db *gorm.DB) string {
 	now := time.Now().UTC()
 	s := &model.Session{
 		ID: "server-test-" + hexish(), Subject: "tester", DisplayName: "Tester",
-		Groups: model.StringArray{groupAdmin}, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
+		Groups: model.StringArray{roleAdmin}, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	if err := store.CreateSession(t.Context(), db, s); err != nil {
 		t.Fatalf("create session: %v", err)

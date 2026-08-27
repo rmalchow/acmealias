@@ -146,9 +146,6 @@ func TestDefaultsApply(t *testing.T) {
 	if cfg.OIDCGroupClaim != "groups" {
 		t.Errorf("OIDCGroupClaim default = %q, want groups", cfg.OIDCGroupClaim)
 	}
-	if cfg.AdminGroup != "" {
-		t.Errorf("AdminGroup default = %q, want empty (nobody holds the role)", cfg.AdminGroup)
-	}
 	if len(cfg.CAAIssuers) != 0 {
 		t.Errorf("CAAIssuers default = %v, want empty", cfg.CAAIssuers)
 	}

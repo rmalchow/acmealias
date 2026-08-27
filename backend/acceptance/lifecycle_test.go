@@ -35,7 +35,7 @@ func TestPresentAndCleanupBothFiredAndNothingRemains(t *testing.T) {
 		}
 	}
 
-	s := mustSignIn(t, adminUser, devPassword)
+	s := mustSignInSeeded(t, adminUser)
 
 	// /cleanup lands a moment after the certificate is on the wire, so this is
 	// a wait rather than an instant read.

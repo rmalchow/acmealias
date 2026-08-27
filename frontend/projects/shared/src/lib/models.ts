@@ -232,3 +232,68 @@ export function may(o: { permittedActions?: string[] } | null | undefined, actio
  * console renders — a disabled button is a courtesy, never the enforcement.
  */
 export const NOT_PERMITTED = 'Your permissions do not allow this.';
+
+/**
+ * What a control says when the capability is not part of this KIND of account.
+ *
+ * A second sentence rather than a second use of NOT_PERMITTED, because the two
+ * refusals have different remedies and the wrong one sends a person somewhere
+ * there is nobody to ask (design C11). "Your permissions do not allow this" told
+ * to the owner of a personal account sends them looking for whoever can grant
+ * the permission — and in an account of one, that is themselves, and no grant
+ * exists to be given.
+ *
+ * The navigation is where a missing capability is normally expressed at all
+ * (C11): a screen a personal account does not have is not listed, and `Upgrade`
+ * carries the whole message once. This string is for the places a control is
+ * reached anyway — a deep link, or a control on a screen both kinds share.
+ */
+export const NOT_IN_PERSONAL_ACCOUNT =
+  'A personal account does not have this. A team account does.';
+
+/** The two kinds of account (design C1). Fixed at creation; neither becomes the other. */
+export type AccountKind = 'personal' | 'team';
+
+/**
+ * One account this person may act in, as `GET /api/v1/accounts` reports it —
+ * `accountView` in `backend/internal/httpapi/admin_accounts.go`.
+ *
+ * It lives here rather than beside the console's switcher because the staff
+ * plane describes the same object: kind, owner and balance are what an account
+ * IS now, not what the customer console happens to render.
+ */
+export interface Account {
+  id: string;
+  slug: string;
+  name: string;
+  createdAt: string;
+  /** Which one this session is acting in, so the switcher needs no second request. */
+  selected: boolean;
+  kind: AccountKind;
+  /** Whether the reader is the person this account answers to — the only person who may pay. */
+  owner: boolean;
+  /** Always zero for a personal account; being free is what it is (design C3). */
+  credits: number;
+  /** The negation of the service's one usable() predicate (C3, C6), not a second reading of it. */
+  suspended: boolean;
+  /**
+   * Which suspension, in a sentence: only one of the two is lifted by paying
+   * (design C6). Empty when the account is usable.
+   */
+  suspendedReason?: string;
+}
+
+/**
+ * The balance below which the console warns (task 6.10, design C4).
+ *
+ * The refusal at zero is soft — renewals stop and the certificate on the wire
+ * keeps working for weeks — so the warning is what actually protects a customer,
+ * and it has to arrive before the balance is gone rather than with it.
+ *
+ * It is the smallest amount a checkout offers, deliberately: "less than one
+ * top-up left" is a threshold a person can act on, and it needs no second number
+ * to be agreed anywhere. A real threshold belongs with the ledger that spends
+ * the balance (`metering-and-credits`), which can say how long the remainder
+ * lasts; until something spends credit, nothing here can.
+ */
+export const LOW_BALANCE = 25;

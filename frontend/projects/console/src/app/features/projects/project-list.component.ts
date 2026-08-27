@@ -8,7 +8,7 @@ import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule, NzTableQueryParams } from 'ng-zorro-antd/table';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionService, apiErrorMessage, may, openNameSlugModal , NOT_PERMITTED} from '@acme/shared';
+import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionService, apiErrorMessage, may, openNameSlugModal } from '@acme/shared';
 /** 19.1 — the project list: filter, page, and create through a modal (creation is ADMIN-only, D10). */
 @Component({
   selector: 'app-project-list',

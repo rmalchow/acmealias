@@ -15,6 +15,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/zoneview"
 )
 
@@ -96,7 +97,7 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
-	a := &admin{opts: o, resolver: verificationResolver(o.Config, o.Log), scopes: &scopeResolver{}}
+	a := &admin{opts: o, resolver: verificationResolver(o.Config, o.Log)}
 
 	e.HTTPErrorHandler = a.handleError
 
@@ -135,11 +136,15 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	// a route that forgot its permission failed closed. That is now the job of
 	// the test in internal/inventory that reads the package's own source and
 	// asserts nothing performs an operation without authorizing it first.
-	// Sessions keep a route-level check, deliberately. A session belongs to a
-	// person rather than to an account, so there is no object to authorize
-	// against and nothing for the service layer to name — the question really is
-	// "may this role administer sessions", which is what the old model asked.
-	sessions := authz.Require(authz.ActionSessionAdmin)
+	//
+	// Sessions were the last route with a middleware check, gated on the global
+	// ADMIN role. Design C10 removed the global roles, and there is no
+	// per-account role that could stand in: a session belongs to a PERSON, not
+	// to an account, so an account administrator holding power over one would be
+	// holding power over somebody who may not be in their account at all. The
+	// routes below are therefore confined to the caller's own sessions, and
+	// administering anybody else's is a staff-plane power that will live under
+	// /api/admin/** — see admin_sessions.go.
 
 	// --- routes reachable with no account selected (design P19) -------------
 	//
@@ -159,6 +164,19 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	sec.GET("/accounts", a.listAccounts)
 	sec.POST("/accounts", a.createAccount)
 	sec.POST("/accounts/:accountId/select", a.selectAccount)
+
+	// Checkout is here rather than under the account-scoped group below, and the
+	// placement is the decision rather than an oversight (design C4, C5, task
+	// 5.1). Everything under that group resolves a scope, and resolving a scope
+	// refuses a suspended account — which is precisely the account whose owner
+	// needs this route. Under `acct` it would be the one way to fix a suspended
+	// account, gated on the account not being suspended.
+	//
+	// What gates it instead is ownership, checked in the handler. The offer is
+	// readable with no account selected because the "Add account" screen renders
+	// it before there is an account.
+	sec.GET("/checkout/amounts", a.checkoutOffer)
+	sec.POST("/accounts/:accountId/checkout", a.checkout)
 
 	// --- account-scoped routes ---------------------------------------------
 	//
@@ -225,13 +243,16 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	acct.POST("/members", a.addMember)
 	acct.DELETE("/members/:id", a.removeMember)
 
+	// Transfer IS scoped, unlike checkout: handing over an account is something
+	// its owner does to a working account, and an owner who cannot pay for it
+	// has nothing to hand over yet.
+	acct.POST("/transfer", a.transferAccount)
+
 	// Sessions belong to a person rather than to an account, so they are not
-	// under /accounts — but administering OTHER people's sessions is still an
-	// account-level power, so the route keeps its role check until the staff
-	// plane gives it a better home.
-	sec.GET("/sessions", a.listSessions, sessions)
-	sec.DELETE("/sessions", a.revokeSubjectSessions, sessions)
-	sec.DELETE("/sessions/:handle", a.revokeSession, sessions)
+	// under /accounts — and for the same reason they are the caller's own.
+	sec.GET("/sessions", a.listSessions)
+	sec.DELETE("/sessions", a.revokeSubjectSessions)
+	sec.DELETE("/sessions/:handle", a.revokeSession)
 
 	// --- the internal surface (design P15) ----------------------------------
 	//
@@ -260,12 +281,19 @@ type admin struct {
 	// registration. Empty means none could be determined and the verification
 	// route says so rather than silently querying nothing.
 	resolver string
-	// scopes memoizes the account every request is confined to; see scope.go.
-	scopes *scopeResolver
 }
 
 func (a *admin) db() *gorm.DB      { return a.opts.DB }
 func (a *admin) log() *slog.Logger { return a.opts.Log }
+
+// limits is the configured room an account has, handed to internal/inventory on
+// every call that can be refused for lack of it (design C13). It is read off the
+// effective config per request rather than captured once, so a reload takes
+// effect without a restart — the same property the funding check has.
+func (a *admin) limits() inventory.Limits {
+	return inventory.Limits{ProjectsPerPersonalAccount: a.opts.Config.ProjectsPerPersonalAccount}
+}
+
 func (a *admin) planOptions() inventory.PlanOptions {
 	return inventory.PlanOptions{Zone: a.opts.Config.Zone, CAAIssuers: a.opts.Config.CAAIssuers}
 }
@@ -308,7 +336,6 @@ func bind(c echo.Context, dst any) error {
 // work that must not run at all if the change is rolled back, refreshView
 // above all — belongs after mutate returns, not inside fn.
 func (a *admin) mutate(c echo.Context, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
-	ctx := c.Request().Context()
 	sc, err := a.scope(c)
 	if err != nil {
 		return err
@@ -317,22 +344,80 @@ func (a *admin) mutate(c echo.Context, fn func(tx *gorm.DB) ([]authz.Event, erro
 	// reading their own trail sees their own entries and nothing else. It comes
 	// off the scope rather than off the request, for the same reason the scope
 	// itself does.
-	actor := authz.ConsoleActor(c).InAccount(sc.AccountID())
+	// The roles are the ones this request was authorized against, resolved from
+	// the caller's membership of that account rather than from anything on the
+	// session (design C10). An entry recording no authority when the actor held
+	// some is worse than no entry: it reads as a system action.
+	_, roles, err := a.subjectWithRoles(c)
+	if err != nil {
+		return err
+	}
+	return a.mutateAs(c, sc, roles, fn)
+}
+
+// mutateAs is mutate for the two callers that cannot let it resolve their scope
+// and their roles: checkout in an account that has none yet, and checkout in an
+// account so suspended that a.scope() refuses it (design C4, C8).
+//
+// Splitting it out rather than making mutate's resolution conditional keeps the
+// dangerous half explicit — a caller here is SAYING which account it is writing
+// into, and the two that do say it are the two that had no other way to.
+// Everything else must keep going through mutate, where the account is a
+// property of the caller rather than an argument.
+func (a *admin) mutateAs(c echo.Context, sc store.Scope, roles []string, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
+	return a.record(c, authz.ConsoleActor(c, roles).InAccount(sc.AccountID()), fn)
+}
+
+// mutateForPerson is mutate for the changes that belong to a PERSON rather than
+// to an account: ending one's own sessions.
+//
+// It resolves no scope, and that is the fix rather than a shortcut. The session
+// routes were going through a.mutate, which resolves the caller's account — so
+// "sign me out everywhere" answered 409 no_account_selected from the picker,
+// which since task 2.2 is the state every sign-in begins in, and 402 from a
+// suspended account. "My laptop was stolen" is exactly the moment somebody is
+// sitting at the picker, and it was the one moment the button did not work.
+//
+// The audit entry is written with NO account (authz.Actor.AccountID stays nil,
+// which audit_entries.account_id allows) instead of being filed into whichever
+// account happened to be selected. A session revocation did not happen inside a
+// tenant, and putting it in one both misattributes it and hides it from the
+// person whose session it was the moment they switch accounts.
+//
+// Nothing else may use this. Every other mutation acts on tenant data and must
+// keep going through mutate, where the account is a property of the caller.
+func (a *admin) mutateForPerson(c echo.Context, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
+	return a.record(c, authz.ConsoleActor(c, nil), fn)
+}
+
+// record is the transaction the three mutate helpers share: the change and its
+// audit entries commit together or not at all.
+func (a *admin) record(c echo.Context, actor authz.Actor, fn func(tx *gorm.DB) ([]authz.Event, error)) error {
+	ctx := c.Request().Context()
 	return a.db().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		events, err := fn(tx)
 		if err != nil {
 			return err
 		}
-		for _, e := range events {
-			if err := authz.Record(ctx, tx, a.opts.Metrics, actor, e); err != nil {
-				a.log().ErrorContext(ctx, "audit entry not recorded",
-					slog.String("action", e.Action), slog.String("object_type", e.ObjectType), slog.Any("error", err))
-				return echo.NewHTTPError(http.StatusInternalServerError,
-					"nothing was applied: the change could not be recorded in the audit trail")
-			}
-		}
-		return nil
+		return a.recordOn(ctx, tx, actor, events)
 	})
+}
+
+// recordOn writes the entries describing a change onto the transaction that made
+// it. It is separate from record for the one caller that opens its own
+// transaction because it has to — createAccount, which is writing the account
+// the entries are about — and which therefore cannot hand a closure to a helper
+// that would open a second one.
+func (a *admin) recordOn(ctx context.Context, tx *gorm.DB, actor authz.Actor, events []authz.Event) error {
+	for _, e := range events {
+		if err := authz.Record(ctx, tx, a.opts.Metrics, actor, e); err != nil {
+			a.log().ErrorContext(ctx, "audit entry not recorded",
+				slog.String("action", e.Action), slog.String("object_type", e.ObjectType), slog.Any("error", err))
+			return echo.NewHTTPError(http.StatusInternalServerError,
+				"nothing was applied: the change could not be recorded in the audit trail")
+		}
+	}
+	return nil
 }
 
 // refreshView reloads the zone view after an alias appeared or disappeared, so

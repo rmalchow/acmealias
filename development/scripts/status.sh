@@ -33,16 +33,17 @@ printf '   LAN can reach them, given the hostnames in its own /etc/hosts)\n'
 
 echo
 printf '\033[1msign-in\033[0m\n'
-printf '  %-22s %-22s %s\n' USER GROUP ROLE
-printf '  %-22s %-22s %s\n' admin@example.com  "$ACME_ADMIN_GROUP"         "ADMIN     (also the staff console)"
-printf '  %-22s %-22s %s\n' user@example.com   "$ACME_READ_ONLY_GROUP"     READ_ONLY
+printf '  %-22s %s\n' USER GROUP
+printf '  %-22s %s\n' admin@example.com  "acme-admin        (the staff console)"
+printf '  %-22s %s\n' user@example.com   "acme-read-only"
 printf '  the four the acceptance suite uses:\n'
-printf '  %-22s %-22s %s\n' admin-user         "$ACME_ADMIN_GROUP"         ADMIN
-printf '  %-22s %-22s %s\n' config-admin-user  "$ACME_CONFIG_ADMIN_GROUP"  CONFIG_ADMIN
-printf '  %-22s %-22s %s\n' key-rotation-user  "$ACME_KEY_ROTATION_GROUP"  KEY_ROTATION
-printf '  %-22s %-22s %s\n' read-only-user     "$ACME_READ_ONLY_GROUP"     READ_ONLY
+printf '  %-22s %s\n' admin-user         "acme-admin"
+printf '  %-22s %s\n' config-admin-user  "acme-config-admin"
+printf '  %-22s %s\n' key-rotation-user  "acme-key-rotation"
+printf '  %-22s %s\n' read-only-user     "acme-read-only"
 printf '  all passwords: devpass       authentik admin: akadmin / %s\n' "$AUTHENTIK_BOOTSTRAP_PASSWORD"
-printf '  only acme-admin reaches http://admin.localhost — the staff application is group-restricted\n'
+printf '  groups grant NO roles (design C10). What a person may do depends on which\n'
+printf '  accounts they are a member of; acme-admin only gates http://admin.localhost.\n'
 
 echo
 printf '\033[1mdata\033[0m\n'

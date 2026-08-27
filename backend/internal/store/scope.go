@@ -22,10 +22,9 @@ import (
 // # What this type guarantees, and what it does not
 //
 // It has no exported constructor taking a bare identifier, so a handler cannot
-// build one out of a path parameter: the only ways to obtain a Scope are from a
-// Membership, which only this package mints, or from the single-account bootstrap.
-// Every store read takes one as a parameter, so a query written without it does
-// not compile.
+// build one out of a path parameter: every producer below reads a row first and
+// takes the account off what the database returned. Every store read takes one as
+// a parameter, so a query written without it does not compile.
 //
 // It does NOT guarantee that a query which HAS a Scope actually used it. That is a
 // property of each query's WHERE clause, and it is why Scope sets a per-connection
@@ -37,9 +36,12 @@ type Scope struct {
 
 // Membership binds a person to one account. Its fields are unexported so that a
 // caller outside this package cannot assemble one out of request data: the only
-// sources are a row in account_members, or the derived membership the
-// identity-provider edition resolves from a group claim, both of which are built
-// here from data the database supplied.
+// source is a row in account_members, built here from data the database supplied.
+//
+// There used to be a second source — a membership derived per request from an
+// identity provider's group claim, for the internal edition. Removing it (design
+// C10) turns P18's rule from one with an exception into one without: a membership
+// is a row we wrote, always.
 type Membership struct {
 	accountID model.ID
 	userID    model.ID
@@ -49,8 +51,7 @@ type Membership struct {
 // AccountID reports the account this membership binds to.
 func (m Membership) AccountID() model.ID { return m.accountID }
 
-// UserID reports the person. It is the nil identifier for a membership derived
-// from a group claim, which names no stored user.
+// UserID reports the person.
 func (m Membership) UserID() model.ID { return m.userID }
 
 // RoleIDs reports the roles held in this account.
@@ -60,24 +61,40 @@ func (m Membership) RoleIDs() []model.ID { return m.roleIDs }
 // producer used by the authenticated request path.
 func ScopeFor(m Membership) Scope { return Scope{accountID: m.accountID} }
 
-// ScopeForBootstrap confines queries to the single account of an internal-edition
-// deployment. It reads the account rather than accepting one, so that a caller
-// cannot pass an identifier of its own choosing; it fails when the deployment has
-// more than one account, because then "the single account" is not a question with
-// an answer.
-func ScopeForBootstrap(ctx context.Context, db *gorm.DB) (Scope, error) {
-	var accs []model.Account
-	if err := db.WithContext(ctx).Order("created_at").Find(&accs).Error; err != nil {
-		return Scope{}, fmt.Errorf("store: bootstrap scope: %w", err)
+// ScopeForSlug confines queries to the account a slug names.
+//
+// It is the CLI's producer, and it exists because `adminctl` has no session and
+// no membership: its authority is the database connection string. Before design
+// C10 it took the deployment's single account, which is not a question with an
+// answer any more — so the account is now named on the command line, and read
+// back before it becomes a Scope. Naming it is the point: the break-glass path
+// should have to say which tenant it is about to write into, rather than
+// inheriting one.
+func ScopeForSlug(ctx context.Context, db *gorm.DB, slug string) (Scope, error) {
+	var acc model.Account
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.First(&acc, "slug = ?", slug).Error
+	})
+	if err != nil {
+		return Scope{}, fmt.Errorf("store: scope for account %q: %w", slug, err)
 	}
-	switch len(accs) {
-	case 0:
-		return Scope{}, errors.New("store: bootstrap scope: no account exists")
-	case 1:
-		return Scope{accountID: accs[0].ID}, nil
-	default:
-		return Scope{}, fmt.Errorf("store: bootstrap scope: %d accounts exist, expected one", len(accs))
+	return Scope{accountID: acc.ID}, nil
+}
+
+// ScopeForAccount confines queries to an account row the caller already read or
+// wrote.
+//
+// It takes the ROW rather than an identifier, which is what keeps it honest: the
+// only way to hold one is to have gone through the database for it, so this
+// cannot be built from a path parameter any more than the others can. It exists
+// for checkout-that-creates (design C8), which has the account in hand from the
+// insert it just performed and cannot go back through ScopeForSelection — the
+// selection has not happened yet, and the transaction has not committed.
+func ScopeForAccount(acc *model.Account) Scope {
+	if acc == nil {
+		return Scope{}
 	}
+	return Scope{accountID: acc.ID}
 }
 
 // ScopeForKey confines queries to the account an API key is anchored to.
@@ -101,14 +118,28 @@ func ScopeForKey(k *model.APIKey) Scope {
 // instead of producing a scope over nothing. The caller's right to act in it was
 // established when the selection was made (design P19).
 func ScopeForSelection(ctx context.Context, db *gorm.DB, accountID model.ID) (Scope, error) {
+	sc, _, err := AccountForSelection(ctx, db, accountID)
+	return sc, err
+}
+
+// AccountForSelection is ScopeForSelection for the callers that need the account
+// ROW as well as the confinement — every request that has to ask whether the
+// account is usable (design C3), which since task 4.3 is every account-scoped
+// one.
+//
+// It exists so that question costs ONE read. The obvious spelling —
+// ScopeForSelection followed by GetAccount — reads the same row twice through
+// two separate cross-account transactions, on the hot path of every management
+// request; ScopeForSelection had already read it and thrown it away.
+func AccountForSelection(ctx context.Context, db *gorm.DB, accountID model.ID) (Scope, *model.Account, error) {
 	var acc model.Account
 	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
 		return tx.First(&acc, "id = ?", accountID).Error
 	})
 	if err != nil {
-		return Scope{}, fmt.Errorf("store: scope for selected account %s: %w", accountID, err)
+		return Scope{}, nil, fmt.Errorf("store: scope for selected account %s: %w", accountID, err)
 	}
-	return Scope{accountID: acc.ID}, nil
+	return Scope{accountID: acc.ID}, &acc, nil
 }
 
 // AccountID reports the account this scope confines to.
@@ -197,11 +228,50 @@ func (s Scope) Run(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error)
 // Design P20 wants this to be a separate database role holding BYPASSRLS.
 // Migration 000007 records why it is a session setting instead, and what that
 // gives up.
+// Called INSIDE an already-open transaction, the lifting is undone again when fn
+// returns, and that is not tidiness. `SET LOCAL` is scoped to the transaction
+// and not to the savepoint: gorm turns a nested Transaction into a savepoint,
+// and PostgreSQL does not undo a SET LOCAL at RELEASE SAVEPOINT. So without the
+// restore, every statement after a nested CrossAccount runs with the policies
+// still off for the rest of the OUTER transaction — which is what happened the
+// first time this was nested under a mutation (transferAccount, checkout).
+// Nothing leaked: both carry their own account_id predicates. But the
+// database-level net that four shipped bugs paid for was silently down for the
+// remainder of every transfer and every checkout, and the next statement written
+// inside one would have had nothing under it.
+//
+// At the TOP level the two extra statements are skipped, and skipped rather than
+// written for symmetry: the transaction ends when this returns, and a SET LOCAL
+// cannot outlive it — that is the whole reason Scope.Run insists on a
+// transaction in the first place. This is the case that matters for cost,
+// because /present resolves its key and its alias through two of these on the
+// certificate-issuance path, and a test pins the statement count there.
+//
+// The restore runs only on success. When fn fails, gorm rolls back to the
+// savepoint — which DOES undo a SET LOCAL — and the transaction may be aborted,
+// so issuing another statement would replace the caller's error with a
+// "current transaction is aborted" from the driver.
 func CrossAccount(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error) error {
+	committer, nested := db.Statement.ConnPool.(gorm.TxCommitter)
+	nested = nested && committer != nil
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var previous string
+		if nested {
+			if err := tx.Raw("select coalesce(current_setting('app.cross_account', true), '')").Scan(&previous).Error; err != nil {
+				return fmt.Errorf("store: read cross-account setting: %w", err)
+			}
+		}
 		if err := tx.Exec("select set_config('app.cross_account', 'on', true)").Error; err != nil {
 			return fmt.Errorf("store: enter cross-account read: %w", err)
 		}
-		return fn(tx)
+		if err := fn(tx); err != nil {
+			return err
+		}
+		if nested {
+			if err := tx.Exec("select set_config('app.cross_account', ?, true)", previous).Error; err != nil {
+				return fmt.Errorf("store: leave cross-account read: %w", err)
+			}
+		}
+		return nil
 	})
 }

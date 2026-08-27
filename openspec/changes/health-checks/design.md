@@ -1,3 +1,20 @@
+> **Read this document against its own proposal, which reduced it.**
+>
+> Everything below was written for a service that hosted customers' zones and steered DNS answers by
+> health. `dns-records` and `satellite-sync` are archived unimplemented, so there is no fleet, no
+> recordset and nothing to steer — and with them go quorum, hysteresis, the fail-open rule,
+> per-family failover state, correlated-family suppression and the late-report rules. **Every one of
+> those existed because a check result changed what the internet was told.** Nothing here does that
+> any more.
+>
+> What survives is the half the proposal called a byproduct: one TLS handshake per node per address
+> family, hours apart, answering the question the challenge history opens and cannot close — a
+> certificate authority validated, but was a certificate ever installed, and does it cover the right
+> names.
+>
+> Read the mechanisms below as *how a thing like this was designed when it had to be trusted with
+> steering*, not as work to do. The proposal is the current scope; `tasks.md` is the current plan.
+
 ## Context
 
 `dns-records` makes the service authoritative for customer zones, so what a recordset holds is what

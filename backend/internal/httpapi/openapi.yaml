@@ -73,12 +73,37 @@ components:
         it arrives, so a stale value costs a refusal rather than access.
     Account:
       type: object
+      description: |
+        An account is `personal` or `team`, fixed at creation, and neither becomes the other.
+        A personal account is materialized for every user at their first sign-in: it is free, has
+        no balance, holds no roles or members, and is limited by a project quota. A team account is
+        created by funding it, has no project quota, and works only while `credits` is above zero.
       properties:
         id: { type: string, format: uuid }
         slug: { type: string }
         name: { type: string }
         createdAt: { type: string, format: date-time }
         selected: { type: boolean }
+        kind: { type: string, enum: [personal, team] }
+        owner:
+          type: boolean
+          description: Whether the caller is the person this account answers to.
+        credits:
+          type: integer
+          format: int64
+          description: The balance, in EUR. Always 0 for a personal account, which has no balance.
+        suspended:
+          type: boolean
+          description: |
+            Whether the account is unusable. A suspended account is still listed, because its owner
+            is the only person who can restore it.
+        suspendedReason: { type: string }
+    CheckoutAmounts:
+      type: object
+      description: The amounts a checkout may ask for. An amount outside this set is refused.
+      properties:
+        amounts: { type: array, items: { type: integer, format: int64 } }
+        currency: { type: string }
     Project:
       type: object
       properties:
@@ -172,6 +197,9 @@ paths:
   /me:
     get:
       summary: The signed-in person, and which account they are acting in
+      description: |
+        `roles` and `permissions` describe what the caller may do IN THE SELECTED ACCOUNT, and are
+        empty when no account is selected — which is the state every session starts in.
       responses:
         "200": { description: OK }
 
@@ -186,21 +214,71 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/Account" } }
     post:
-      summary: Create an account, becoming its first unrestricted member
+      summary: Buy a team account
       description: |
+        Creating a team account and funding it are one act, in one transaction: no team account
+        exists that has never been funded. The body carries `slug`, `name` and an `amount` from
+        the offered set; an amount outside it is refused.
+
         Refused unless the deployment enables it. A deployment authenticating a whole organization
         does not want every person in it able to create a tenant.
+
+        There is no route that creates a PERSONAL account. Every user has one because they are a
+        user; it appears at their first sign-in.
       responses:
-        "201": { description: Created }
+        "201": { description: Created and funded }
+        "400": { description: The amount is not one this service offers }
         "403": { description: Account creation is not enabled here }
+
+  /checkout/amounts:
+    get:
+      summary: The amounts a checkout may ask for
+      description: Reachable with no account selected; it is what the buy screen renders.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckoutAmounts" }
+
+  /accounts/{accountId}/checkout:
+    post:
+      summary: Add credit to an account
+      description: |
+        Deliberately NOT an account-scoped route. Every route under the scoped group is refused
+        for a suspended account, and the person this exists for is the owner of exactly such an
+        account — gating it on the account working would mean nobody could ever pay for one.
+
+        What gates it instead is ownership: only the person the account answers to may add credit.
+        The amount comes from the offered set.
+
+        Because the account is named in the path and there is no selection to check it against,
+        a caller who does not own it is answered NOT FOUND rather than forbidden — the same
+        answer as for an account that does not exist, so the route cannot be used to confirm
+        that a guessed identifier names a real account.
+      parameters: [{ $ref: "#/components/parameters/accountId" }]
+      responses:
+        "200":
+          description: The new balance
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { description: The amount is not one this service offers }
+        "404": { description: No such account, or it is not yours; the two are indistinguishable }
 
   /accounts/{accountId}/select:
     post:
       summary: Switch the session into one account
-      description: Membership is re-evaluated here, so a revoked membership takes effect at the switch.
+      description: |
+        Membership is re-evaluated here, so a revoked membership takes effect at the switch.
+
+        A suspended team account cannot be selected by a member — but it CAN be selected by its
+        owner, who then reaches its balance and checkout and nothing else. Without that exception
+        a suspended account would be unreachable by the only person who can restore it.
       parameters: [{ $ref: "#/components/parameters/accountId" }]
       responses:
         "204": { description: Selected }
+        "402": { description: The account is suspended and the caller is not its owner }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /accounts/{accountId}/projects:
@@ -224,9 +302,16 @@ paths:
         "409": { $ref: "#/components/responses/NoAccountSelected" }
     post:
       summary: Create a project
-      description: Governed by membership of the account's unrestricted role, not by a grant.
+      description: |
+        Governed by membership of the account's unrestricted role, not by a grant.
+
+        A personal account holds a configured number of projects — five by default. A team
+        account has no project quota at all; its balance is what limits it. Exceeding the quota is
+        a 409 and not a 403: it is a lack of room, not a lack of authority, and the remedy is to
+        delete a project or move to a team account rather than to ask somebody for a grant.
       responses:
         "201": { description: Created }
+        "409": { description: The account is full, or no account is selected }
 
   /accounts/{accountId}/projects/{id}:
     parameters:
@@ -433,12 +518,16 @@ paths:
       responses:
         "200": { description: OK }
 
+  # All three require inventory.view in the account, like every other read of
+  # what it holds. Membership alone is not enough: a member holding a role with
+  # no grants is refused these exactly as they are refused the project listing.
   /accounts/{accountId}/challenges:
     parameters: [{ $ref: "#/components/parameters/accountId" }]
     get:
       summary: Values answerable right now
       responses:
         "200": { description: OK }
+        "403": { description: The caller does not hold inventory.view in this account }
 
   /accounts/{accountId}/audit:
     parameters: [{ $ref: "#/components/parameters/accountId" }]
@@ -446,6 +535,7 @@ paths:
       summary: What changed in this account, and who changed it
       responses:
         "200": { description: OK }
+        "403": { description: The caller does not hold inventory.view in this account }
 
   /accounts/{accountId}/config:
     parameters: [{ $ref: "#/components/parameters/accountId" }]
@@ -453,7 +543,12 @@ paths:
       summary: The effective configuration, redacted
       responses:
         "200": { description: OK }
+        "403": { description: The caller does not hold inventory.view in this account }
 
+  # Roles and members exist only in a TEAM account. In a personal account these routes are
+  # REFUSED with 409 rather than answered with an empty collection, so a client can tell "there
+  # are none" from "there cannot be any". API keys and their grants are not like this: the grant
+  # model, and its subset rule, stay live in every account.
   /accounts/{accountId}/roles:
     parameters: [{ $ref: "#/components/parameters/accountId" }]
     get:
@@ -510,20 +605,46 @@ paths:
         "204": { description: Removed }
         "409": { description: This would leave the unrestricted role with no member }
 
+  /accounts/{accountId}/transfer:
+    post:
+      summary: Hand a team account to another user
+      description: |
+        The recipient is named by identity-provider subject, and is given an unrestricted
+        membership in the same transaction — an owner who is not a member cannot open their own
+        account. Only the current owner may do it.
+
+        A personal account is never transferred: it is one person's own workspace, and handing it
+        over would make it a team account with the team parts missing.
+      parameters: [{ $ref: "#/components/parameters/accountId" }]
+      responses:
+        "204": { description: Transferred }
+        "403": { description: The caller is not the account's owner }
+        "409": { description: This account cannot be transferred }
+
   /sessions:
     get:
-      summary: Console sessions
+      summary: Your own console sessions
+      description: |
+        The sessions of the person making the request, and nobody else's. A session belongs to a
+        person rather than to an account, so there is no account-level authority over one.
       responses:
         "200": { description: OK }
     delete:
-      summary: Revoke every session of one subject
+      summary: Sign out everywhere
+      description: |
+        Ends every session the caller holds. The optional `subject` query parameter is a check
+        rather than a target: naming anybody but yourself is refused.
+      parameters:
+        - { name: subject, in: query, required: false, schema: { type: string } }
       responses:
         "200": { description: OK }
+        "403": { description: The named subject is not the caller }
 
   /sessions/{handle}:
     parameters:
       - { name: handle, in: path, required: true, schema: { type: string } }
     delete:
-      summary: Revoke one session
+      summary: End one of your own sessions
       responses:
         "200": { description: OK }
+        "404": { description: You hold no valid session with that handle }

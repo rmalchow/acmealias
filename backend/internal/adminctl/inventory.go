@@ -59,11 +59,16 @@ func resolveLoadBalancerRef(ctx context.Context, db *gorm.DB, sc store.Scope, re
 }
 
 // ProjectCreate creates a project and prints the result.
-func ProjectCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, slug, name string) error {
+//
+// lim is the deployment's configured quota, passed in rather than assumed away.
+// The CLI is subject to it for the same reason it is subject to every other rule
+// in internal/inventory: a limit the API enforces and the CLI walks past is a
+// limit that holds until somebody uses the CLI (design P7, C13).
+func ProjectCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, lim inventory.Limits, slug, name string) error {
 	var p *model.Project
 	err := mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		p, err = inventory.CreateProject(ctx, tx, sc, authz.CLISubject(sc.AccountID()), slug, name)
+		p, err = inventory.CreateProject(ctx, tx, sc, authz.CLISubject(sc.AccountID()), lim, slug, name)
 		if err != nil {
 			return nil, err
 		}

@@ -93,6 +93,19 @@ func discoverAlias() error {
 	return nil
 }
 
+// aliasNameFor is the authoritative name one alias answers TXT at.
+//
+// The zone suffix is taken from the alias discovered above rather than written
+// out, for the same reason the label is: it comes from configuration
+// (ACME_DNS_ZONE) and a second copy here would be a second thing to keep in
+// step. Tests that create their own inventory — the personal and team arcs —
+// need this because their alias is not the seeded one the fake internet
+// delegates to; they query our authoritative listener directly, which is where
+// challenge values live in any case (CoreDNS does not chase the CNAME).
+func aliasNameFor(label string) string {
+	return label + "." + strings.TrimPrefix(aliasFQDN, aliasLabel+".")
+}
+
 // repoDir is the checkout root. The suite lives at backend/acceptance, so the
 // scripts are two levels up.
 var repoDir = func() string {
@@ -498,11 +511,41 @@ func demoProd(t *testing.T, s *session) (project, lb string) {
 }
 
 // mustSignIn is signIn with the failure reported against the test.
+//
+// The session it returns has NO account selected — the state every session now
+// begins in (design P19, task 7.5). A test that needs to act on inventory has to
+// choose one first: mustSignInSeeded below for the seeded inventory, or
+// s.selectInto(t, s.personalAccount(t)) for the account the user simply has.
 func mustSignIn(t *testing.T, user, password string) *session {
 	t.Helper()
 	s, err := signIn(user, password)
 	if err != nil {
 		t.Fatalf("signing in as %s: %v", user, err)
 	}
+	return s
+}
+
+// mustSignInSeeded signs a user in and puts them to work in the seeded team
+// account, holding the role seededRoles gives them.
+//
+// This is the fixture that replaces "everybody shares one account and their
+// group grants them a role" (task 7.1). The three steps are the three things
+// that used to be implicit: the person exists (sign-in), they are a member of
+// this account with this role (joinAccount — see the note there on why it is
+// written rather than requested), and this session is acting in it (selectInto).
+//
+// Only the seeded account is reached this way, because it is the only account
+// nobody can be invited into: it holds the inventory the whole issuance arc runs
+// against and its owner is a stand-in nobody can sign in as. Team accounts the
+// suite creates itself are joined through the real API — see team_test.go.
+func mustSignInSeeded(t *testing.T, user string) *session {
+	t.Helper()
+	role, ok := seededRoles[user]
+	if !ok {
+		t.Fatalf("no seeded role for %s; seededRoles covers the four users the blueprint creates", user)
+	}
+	s := mustSignIn(t, user, devPassword)
+	joinAccount(t, seededAccountSlug, s.subject, role)
+	s.selectInto(t, s.accountBySlug(t, seededAccountSlug))
 	return s
 }

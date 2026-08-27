@@ -24,7 +24,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := t.Context()
 
-	p, err := inventory.CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), "acme", "Acme")
+	p, err := inventory.CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), inventory.Limits{}, "acme", "Acme")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}

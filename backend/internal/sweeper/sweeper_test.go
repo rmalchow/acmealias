@@ -29,13 +29,32 @@ const testDatabaseURLEnv = "TEST_DATABASE_URL"
 // unexported helper of the same shape rather than importing it — that helper
 // isn't exported, and this is the only place outside internal/store that
 // needs it.
-// scopedDB is migratedDB plus the scope every inventory call now takes.
+// scopedDB is migratedDB plus the scope every call now takes.
+//
+// The account is CREATED, through the production path, rather than resolved out
+// of a migration seed: design C10 deleted store.ScopeForBootstrap along with the
+// single-account edition it served. The Valid check is not ceremony — row-level
+// security is on, and a zero Scope reads no rows and raises no error, so a
+// fixture that quietly produced one would make a whole file pass against empty
+// result sets.
 func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
 	t.Helper()
 	db := migratedDB(t)
-	sc, err := store.ScopeForBootstrap(context.Background(), db)
+	ctx := context.Background()
+	owner, err := store.FindOrCreateUser(ctx, db, "sweeper-fixture-owner", "Fixture Owner", "")
 	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
+		t.Fatalf("create owner: %v", err)
+	}
+	acc, err := store.CreateAccountWithOwner(ctx, db, "sweeper-fixture", "Fixture", owner.ID, 25)
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	sc, err := store.ScopeForSelection(ctx, db, acc.ID)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if !sc.Valid() {
+		t.Fatal("fixture scope is the zero Scope; every read below would silently match nothing")
 	}
 	return db, sc
 }

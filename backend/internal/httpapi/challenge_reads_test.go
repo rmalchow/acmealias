@@ -62,7 +62,8 @@ func TestIntegrationPresentIssuesNoExtraDatastoreReads(t *testing.T) {
 	//   3. upsert the challenge value
 	//   4. read the alias's domain names for the interaction history
 	//   5. open the interaction row
-	//   6-9. the transaction wrapper's set_config for each scoped statement
+	//   6. read the account, to decide whether it is funded
+	//   7-11. the transaction wrapper's set_config for each scoped statement
 	//
 	// Migration 000010 added one to this, and it is worth naming: challenges now
 	// inherits a policy from aliases, so the upsert runs inside a scope
@@ -74,7 +75,18 @@ func TestIntegrationPresentIssuesNoExtraDatastoreReads(t *testing.T) {
 	// The grant evaluation added NONE, which is what this test exists to hold:
 	// the key's grants are preloaded with the key, and the alias carries its own
 	// ancestors. A lazily loaded grant set would show up here immediately.
-	const ceiling = 13
+	//
+	// The FUNDING check added two — the account read and its cross-account
+	// set_config — and they are named here rather than absorbed, because this
+	// test's job is to make a number somebody has to justify. The justification:
+	// the check cannot be answered from anything already in memory. It is a
+	// property of the ACCOUNT, the request arrives holding only a key, and the
+	// answer has to be current — an account that ran out mid-renewal must stop,
+	// and one that was just paid for must resume, neither waiting for a cache to
+	// expire or a process to restart (task 4.6). Caching it was the alternative
+	// and is what that requirement rules out. One indexed primary-key lookup on
+	// a row PostgreSQL has in shared buffers is the price of the whole of C3.
+	const ceiling = 15
 	if n := statements.Load(); n > ceiling {
 		t.Fatalf("one publish issued %d datastore statements, want at most %d.\n"+
 			"The permission check on this path must read nothing: grants are preloaded "+

@@ -32,11 +32,25 @@ metadata:
 entries:
   # --- groups -----------------------------------------------------------------
   #
-  # These four names are not decorative and must not be tidied. Each is named by a
-  # setting in development/.env (ACME_ADMIN_GROUP and its three siblings), and each
-  # is asserted by name in backend/acceptance/identity_test.go. A role whose
-  # configured group does not exist grants nothing, and the service reports that at
-  # start-up rather than failing later (design K3).
+  # THESE GROUPS NO LONGER GRANT ANYTHING (design C10, task 2.7).
+  #
+  # Each used to be named by a setting in development/.env (ACME_ADMIN_GROUP and
+  # its three siblings) and turned into one of four global roles at every request.
+  # Roles are membership rows inside an account now, and nothing an identity
+  # provider says confers authority. The four ACME_*_GROUP settings are gone.
+  #
+  # They are kept rather than deleted, for two reasons that are worth separating:
+  #
+  #   1. acme-admin is what the STAFF application is restricted to, further down
+  #      this file. That is a different mechanism — who may open admin.localhost —
+  #      and deleting the group would lock everybody out of the staff console
+  #      while looking like tidying up after the role mapping.
+  #
+  #   2. The acceptance suite still wants four distinguishable people, so that a
+  #      test can invite each into an account with a different role and see the
+  #      difference. What changes is where the role comes from: an invitation
+  #      rather than a claim. The groups themselves are now just labels on those
+  #      users, and a later change may drop them once nothing reads them.
 
   - model: authentik_core.group
     id: group-admin
@@ -60,13 +74,14 @@ entries:
 
   # --- the two people you sign in as ------------------------------------------
   #
-  # admin@example.com holds acme-admin, so it can do everything the console
-  # offers, and it is the only one of the six that reaches the STAFF console —
-  # the staff application admits acme-admin and nothing else.
+  # admin@example.com holds acme-admin, which is now exactly one thing: the key
+  # to the STAFF console. It no longer confers any role in the customer console —
+  # what it can do there depends on which accounts it is a member of.
   #
-  # user@example.com holds acme-read-only, which is the more useful default of
-  # the two: a surface that looks right for an administrator and wrong for
-  # everybody else is the failure this account exists to catch.
+  # user@example.com holds acme-read-only, which grants nothing at all any more.
+  # It is kept as the second person: a surface that looks right for the account
+  # owner and wrong for everybody else is the failure this account exists to
+  # catch, and having two people is what makes that visible.
   #
   # Everything here uses the password `devpass`.
 
@@ -182,21 +197,20 @@ entries:
 
   # --- the group claim --------------------------------------------------------
   #
-  # THE MOST IMPORTANT DOZEN LINES IN THIS FILE (design K3).
+  # The claim is still emitted, and it no longer decides anything (design C10).
   #
-  # Roles are derived by comparing the `groups` claim of the identity token
-  # against one setting per role. What matters is the SHAPE of that list: bare
-  # names (`acme-admin`), not paths (`/acme-admin`).
+  # It used to be the whole of the permission model: the `groups` claim compared
+  # against one setting per role, at every request. Now it is recorded — on the
+  # session, and beside the roles in every audit entry — because what the identity
+  # provider said about a person is worth keeping even when nothing is concluded
+  # from it. That makes the shape of the list a diagnostic question rather than an
+  # access one, which is a real demotion: a wrong shape here used to lock people
+  # out and now only makes an audit entry read oddly.
   #
-  # ACME_OIDC_GROUP_PREFIX exists to absorb providers that disagree about this.
-  # The decision is to emit the right shape here and leave that setting empty, so
-  # development exercises the same code path production will; a stack needing a
-  # non-empty prefix would be testing the prefix rather than the mapping.
-  #
-  # The failure this prevents does not look like itself: a token carrying
-  # `/acme-admin` where `acme-admin` was expected produces "you are in none of the
-  # configured groups", which reads as a permissions problem and is a claim-shape
-  # problem.
+  # The shape is still bare names (`acme-admin`), not paths (`/acme-admin`), and
+  # ACME_OIDC_GROUP_PREFIX still exists to absorb providers that disagree. The
+  # decision is unchanged: emit the right shape here and leave that setting empty,
+  # so development exercises the same code path production will.
 
   - model: authentik_providers_oauth2.scopemapping
     id: mapping-groups
@@ -314,6 +328,10 @@ entries:
   # application admits a staff group and nothing else. Here that group is
   # acme-admin, so user@example.com can reach the customer console and is refused
   # by the staff one — which is the arrangement worth being able to demonstrate.
+  #
+  # This is the ONE thing acme-admin still does. It is unrelated to the role
+  # mapping design C10 removed, and the two are easy to conflate: deleting the
+  # group as part of that removal would close the staff console.
   - model: authentik_core.application
     identifiers: { slug: acmeservice-admin }
     attrs:
@@ -321,3 +339,45 @@ entries:
       slug: acmeservice-admin
       provider: !KeyOf provider-admin
       meta_description: "Staff surface. Address-restricted at the ingress; see public-edition U7."
+
+  # --- what the sign-in page looks like ---------------------------------------
+  #
+  # A BRAND, in authentik's sense, is the per-domain appearance and set of default
+  # flows — the object that decides which logo, title and favicon a person sees.
+  # Every installation has exactly one to begin with, whose domain is the literal
+  # string `authentik-default` and which matches when no other brand's domain does.
+  # This modifies that one rather than adding a second, because a second brand
+  # would only ever be selected on a hostname this stack does not have.
+  #
+  # The two image paths are files bind-mounted into the image by
+  # development/compose.yaml; /static/dist is how the server publishes /web/dist.
+  # They are NOT uploads: an uploaded logo would live in ./data/authentik_media
+  # and disappear on the next `reset.sh`, leaving a blueprint that names a file
+  # nobody can serve.
+  #
+  # The black background and the accent green are not here — 2024.10's brand has
+  # no CSS field at all — they are development/authentik/branding/custom.css.
+  - model: authentik_brands.brand
+    identifiers: { domain: authentik-default }
+    attrs:
+      branding_title: AcmeAlias
+      branding_logo: /static/dist/brand/logo.png
+      branding_favicon: /static/dist/brand/logo.png
+      # authentik ships both a light and a dark stylesheet and picks per browser
+      # preference by default. Pinned to dark here, so the page every visitor
+      # gets is the one the CSS below is written against — a light-theme visitor
+      # would otherwise land on white PatternFly components sitting on our black
+      # background, which is worse than either theme on its own.
+      attributes:
+        settings:
+          theme:
+            base: dark
+
+  # The line above the username field. authentik ships "Welcome to authentik!",
+  # which is the correct name of the wrong product as far as anyone signing in is
+  # concerned: they came to us, and the identity provider being a separate piece
+  # of software is our business rather than theirs.
+  - model: authentik_flows.flow
+    identifiers: { slug: default-authentication-flow }
+    attrs:
+      title: Welcome to AcmeAlias

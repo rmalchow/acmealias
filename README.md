@@ -219,9 +219,15 @@ rather than NXDOMAIN; that a key belonging to another load balancer is refused a
 CIDR-restricted key is enforced in both directions, forged `X-Forwarded-For` included; that
 restarting the api container between publishing a challenge and its validation still yields a
 certificate; that `adminctl loadbalancer dns demo/prod` matches the zone CoreDNS is serving,
-record for record, on the challenge aliases; that all four seeded users' roles resolve through the
-real Keycloak with the `CONFIG_ADMIN`/`KEY_ROTATION` boundary pinned in both directions; and that
-the one TXT query answering two authorizations is credited to both of them.
+record for record, on the challenge aliases; that a signed-in user holds a role because of a
+membership in one account and not because of a group claim, with the `CONFIG_ADMIN`/`KEY_ROTATION`
+boundary pinned in both directions; that a new session has selected nothing and is still offered
+somewhere to work; that the personal account arc works end to end — sign in, pick it, build a
+project, publish a challenge — while its roster is refused and its project quota is a 409 rather
+than a 403; that a team account is bought, invites a member, stops with 402 in both the console and
+the challenge API when its balance reaches zero, and works again once its owner pays without a new
+session or a new key; and that the one TXT query answering two authorizations is credited to both
+of them.
 
 **It costs minutes, not seconds.** The suite owns the stack: it runs `./scripts/dev.sh reset
 --yes`, then `up --acme`, then `down` around itself, which is a full rebuild plus several real
@@ -294,11 +300,11 @@ until the previous one verifies green.
    failure this check catches: a DS pointing at an unsigned child makes every validating resolver
    SERVFAIL the whole subtree while a direct `dig` at our server still looks fine. Full checklist
    in [`docs/dns-zone-setup.md`](docs/dns-zone-setup.md) step 4.
-4. **Register the Keycloak client**, with a Group Membership mapper emitting a plain (non-path)
-   `groups` claim, and set `ACME_ADMIN_GROUP`, `ACME_CONFIG_ADMIN_GROUP`,
-   `ACME_KEY_ROTATION_GROUP`, `ACME_READ_ONLY_GROUP` to the groups it should map to roles from.
-   Restart and sign in — there's no separate console bootstrap step. See
-   [`docs/installation.md`](docs/installation.md) step 2 and step 6.
+4. **Register the Keycloak client** and create the first account. Groups grant nothing: a person's
+   permissions come from their membership of an account, so after the client is registered run
+   `acmeservice adminctl account create --slug … --name … --owner <idp-subject> --credits 25` once,
+   then sign in. (Only for a shared account: signing in gives every user their own personal one.)
+   and select it. See [`docs/installation.md`](docs/installation.md) step 2 and step 6.
 5. **Enter the existing fleet into the inventory** — projects, load balancers with node addresses, and
    the domains each already answers for. Read-only reality capture; nothing changes for those
    domains yet. See [`docs/load-balancer-setup.md`](docs/load-balancer-setup.md) step 1.

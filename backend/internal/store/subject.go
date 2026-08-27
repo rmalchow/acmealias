@@ -183,21 +183,77 @@ func GetAccount(ctx context.Context, db *gorm.DB, sc Scope) (*model.Account, err
 //
 // Cross-account by construction: it runs before the account it is creating
 // exists, so there is no scope to run it in.
-func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string, userID model.ID) (*model.Account, error) {
+//
+// credits is the account's opening balance, and it is a PARAMETER rather than a
+// zero somebody tops up afterwards because of design C8: a team account is
+// created by funding it, in one transaction, so that no team account exists that
+// has never been funded. An account created with zero is suspended from its first
+// instant, which is a state with no purpose — its owner would land on the pay
+// screen of an account they just made. Callers that genuinely want that (a
+// fixture, a test of the boundary) have to say so, which is the point of making
+// them pass the number.
+//
+// It takes the *gorm.DB the caller holds, so a checkout can pass its transaction
+// and get the account, the roles, the membership, the credit and the audit entry
+// in one commit.
+//
+// The positive-credits check is HERE and not in the database, and the asymmetry
+// with accounts_personal_has_no_balance is not an oversight. A team account at
+// zero is not an illegal row — it is the SUSPENDED state the whole of C3 and C4
+// is about, and every account reaches it eventually — so `check (kind =
+// 'personal' or credits > 0)` would forbid the state the design requires. The
+// rule is about creation only, and creation is a function rather than a
+// constraint, so this is the lowest floor there is. Both callers already refuse
+// it (POST /accounts against CheckoutAmounts, `adminctl account create` against
+// --credits); this is what a third one — a repair script, a seed, the staff
+// plane — walks into instead of quietly producing an account that is broken from
+// its first instant.
+func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string, userID model.ID, credits int64) (*model.Account, error) {
+	if credits <= 0 {
+		return nil, fmt.Errorf("%w: a team account is created by funding it, and %d leaves it suspended "+
+			"from its first instant (design C8)", ErrAmountNotOffered, credits)
+	}
 	var acc model.Account
 	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
-		acc = model.Account{Slug: slug, Name: name}
+		// A team account, always: a personal account is materialized rather than
+		// requested (design C1), so nothing that goes through a slug and a name
+		// a caller chose can be one. The owner is the same user the first
+		// membership names — the column records what was already true.
+		acc = model.Account{
+			Slug: slug, Name: name,
+			Kind: model.AccountKindTeam, OwnerUserID: userID, Credits: credits,
+		}
 		if err := tx.Create(&acc).Error; err != nil {
 			return fmt.Errorf("create account: %w", err)
 		}
-		role := model.Role{
-			AccountID: acc.ID, Name: "ADMIN", Unrestricted: true,
-			Description: "Every action on every object in this account",
+		// The default role set (design C10, task 2.5). It used to be seeded by
+		// migration 000008 across every account that existed at migration time,
+		// which is what made the four names a global vocabulary; it is written
+		// per account here instead, which is what makes them this account's own.
+		//
+		// Personal accounts never reach this line, and that is the point: they
+		// have nobody to give a role to (design C9).
+		var unrestricted model.ID
+		for _, r := range DefaultRoles() {
+			r.AccountID = acc.ID
+			for i := range r.Grants {
+				r.Grants[i].AccountID = acc.ID
+			}
+			if err := tx.Create(&r).Error; err != nil {
+				return fmt.Errorf("create role %q: %w", r.Name, err)
+			}
+			if r.Unrestricted {
+				unrestricted = r.ID
+			}
 		}
-		if err := tx.Create(&role).Error; err != nil {
-			return fmt.Errorf("create unrestricted role: %w", err)
+		if unrestricted == model.NilID {
+			// Unreachable while DefaultRoles carries ADMIN, and checked because
+			// the alternative is an account with a membership pointing at the
+			// nil role — which the foreign key would refuse with a message
+			// nobody could act on.
+			return fmt.Errorf("the default role set has no unrestricted role")
 		}
-		member := model.AccountMember{AccountID: acc.ID, UserID: userID, RoleID: role.ID}
+		member := model.AccountMember{AccountID: acc.ID, UserID: userID, RoleID: unrestricted}
 		if err := tx.Create(&member).Error; err != nil {
 			return fmt.Errorf("create first membership: %w", err)
 		}
@@ -207,6 +263,74 @@ func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string,
 		return nil, fmt.Errorf("store: create account %q: %w", slug, err)
 	}
 	return &acc, nil
+}
+
+// ErrPersonalAccountFixed is the refusal to hand a personal account to somebody
+// else. It is a property of what the account is, not of who is asking: a
+// personal account handed over is a team account with the team parts missing
+// (design C1).
+var ErrPersonalAccountFixed = errors.New("store: a personal account belongs to its user and cannot be transferred")
+
+// ErrSecondPersonalAccount is the refusal to leave one user owning two personal
+// accounts (design C2).
+var ErrSecondPersonalAccount = errors.New("store: a user may own only one personal account")
+
+// TransferOwnership moves a team account to another user.
+//
+// It takes a Scope because the account being transferred is the one the caller
+// is already acting in, and CrossAccount because `accounts` is the one table a
+// Scope cannot filter — it has an id where every other table has an account_id,
+// which is why every read of it in this package is written this way.
+//
+// The row is locked for the length of the check, so two concurrent transfers
+// serialize rather than both reading the same owner and both writing over it.
+// The database refuses both of the refusals below on its own (migration 000013's
+// trigger and partial unique index); this is where they become a sentence the
+// caller can read instead of a constraint name.
+//
+// Establishing the recipient's membership is the CALLER's job, in this same
+// transaction — pass the transaction handle. An owner who is not a member is an
+// account whose owner cannot open it.
+func TransferOwnership(ctx context.Context, db *gorm.DB, sc Scope, newOwnerUserID model.ID) error {
+	if !sc.Valid() {
+		return ErrNoScope
+	}
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		var acc model.Account
+		if err := tx.Clauses(lockingClause()).First(&acc, "id = ?", sc.AccountID()).Error; err != nil {
+			return fmt.Errorf("read account: %w", err)
+		}
+		if acc.Kind == model.AccountKindPersonal {
+			return ErrPersonalAccountFixed
+		}
+		if acc.OwnerUserID == newOwnerUserID {
+			return nil
+		}
+		// C2's other door. Unreachable while the refusal above holds, because a
+		// personal account never reaches this line — and written anyway,
+		// because the day somebody adds "transfer a personal account, for
+		// support reasons" the limit would otherwise be gone without anybody
+		// removing it.
+		if acc.Kind == model.AccountKindPersonal {
+			var n int64
+			if err := tx.Model(&model.Account{}).
+				Where("owner_user_id = ? AND kind = ?", newOwnerUserID, model.AccountKindPersonal).
+				Count(&n).Error; err != nil {
+				return fmt.Errorf("count personal accounts of %s: %w", newOwnerUserID, err)
+			}
+			if n > 0 {
+				return fmt.Errorf("%w: %s already owns one", ErrSecondPersonalAccount, newOwnerUserID)
+			}
+		}
+		if err := tx.Model(&acc).Update("owner_user_id", newOwnerUserID).Error; err != nil {
+			return fmt.Errorf("write owner: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("store: transfer account %s to %s: %w", sc.AccountID(), newOwnerUserID, err)
+	}
+	return nil
 }
 
 // IsMember reports whether a user holds any membership in an account.

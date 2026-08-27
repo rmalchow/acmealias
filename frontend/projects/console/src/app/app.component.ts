@@ -1,12 +1,13 @@
 import { Component, computed, inject } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzDropDownModule } from 'ng-zorro-antd/dropdown';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzMenuModule } from 'ng-zorro-antd/menu';
 import { NzModalModule } from 'ng-zorro-antd/modal';
 import { AccountSwitcherComponent } from './features/accounts/account-switcher.component';
-import { SessionService } from '@acme/shared';
+import { AccountsService } from './features/accounts/accounts.service';
+import { LOW_BALANCE, SessionService } from '@acme/shared';
 
 interface NavItem {
   path: string;
@@ -14,19 +15,32 @@ interface NavItem {
 }
 
 /**
- * The screens of D11. Sessions and effective-configuration are deliberately NOT here: both are
- * still served by the management API (`/sessions`, `/config`) for the CLI and for support, but
- * neither is part of an operator's work — see the note in app.routes.ts.
+ * A personal account's navigation, and a team account's (design C11, tasks 6.2 / 6.2a).
+ *
+ * THE NAVIGATION IS THE ONE PLACE THINGS ARE LEFT OUT, and it is worth saying why that does not
+ * contradict the rule right beside it. Inside a screen a control the caller lacks a grant for
+ * stays visible and disabled with a reason (`NOT_PERMITTED`), because an absent button teaches
+ * nothing. Navigation is not a set of controls, though — it is the map of the product, and a map
+ * with three greyed-out destinations does not read as "you could go here", it reads as clutter
+ * on every screen forever, for a customer who may never want any of them.
+ *
+ * What the disabled-control rule is really protecting is the REMEDY: someone must be able to
+ * learn that the capability exists and what would unlock it. One entry that names the remedy
+ * does that better than three that describe the lack, so `Upgrade` is the whole message in a
+ * personal account — the positive form of the same sentence, pointing at what to do rather than
+ * at what is missing.
+ *
+ * `Live challenges` is in neither list and its route still exists: deferred, not dropped (6.2d).
  */
-export const NAV: NavItem[] = [
+export const PERSONAL_NAV: NavItem[] = [
   { path: '/projects', label: 'Projects' },
-  { path: '/challenges', label: 'Live challenges' },
-  { path: '/audit', label: 'Audit log' },
-  // Roles and membership are an account administering itself. Reading the roster
-  // needs no grant; changing it is refused by the service for anyone who is not
-  // an unrestricted member, so the link is offered to everyone and the screen
-  // says what they may do.
-  { path: '/roles', label: 'Roles' },
+  { path: '/upgrade', label: 'Upgrade' },
+];
+
+export const TEAM_NAV: NavItem[] = [
+  { path: '/projects', label: 'Projects' },
+  { path: '/audit', label: 'Audit' },
+  { path: '/settings', label: 'Settings' },
 ];
 
 @Component({
@@ -47,8 +61,52 @@ export const NAV: NavItem[] = [
 })
 export class AppComponent {
   readonly session = inject(SessionService);
-  // Every item, for everybody. Navigation is not filtered by permission: a link
-  // that vanishes teaches nothing, and a screen that refuses with a reason teaches
-  // what to ask for. Each destination says what this caller may do once there.
-  readonly nav = NAV;
+  readonly accounts = inject(AccountsService);
+  private readonly router = inject(Router);
+
+  /**
+   * The navigation of the SELECTED ACCOUNT, recomputed when the selection changes — which is
+   * what task 6.2c asks for and what the switcher's `location.reload()` used to prevent. The
+   * account list is loaded before the first render (app.config's initializer), so this is right
+   * the first time rather than flickering from one shape into the other.
+   *
+   * Nothing while no account is selected: the picker is the only screen reachable from that
+   * state, and a bar of links that all redirect back to it is worse than an empty bar. Nothing
+   * either while the account is suspended — that account has exactly one screen (design C5).
+   */
+  readonly nav = computed<NavItem[]>(() => {
+    const account = this.accounts.current();
+    if (!account || account.suspended) return [];
+    return account.kind === 'personal' ? PERSONAL_NAV : TEAM_NAV;
+  });
+
+  /**
+   * Warned before zero, not at it (task 6.10, design C4). It sits in the shell rather than on
+   * one screen because the point is that it is seen — the consequence of an empty balance is a
+   * clock the customer will not feel for weeks, so the warning is the part that protects them.
+   */
+  readonly lowBalance = computed(() => {
+    const account = this.accounts.current();
+    if (!account || account.kind !== 'team' || account.suspended) return null;
+    return account.credits <= LOW_BALANCE ? account : null;
+  });
+
+  /**
+   * What the routed screen belongs to. The outlet is keyed on it (see the template), so a switch
+   * between two accounts re-mounts the screen even when the URL does not change — which is the
+   * other half of dropping the reload: every screen fetches for one account, and the one it
+   * fetched for has just gone.
+   */
+  readonly accountKey = computed(() => this.accounts.current()?.id ?? 'none');
+
+  /**
+   * Leaving is not signing out. "No account selected" is a state the service understands and
+   * answers distinctly, so someone who has finished with one account gets back to the picker
+   * without ending their session. It moved into this menu when the switcher became a select,
+   * which has options but no place to hang a verb.
+   */
+  async leave(): Promise<void> {
+    await this.accounts.leave();
+    await this.router.navigateByUrl('/accounts');
+  }
 }

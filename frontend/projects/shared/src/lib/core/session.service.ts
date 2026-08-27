@@ -4,8 +4,17 @@ import { Router } from '@angular/router';
 import { ApiService } from './api.service';
 import { firstValueFrom } from 'rxjs';
 
-/** The four global roles (D10). There is no per-project scoping. */
-export type Role = 'ADMIN' | 'CONFIG_ADMIN' | 'KEY_ROTATION' | 'READ_ONLY';
+/**
+ * The name of a role held IN THE SELECTED ACCOUNT.
+ *
+ * It was a union of four literals — the global vocabulary configured by
+ * `ACME_ADMIN_GROUP` and its siblings. There is no such vocabulary any more
+ * (design C10): the four names survive as the default roles seeded into each new
+ * team account, where the account's owner may rename, edit or delete them, so
+ * any fixed set of literals here would be a claim the service no longer makes.
+ * A personal account has no roles at all (C9) and this is empty there.
+ */
+export type Role = string;
 
 /** Shape of `GET /api/v1/me`. */
 export interface Me {
@@ -24,9 +33,12 @@ export interface Me {
    */
   permissions: string[];
   /**
-   * The account this session is acting in, or null when none is selected — which is a normal
-   * state, not an error: someone who belongs to several accounts and has not yet said which.
-   * A single-account deployment selects it at sign-in and never shows a picker.
+   * The account this session is acting in, or null when none is selected.
+   *
+   * That is now the state EVERY session starts in (design P19, C10): sign-in no longer selects
+   * an account, so the picker is the front door rather than an edge case — and it is never
+   * empty, because a user's personal account is materialized on first sign-in (C1). "No account
+   * selected" therefore means "you have not yet said which", never "you have nothing".
    */
   selectedAccountId: string | null;
 }

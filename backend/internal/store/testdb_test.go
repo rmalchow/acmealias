@@ -153,11 +153,7 @@ func isolatedDB(t *testing.T) (*gorm.DB, Scope) {
 			sqlDB.Close()
 		}
 	})
-	sc, err := ScopeForBootstrap(context.Background(), db)
-	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
-	}
-	return db, sc
+	return db, seedAccount(t, db, "isolated")
 }
 
 // migratedDB returns a schema with every migration applied and a GORM handle on it.
@@ -179,25 +175,67 @@ func migratedDB(t *testing.T) (*gorm.DB, string) {
 	return db, dsn
 }
 
-// scopedDB is migratedDB plus the scope every inventory call now takes. The
-// migration seeds exactly one account, so the bootstrap producer is the honest
-// way for a test to obtain one — a test that could mint a Scope from an
-// identifier would be testing a constructor that does not exist in production.
+// scopedDB is migratedDB plus the scope every inventory call now takes.
+//
+// The account is CREATED, through the production path, rather than resolved from
+// whatever the migration happened to seed. That is the change design C10 forces
+// and it is an improvement: store.ScopeForBootstrap used to hand a test the
+// deployment's single account, so every fixture in the repo silently depended on
+// a migration seed, and none of them exercised the code that makes an account.
+//
+// The Valid check is not ceremony. Row-level security is on: a query with a zero
+// Scope returns NO ROWS AND NO ERROR, so a fixture that quietly produced one
+// would make a whole file of tests pass against empty result sets — which is the
+// exact failure mode the policies exist to prevent, arriving through the test
+// helper.
 func scopedDB(t *testing.T) (*gorm.DB, Scope) {
 	t.Helper()
 	db, _ := migratedDB(t)
-	sc, err := ScopeForBootstrap(context.Background(), db)
+	return db, seedAccount(t, db, "fixture")
+}
+
+// seedAccount creates an account with an owner and returns a scope confined to
+// it. See scopedDB for why fixtures create rather than resolve.
+func seedAccount(t *testing.T, db *gorm.DB, slug string) Scope {
+	t.Helper()
+	owner := seedUser(t, db, "owner:"+slug)
+	acc, err := CreateAccountWithOwner(context.Background(), db, slug, slug, owner, 25)
 	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
+		t.Fatalf("create account %q: %v", slug, err)
 	}
-	return db, sc
+	sc := Scope{accountID: acc.ID}
+	if !sc.Valid() {
+		t.Fatalf("fixture scope for %q is the zero Scope; every read below would silently match nothing", slug)
+	}
+	return sc
+}
+
+// accountOwner reads the user a fixture account belongs to.
+//
+// Fixtures create their account through store.CreateAccountWithOwner, which
+// makes that owner its first unrestricted member — so a test counting members of
+// the unrestricted role has to know about them. Before design C10 the fixture
+// account came from a migration seed and had no members at all.
+func accountOwner(t *testing.T, db *gorm.DB, sc Scope) model.ID {
+	t.Helper()
+	acc, err := GetAccount(context.Background(), db, sc)
+	if err != nil {
+		t.Fatalf("read account: %v", err)
+	}
+	return acc.OwnerUserID
 }
 
 // secondAccount creates another account and returns a scope confined to it, for
 // the tests that assert one account cannot reach another's rows.
 func secondAccount(t *testing.T, db *gorm.DB, slug string) Scope {
 	t.Helper()
-	a := &model.Account{ID: model.NewID(), Slug: slug, Name: slug}
+	// Every account has an owner since migration 000013, so a test that wants
+	// an account wants a user first.
+	owner := seedUser(t, db, "second-account-owner:"+slug)
+	a := &model.Account{
+		ID: model.NewID(), Slug: slug, Name: slug,
+		Kind: model.AccountKindTeam, OwnerUserID: owner,
+	}
 	if err := CrossAccount(context.Background(), db, func(tx *gorm.DB) error {
 		return tx.Create(a).Error
 	}); err != nil {

@@ -13,10 +13,15 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService, SessionService, apiErrorMessage } from '@acme/shared';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { openRoleEditor } from './role-editor.modal';
-import { Grant, Member, Role } from './roles.models';
+import { Member, Role } from './roles.models';
 
 /**
  * Roles and membership: who may do what, in this account (tasks 9.2 and 9.4).
+ *
+ * A SECTION OF SETTINGS, not a screen of its own (task 6.5a) — hence no page header and no h1.
+ * It renders only inside a team account: the routes below refuse in a personal one, where there
+ * is nobody to give a role to (design C9), and the route guard on Settings is what keeps it out
+ * of there rather than a condition in here.
  *
  * Two rules the screen has to make visible rather than merely obey.
  *
@@ -45,8 +50,6 @@ import { Grant, Member, Role } from './roles.models';
     NzTagModule,
   ],
   template: `
-    <h1>Roles and members</h1>
-
     @if (error(); as e) {
       <nz-alert nzType="error" [nzMessage]="e" />
     }
@@ -138,7 +141,12 @@ import { Grant, Member, Role } from './roles.models';
           } @empty {
             <tr>
               <td colspan="3" class="ac-muted">
-                No stored memberships. This deployment derives them from identity-provider groups.
+                <!--
+                  Membership is rows we wrote, and only that (design P18): the branch that derived
+                  it from identity-provider groups is gone, so an empty roster is now genuinely an
+                  account with one person in it rather than a deployment answering elsewhere.
+                -->
+                Nobody has been added yet. Add a member below.
               </td>
             </tr>
           }
@@ -168,6 +176,9 @@ import { Grant, Member, Role } from './roles.models';
     `
       section {
         margin-block-end: 2.5rem;
+      }
+      section:last-of-type {
+        margin-block-end: 0;
       }
       .ac-muted {
         opacity: 0.65;

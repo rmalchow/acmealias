@@ -109,6 +109,13 @@ create table api_key_grants (
 
 create index api_key_grants_key_idx on api_key_grants (api_key_id);
 
+-- Superseded, for accounts created from here on, by store.DefaultRoles: design
+-- C10 turned these four names from a global vocabulary into the role set seeded
+-- into each new team account, with the same names and the same grants. This
+-- block stays because it is what an already-migrated database was given, and
+-- because on a fresh chain there are no accounts to insert for and it writes
+-- nothing.
+--
 -- The four roles that exist today, reproduced as data so the internal edition's
 -- behaviour does not observably change (constraint 1). ADMIN becomes the
 -- unrestricted role; the other three become ordinary editable rows holding

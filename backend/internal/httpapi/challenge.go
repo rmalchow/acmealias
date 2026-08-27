@@ -223,6 +223,32 @@ const (
 	challengeWithdraw = authz.ActionChallengeWithdraw
 )
 
+// errUnfunded is the 402 for a key that is valid, permitted, and anchored to an
+// account that does not work (design C7, task 4.4).
+//
+// 402 Payment Required, and NOT 401 or 403, is the whole point of this error
+// existing separately. A 401 sends an operator to look at their API key, which
+// is not the problem — the key authenticated, and the grant evaluation passed.
+// A 403 sends them to look at the key's grants, which are also fine. The thing
+// that is wrong is upstream of both and is not something the machine holding the
+// key can fix, so the status has to say so; this is one of the few genuinely
+// correct uses of 402.
+//
+// Unlike the errors around it this is built per request rather than being a
+// package-level value, because the message names the account and the reason. The
+// response lands in the logs of a machine whose owner has to understand it
+// without reading our documentation, and "payment required" with no subject is
+// not something anybody can act on.
+func errUnfunded(acc *model.Account, reason string) *echo.HTTPError {
+	label := "the account this key belongs to"
+	if acc != nil && acc.Slug != "" {
+		label = "account " + acc.Slug
+	}
+	return echo.NewHTTPError(http.StatusPaymentRequired,
+		label+" cannot publish challenges: "+reason+
+			". The API key is valid and permitted; add credit to the account and retry.")
+}
+
 // errStorage is the single 500. It names no datastore identifier, driver message
 // or query text; the real error goes to the log.
 var errStorage = echo.NewHTTPError(http.StatusInternalServerError, "challenge record could not be stored")
@@ -333,9 +359,43 @@ func (h *challenge) resolve(c echo.Context, action string) (*resolved, error) {
 		h.refuse(ctx, key, name, form, "the key holds no grant permitting that action on that name")
 		return nil, errRefused
 	}
+	// The third check, and its position is the decision (design C7, task 4.4).
+	//
+	// It cannot go earlier: /present does not know which account it belongs to
+	// until the alias has been resolved, because that resolution is the
+	// deliberately global read CrossAccount exists for — it ESTABLISHES the
+	// account rather than being filtered by it. And it must not go later:
+	// present's first write is store.Present and cleanup's is the withdraw, so
+	// here is the last point at which nothing has changed and the key is already
+	// authenticated. Putting it in present() alone would leave /cleanup working
+	// for an account that cannot publish, which is a strange half-service.
+	//
+	// A personal account never fails this, because it has no balance to run out
+	// of (C3), and store.Usable is the one place that is decided.
+	//
+	// Refusing does NOT withdraw what is already published. Values that are live
+	// expire on the usual schedule, which is what makes this refusal soft in the
+	// way C4 argues it is: it stops renewals, and the certificate on the wire
+	// keeps working for weeks.
+	scope := store.ScopeForKey(key)
+	acc, err := store.GetAccount(ctx, h.opts.DB, scope)
+	if err != nil {
+		h.opts.Log.ErrorContext(ctx, "account lookup failed", slog.String("key_id", key.Identifier),
+			slog.String("fqdn", name), slog.Any("error", err))
+		return nil, errStorage
+	}
+	if !store.Usable(acc) {
+		reason := store.SuspensionReason(acc)
+		// Logged through the same outcome record as an authorization refusal so
+		// it appears in the same place an operator already looks, with a reason
+		// string that is deliberately NOT the authz vocabulary — nothing was
+		// refused on authority here.
+		h.refuse(ctx, key, name, form, "account not usable: "+reason)
+		return nil, errUnfunded(acc, reason)
+	}
 	return &resolved{
 		key: key, fqdn: name, form: form, value: value, alias: alias,
-		scope: store.ScopeForKey(key),
+		scope: scope,
 	}, nil
 }
 

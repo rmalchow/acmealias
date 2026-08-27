@@ -92,9 +92,11 @@ instance with `sslmode=require`. Nothing else differs.
 
 ## 2 · Identity provider
 
-The console has no local accounts. Everyone signs in through the IdP, and their permissions come
-from the groups the IdP reports. What matters is that the ID token carries a
-**groups claim**.
+The console has no local accounts. Everyone signs in through the IdP.
+**Groups no longer grant anything**: what a person may do is decided by their membership of an
+account, which is data this service owns. The groups claim is still read and recorded — on the
+session, and beside the roles in every audit entry — because what the IdP said about a person is
+worth keeping, but no configuration turns a group into a permission.
 
 ### Keycloak
 
@@ -108,8 +110,8 @@ from the groups the IdP reports. What matters is that the ID token carries a
    Membership**:
    - Token Claim Name: `groups`
    - Full group path: **Off** — otherwise every group arrives as
-     `/parent/child` and the group names in `.env` have to match that
-     shape
+     `/parent/child`, which makes the recorded claim harder to read (it no
+     longer breaks sign-in, since nothing is matched against it)
    - Add to ID token: **On**
 5. Copy the client secret and the issuer URL
    (`https://idp.example/realms/<realm>`).
@@ -119,11 +121,11 @@ Authentik, for instance, needs only its built-in
 `goauthentik.io/providers/oauth2/scope-groups` scope mapping — but Keycloak is the
 supported, tested identity provider, and the rest of this page assumes it.*
 
-> **Verify the claim before going further**
+> **The claim is a record, not a key**
 >
-> Decode an ID token from a test user and confirm the `groups` claim is present and
-> contains plain group names. Getting this wrong produces a working sign-in where nobody has any
-> permissions, which is a confusing thing to debug from the console side.
+> A missing or oddly shaped `groups` claim no longer stops anybody doing anything: it makes the
+> audit trail less informative. This used to be the single most common cause of "sign-in works and
+> nobody has permissions"; that failure mode no longer exists.
 
 ## 3 · Configuration
 
@@ -179,12 +181,6 @@ ACME_OIDC_CLIENT_ID=acmeservice
 ACME_OIDC_CLIENT_SECRET=<secret>
 ACME_OIDC_REDIRECT_URL=https://acme-console.cloudpowered.services/api/v1/auth/callback
 ACME_OIDC_GROUPS_CLAIM=groups
-
-# --- roles: which Keycloak group grants which role (the roles themselves are data) ---
-ACME_ADMIN_GROUP=infra-admins
-ACME_CONFIG_ADMIN_GROUP=infra-config-admins
-ACME_KEY_ROTATION_GROUP=infra-key-rotators
-ACME_READ_ONLY_GROUP=support
 
 ACME_LOG_LEVEL=info
 ```
@@ -301,34 +297,49 @@ Terminate TLS on the existing proxy, as with everything else we run.
 
 ## 6 · First sign-in
 
-There is no role-binding table to seed, and the four roles you start with are **rows**, not
-constants in the code. The migration creates them in the deployment's single account — `ADMIN`,
-`CONFIG_ADMIN`, `KEY_ROTATION`, `READ_ONLY` — carrying exactly the permissions their
-predecessors carried, so an upgrade changes nothing you can observe. What is new is that they can be
-edited, and that you can add others.
+There is no role-binding table to seed and no group-to-role configuration. Roles are **rows inside
+an account**, and every new account is created with four of them — `ADMIN`, `CONFIG_ADMIN`,
+`KEY_ROTATION`, `READ_ONLY` — carrying exactly the permissions the four fixed roles of earlier
+versions carried. What is new is that they can be edited, and that you can add others.
 
-Which Keycloak group grants which role is still configuration, and deliberately so: a role is an
-account's own data, but deciding who is in it from outside the account is not something an account
-may do for itself.
+### Creating the first account
+
+A fresh database has **no accounts**. Earlier versions seeded one at migration time and derived
+membership from Keycloak groups; both are gone. Make the first one from the command line:
 
 ```
-ACME_ADMIN_GROUP=infra-admins
-ACME_CONFIG_ADMIN_GROUP=infra-config-admins
-ACME_KEY_ROTATION_GROUP=infra-key-rotators
-ACME_READ_ONLY_GROUP=support
+docker compose run --rm acmeservice \
+  acmeservice adminctl account create \
+    --slug infra --name "Infrastructure" --owner <idp-subject> --credits 25
 ```
 
-A user's roles are the union of every role whose configured group appears in their Keycloak groups
-claim — holding several is normal and additive. On a database with no inventory at all, the operator
-whose Keycloak account is in `infra-admins` is already an `ADMIN`, because that is what
-`ACME_ADMIN_GROUP` says. The problem the old bootstrap group existed to solve — an empty bindings
-table meaning nobody, including you, has permissions — is dissolved rather than solved.
+`--owner` is the **identity-provider subject** — the `sub` claim of the ID token, not an email
+address unless your provider is configured to use one. If you do not know it, sign in to the console
+once first: the sign-in creates the user row, and the subject is then visible in the audit trail and
+on `GET /api/v1/me`.
 
-A configured group naming a role nobody created grants nothing, and the service says so at startup
-rather than leaving you to discover it when somebody cannot sign in. It is a warning and not a
-refusal: creating the group before the role is a reasonable order to work in.
+That one command creates the account, funds it, seeds the four roles, and makes the named person its
+first unrestricted member.
 
-The seeded roles confer:
+`--credits` is the opening balance, and there is no zero-credit form: a **team account works only
+while its balance is above zero**, so one created empty would be suspended from the moment it
+existed and its owner would sign in to the pay screen of an account they had just made. It defaults
+to 25. In the console the same act is a purchase — creating a team account and paying for it are one
+request — and this flag is what stands in for that on a deployment where nobody can reach the
+console yet.
+
+Nobody needs this command to get *somewhere to work*. Every user is given a **personal account** the
+first time they sign in: free, limited to a handful of projects, holding no members but themselves.
+The command above is for the first *shared* account. Everything `adminctl` does afterwards names the account it acts in:
+
+```
+acmeservice adminctl --account infra project create --slug shop --name "Shop"
+```
+
+or set `ACME_ADMINCTL_ACCOUNT=infra` once. There is no deployment-wide account to fall back on,
+and a verb without one is refused rather than guessing.
+
+### What the seeded roles confer
 
 | | `ADMIN` | `CONFIG_ADMIN` | `KEY_ROTATION` | `READ_ONLY` |
 | --- | --- | --- | --- | --- |
@@ -352,20 +363,23 @@ whole project rather than one load balancer, is now expressible — the latter b
 prompted the model in the first place. The console's Roles screen composes them; the composer offers
 only what the person using it already holds, because a subject may grant only what it holds.
 
-Open `https://acme-console.cloudpowered.services/`. You are redirected to the IdP and
-back. If you land on a page saying you match no role, it lists the groups it saw for your sign-in —
-compare those against the four `ACME_*_GROUP` values in `.env`.
+Open `https://acme-console.cloudpowered.services/`. You are redirected to the IdP and back, and land
+on the **account picker** rather than inside an account: a session begins with nothing selected, and
+choosing is the first thing you do. Pick the account you were made a member of.
+
+> **Adding the second person**
+>
+> Add them to a role from the console's Settings → Members screen, naming their identity-provider
+> subject. They must have signed in at least once so the service knows the subject exists. There is
+> no group to add them to.
 
 > **Removing someone's access is not instant**
 >
-> Group membership is read from the ID token **at sign-in**, not re-checked per
-> request. Removing someone from a Keycloak group takes effect the next time they sign in, which is
-> bounded by `ACME_SESSION_MAX_LIFETIME` — up to that long, they keep whatever roles their
-> current session already has. Changing which group maps to which role is a `.env` edit
-> plus a restart, same as any other configuration change; it does not touch existing sessions either.
-> If access needs to end *now*, the lever is an `ADMIN` revoking the person's
-> session from the console — sessions are server-side, so that takes effect immediately. See
-> [the console guide](console-guide.md#settings) for where.
+> Membership is re-checked when somebody SELECTS an account, not on every request. Removing a member
+> takes effect the next time they switch accounts, bounded by `ACME_SESSION_MAX_LIFETIME`. If access
+> needs to end sooner, remove the membership and have them sign out; a person can end their own
+> sessions from the console, and ending somebody else's is a staff-plane operation that does not
+> exist yet.
 
 ## 7 · Post-deploy verification
 
@@ -509,10 +523,6 @@ services:
 | `oidc.redirect_url` | `ACME_OIDC_REDIRECT_URL` | *required* | Must exactly match what the IdP has registered. |
 | `oidc.groups_claim` | `ACME_OIDC_GROUPS_CLAIM` | `groups` | Claim carrying group membership. |
 | `oidc.group_prefix` | `ACME_OIDC_GROUP_PREFIX` | *empty* | Stripped from each group value — useful when the IdP emits path-style names. |
-| `oidc.admin_group` | `ACME_ADMIN_GROUP` | *empty* | Group granting the seeded `ADMIN` role. |
-| `oidc.config_admin_group` | `ACME_CONFIG_ADMIN_GROUP` | *empty* | Group granting the seeded `CONFIG_ADMIN` role. |
-| `oidc.key_rotation_group` | `ACME_KEY_ROTATION_GROUP` | *empty* | Group granting the seeded `KEY_ROTATION` role. |
-| `oidc.read_only_group` | `ACME_READ_ONLY_GROUP` | *empty* | Group granting the seeded `READ_ONLY` role. |
 | `oidc.session_idle_timeout` | `ACME_SESSION_IDLE_TIMEOUT` | `1h` | Idle expiry. |
 | `oidc.session_max_lifetime` | `ACME_SESSION_MAX_LIFETIME` | `8h` | Absolute expiry. Also bounds how stale a user's group list can be. |
 
@@ -556,7 +566,7 @@ one is accepted and has no effect.
 | Path | Variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `limits.allow_account_creation` | `ACME_ALLOW_ACCOUNT_CREATION` | `false` | Opens account creation to any authenticated person. Creating an account creates a tenant, so a deployment authenticating a whole organisation usually wants this off. |
-| `limits.projects_per_personal_account` | *(file only)* | `5` | How many projects one personal account may hold. Team accounts have no project quota; credit is their limit. **Not enforced yet** — the value is loaded and nothing reads it, so setting it changes no behaviour until the change that enforces the quota lands. |
+| `limits.projects_per_personal_account` | `ACME_PROJECT_QUOTA` | `5` | How many projects one personal account may hold. Team accounts have no project quota; credit is their limit. Exceeding it is refused as a lack of room (409), not as a lack of authority (403). Zero or less turns the quota off. |
 | `log.level` | `ACME_LOG_LEVEL` | `info` | `debug` logs each expiry sweep and every DNS decision. |
 
 ## Operating it

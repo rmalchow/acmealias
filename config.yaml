@@ -126,13 +126,12 @@ oidc:
   groups_claim: '${ACME_OIDC_GROUPS_CLAIM:groups}'
   group_prefix: '${ACME_OIDC_GROUP_PREFIX:}'    # stripped from each group value
 
-  # Which group grants each global role. Unset means nobody holds it — a role
-  # nobody holds is a role nobody can use, which is the right default for a
-  # deployment that has not decided yet.
-  admin_group:        '${ACME_ADMIN_GROUP:}'
-  config_admin_group: '${ACME_CONFIG_ADMIN_GROUP:}'
-  key_rotation_group: '${ACME_KEY_ROTATION_GROUP:}'
-  read_only_group:    '${ACME_READ_ONLY_GROUP:}'
+  # There is no group-to-role mapping here any more. admin_group and its three
+  # siblings named the group that granted each of four global roles; roles are
+  # rows inside an account now, and nothing an identity provider says grants
+  # authority. The group claim above is still read, and still recorded — it is
+  # what the provider said about a person, which is worth keeping even when
+  # nothing is decided from it.
 
   session_idle_timeout: '${ACME_SESSION_IDLE_TIMEOUT:1h}'
   session_max_lifetime: '${ACME_SESSION_MAX_LIFETIME:8h}'
@@ -190,13 +189,14 @@ limits:
   # different clock from deployments. Team accounts have no project quota at
   # all — credit is their limit — so this does not apply to them.
   #
-  # Nothing reads it yet. The quota is declared here so the file states the
-  # policy, but this change adds no setting (see the proposal) and so wires it
-  # to nothing: the change that ENFORCES the quota is the one that carries it
-  # into the runtime config and names its override. Until then it is loaded and
-  # discarded, and the schema's nested form ACME_LIMITS_PROJECTS_PER_PERSONAL_
-  # ACCOUNT reaches it and is equally inert.
-  projects_per_personal_account: 5
+  # Enforced when a project is created, in the service layer the API and the
+  # CLI share, so neither can drift from the other. Over-quota is refused as a
+  # QUOTA and not as a permission: 409 and "there is no room, delete one or use
+  # a team account", never 403 and "you may not" — a caller holding every grant
+  # there is still cannot make room, and one message cannot be right for both.
+  #
+  # Zero or less turns it off.
+  projects_per_personal_account: '${ACME_PROJECT_QUOTA:5}'
 
   # False, and that is the important half: creating an account creates a
   # tenant, and a deployment authenticating a whole organisation does not want

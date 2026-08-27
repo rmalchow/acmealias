@@ -18,11 +18,21 @@ table account_members
 
 table accounts
   column created_at timestamp with time zone not null default now()
+  column credits bigint not null default 0
   column id uuid not null default uuidv7()
+  column kind text not null
   column name text not null
+  column owner_user_id uuid not null
   column slug text not null
+  column staff_suspended boolean not null default false
+  constraint accounts_credits_non_negative check ()
+  constraint accounts_kind_check check ()
+  constraint accounts_owner_user_id_fkey foreign key (owner_user_id)
+  constraint accounts_personal_has_no_balance check ()
   constraint accounts_pkey primary key (id)
   constraint accounts_slug_key unique (slug)
+  index accounts_one_personal_per_owner CREATE UNIQUE INDEX accounts_one_personal_per_owner ON accounts USING btree (owner_user_id) WHERE (kind = 'personal'::text)
+  index accounts_owner_user_id_idx CREATE INDEX accounts_owner_user_id_idx ON accounts USING btree (owner_user_id)
   index accounts_pkey CREATE UNIQUE INDEX accounts_pkey ON accounts USING btree (id)
   index accounts_slug_key CREATE UNIQUE INDEX accounts_slug_key ON accounts USING btree (slug)
 

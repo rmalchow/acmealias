@@ -300,14 +300,39 @@ type env struct {
 	ours, theirs func(*http.Request) // basic-auth setters
 }
 
+// challengeAccount creates the account these fixtures act in.
+//
+// It used to be store.ScopeForBootstrap over the account the migration seeded;
+// design C10 removed both, so the fixture makes its own. The Valid check is
+// there because row-level security is on and a zero Scope reads no rows and
+// raises no error — a fixture that produced one would leave every assertion in
+// this file passing against nothing.
+func challengeAccount(t *testing.T, db *gorm.DB) store.Scope {
+	t.Helper()
+	ctx := t.Context()
+	owner, err := store.FindOrCreateUser(ctx, db, "challenge-fixture-owner", "Challenge Fixture", "")
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	acc, err := store.CreateAccountWithOwner(ctx, db, "challenge-fixture", "Challenge Fixture", owner.ID, 25)
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	sc, err := store.ScopeForSelection(ctx, db, acc.ID)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if !sc.Valid() {
+		t.Fatal("fixture scope is the zero Scope; every read below would silently match nothing")
+	}
+	return sc
+}
+
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	db := migratedDB(t)
 	ctx := t.Context()
-	sc, err := store.ScopeForBootstrap(ctx, db)
-	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
-	}
+	sc := challengeAccount(t, db)
 
 	p := &model.Project{Slug: "acme", Name: "Acme"}
 	if err := store.CreateProject(ctx, db, sc, p); err != nil {
@@ -343,7 +368,7 @@ func newEnv(t *testing.T) *env {
 	metrics := obs.New()
 	e := echo.New()
 	e.Logger.SetOutput(io.Discard)
-	err = RegisterChallenge(ctx, e, ChallengeOptions{
+	err := RegisterChallenge(ctx, e, ChallengeOptions{
 		DB:       db,
 		Zone:     testZone,
 		View:     view,
@@ -564,10 +589,7 @@ func TestStorageFailureIsReportedAsFailure(t *testing.T) {
 func TestRegisterChallengeRefusesUnprotectedCIDRRestriction(t *testing.T) {
 	db := migratedDB(t)
 	ctx := t.Context()
-	sc, err := store.ScopeForBootstrap(ctx, db)
-	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
-	}
+	sc := challengeAccount(t, db)
 
 	p := &model.Project{Slug: "acme", Name: "Acme"}
 	if err := store.CreateProject(ctx, db, sc, p); err != nil {

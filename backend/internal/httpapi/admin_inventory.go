@@ -177,7 +177,7 @@ func (a *admin) createProject(c echo.Context) error {
 	ctx := c.Request().Context()
 	var out projectView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		p, err := inventory.CreateProject(ctx, tx, sc, subj, body.Slug, body.Name)
+		p, err := inventory.CreateProject(ctx, tx, sc, subj, a.limits(), body.Slug, body.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -787,9 +787,25 @@ func (a *admin) domainsOf(c echo.Context, loadBalancerID model.ID) ([]model.Doma
 	return domains, byID, nil
 }
 
+// node reads one node within the acting account.
+//
+// Scope.Run, not merely sc.Where, and the difference is the whole comment.
+// `lb_nodes` is policied (migration 000007), and this is the FIRST statement of
+// a.mutate's transaction — which is opened from a plain handle, so nothing has
+// set app.account_id yet. Filtering in Go while the policy sees a NULL
+// current_account() matches no rows at all: PATCH /nodes/:id and DELETE
+// /nodes/:id answered 404 for a perfectly good node under any non-superuser
+// role. It survived the test suite because the test connection is a superuser
+// and bypasses policies entirely, which is exactly the failure mode Scope.Run's
+// own doc comment warns about — a scopeless read of a policied table returns no
+// rows and no error. The neighbouring key() has done it this way since the same
+// bug was found there.
 func node(ctx context.Context, db *gorm.DB, sc store.Scope, id model.ID) (*model.LBNode, error) {
 	var n model.LBNode
-	if err := sc.Where(db.WithContext(ctx)).First(&n, "id = ?", id).Error; err != nil {
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return sc.Where(tx).First(&n, "id = ?", id).Error
+	})
+	if err != nil {
 		return nil, fmt.Errorf("get lb node %s: %w", id, err)
 	}
 	return &n, nil

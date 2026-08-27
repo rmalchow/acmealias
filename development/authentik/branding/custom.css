@@ -1,0 +1,241 @@
+/* The sign-in page's appearance (design K1's identity provider, wearing our
+ * clothes rather than authentik's).
+ *
+ * WHY A CSS FILE AND NOT A SETTING. authentik 2024.10's brand object carries a
+ * title, a logo and a favicon and nothing else — `branding_custom_css` arrives
+ * in a later release. The version it does have is this file: the flow page loads
+ * /static/dist/custom.css unconditionally, and the image ships an empty one.
+ * development/compose.yaml bind-mounts this over it, so the styling is a file in
+ * the repository rather than a field somebody typed into an admin interface, and
+ * `./scripts/dev.sh reset` keeps it.
+ *
+ * Everything here is written twice — once for `:root`/`body` and once for
+ * `:host` — because authentik renders the flow inside shadow roots and adopts
+ * this stylesheet into each of them. A rule that only names `body` reaches the
+ * page but not the card sitting inside a shadow root.
+ */
+
+:root,
+:host {
+  --acme-ink: #05070a;
+  --acme-accent: #00ffb0;
+  --acme-text: #ffffff;
+  --acme-text-dim: #a7b0ba;
+  /* An opaque grey, not a translucent white: on black, a 4%-white panel is a
+   * shade nobody can see, and the card stops looking like a card. */
+  --acme-surface: #16191d;
+  --acme-surface-raised: #1c2026;
+  --acme-line: rgba(255, 255, 255, 0.12);
+
+  /* PatternFly's own dark palette, pulled down to our black. authentik loads
+   * theme-dark.css and everything in it reads these; setting them here is what
+   * makes components we never name — the footer band, the identifier chip,
+   * error messages — land on the same background as the card. */
+  --pf-global--BackgroundColor--dark-100: var(--acme-surface);
+  --pf-global--BackgroundColor--dark-200: var(--acme-ink);
+  --pf-global--BackgroundColor--dark-300: var(--acme-surface-raised);
+  --pf-global--BackgroundColor--dark-400: var(--acme-surface-raised);
+  --pf-global--Color--light-100: var(--acme-text);
+  --pf-global--Color--light-200: var(--acme-text-dim);
+}
+
+/* Black, with one off-centre highlight so it reads as a lit surface rather than
+ * as a failure to set a colour. Two radials: a wide cool wash top-left and a
+ * tight accent-tinted specular above the card. */
+html,
+body,
+.pf-c-background-image,
+.pf-c-login,
+.pf-c-page,
+ak-flow-executor {
+  background: var(--acme-ink) !important;
+}
+
+.pf-c-login,
+.pf-c-background-image {
+  /* Three washes, all faint: a green one from the top left, a neutral specular
+   * behind the card, and a deep vignette so the corners stay properly black.
+   * Fixed attachment keeps them put if the flow grows tall enough to scroll. */
+  background-image:
+    radial-gradient(70rem 45rem at 12% -12%, rgba(0, 255, 176, 0.16), transparent 68%),
+    radial-gradient(45rem 30rem at 50% 2%, rgba(190, 225, 255, 0.10), transparent 66%),
+    radial-gradient(90rem 70rem at 50% 120%, rgba(0, 255, 176, 0.05), transparent 60%) !important;
+  background-attachment: fixed !important;
+  color: var(--acme-text);
+}
+
+/* authentik paints a stock illustration behind the form. Nothing here wants it. */
+/* The photograph behind the card is NOT hidden here, and hiding it here was the
+ * mistake worth recording: authentik hands the flow's background in as a custom
+ * property on the element, so any rule that switches it off is one selector away
+ * from being bypassed by a stage that renders it somewhere else — which is
+ * exactly what happened, and the page still showed the stock image. The file
+ * itself is replaced instead (development/compose.yaml), so there is nothing
+ * left to override. What stays here is the black underneath it, for the moment
+ * before the image loads.
+ *
+ * The stock decorative SVG is a different thing and does go away. */
+.pf-c-background-image::before,
+.pf-c-background-image svg {
+  display: none !important;
+}
+
+/* The card. Glass over black rather than a white panel: a light card on a black
+ * page is the one combination that looks accidental. */
+.pf-c-login__main,
+.pf-c-login__main .pf-c-login__main-header,
+.pf-c-login__main .pf-c-login__main-body,
+.pf-c-login__main .pf-c-login__main-footer {
+  background-color: var(--acme-surface) !important;
+  color: var(--acme-text) !important;
+}
+
+.pf-c-login__main {
+  border: 1px solid var(--acme-line);
+  border-radius: 8px;
+  /* Lit from above: a hairline highlight on the top edge, a long shadow under
+   * the whole panel. That, and nothing else, is what separates a grey box from
+   * a grey box floating on black. */
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 30px 70px rgba(0, 0, 0, 0.75);
+}
+
+/* The card's body is not one element: each stage renders inside its own custom
+ * element, and a stage host left transparent shows the page's black through the
+ * middle of the panel while the header stays grey. Naming the hosts is what
+ * makes the card one colour. */
+.pf-c-login__main-body,
+ak-flow-executor,
+ak-stage-identification,
+ak-stage-password,
+ak-stage-authenticator-validate,
+ak-stage-user-login {
+  background-color: var(--acme-surface) !important;
+  color: var(--acme-text);
+}
+
+/* ONE PANEL, NOT A HEADER AND A PANEL.
+ *
+ * PatternFly's login header is a fixed-height band and authentik's logo is
+ * taller than it, so the logo hangs out of the bottom — with a lighter band
+ * behind its top half, a divider line drawn straight through its middle, and the
+ * logo's glow smeared along that line. Every one of those is a symptom of the
+ * band existing at all. So it does not: same colour as the body, no divider, and
+ * enough padding that the logo has the room it was overflowing to find. */
+.pf-c-login__main .pf-c-login__main-header {
+  background-color: var(--acme-surface) !important;
+  border-bottom: none !important;
+  border-radius: 8px 8px 0 0;
+  padding: 2.25rem 2rem 0.5rem !important;
+  min-height: 0 !important;
+  overflow: visible;
+}
+
+.pf-c-login__main .pf-c-login__main-header .pf-c-brand,
+.pf-c-login__main .pf-c-login__main-header img {
+  display: block;
+  margin: 0 auto;
+}
+
+.pf-c-login__main-header-desc,
+.pf-c-login__main-footer-band,
+.pf-c-form__helper-text,
+.pf-c-login__main-footer-band-item {
+  color: var(--acme-text-dim) !important;
+  background-color: transparent !important;
+}
+
+.pf-c-title,
+.pf-c-form__label-text,
+h1, h2, h3 {
+  color: var(--acme-text) !important;
+}
+
+/* THE GLOW GOES ON THE IMAGE, NOT ON `.pf-c-brand`.
+ *
+ * authentik puts three classes on ONE div — `pf-c-login__main-header pf-c-brand
+ * ak-brand` — so the header and the brand are the same element. A drop-shadow
+ * on `.pf-c-brand` is therefore a drop-shadow on the header's whole box, which
+ * draws a green line across the card under the logo and reads as a divider
+ * nobody asked for. Naming the img is what confines it to the mark, and a
+ * max-height on that div squeezes the header rather than the logo. */
+.pf-c-login__main-header.pf-c-brand {
+  filter: none !important;
+}
+
+.pf-c-brand img,
+img.pf-c-brand,
+.pf-c-login__main-header img {
+  max-height: 4.5rem;
+  filter: drop-shadow(0 0 12px rgba(0, 255, 176, 0.22));
+}
+
+/* Inputs: dark wells, accent focus ring.
+ *
+ * PatternFly draws every field from custom properties, and its own selectors are
+ * specific enough that overriding `background-color` alone leaves states behind
+ * — the disabled password field stayed light grey until the variables below were
+ * set. Set the variables and the states follow. */
+.pf-c-form-control,
+.pf-c-form-control:disabled,
+.pf-c-form-control[readonly] {
+  --pf-c-form-control--BackgroundColor: rgba(0, 0, 0, 0.45);
+  --pf-c-form-control--Color: var(--acme-text);
+  --pf-c-form-control--BorderTopColor: var(--acme-line);
+  --pf-c-form-control--BorderRightColor: var(--acme-line);
+  --pf-c-form-control--BorderLeftColor: var(--acme-line);
+  --pf-c-form-control--BorderBottomColor: var(--acme-line);
+  --pf-c-form-control--disabled--BackgroundColor: rgba(0, 0, 0, 0.30);
+  --pf-c-form-control--disabled--Color: var(--acme-text-dim);
+  --pf-c-form-control--m-readonly--BackgroundColor: rgba(0, 0, 0, 0.30);
+  --pf-c-form-control--focus--BorderBottomColor: var(--acme-accent);
+  --pf-c-form-control--placeholder--Color: var(--acme-text-dim);
+}
+
+.pf-c-form-control {
+  background-color: rgba(0, 0, 0, 0.45) !important;
+  color: var(--acme-text) !important;
+  border: 1px solid var(--acme-line) !important;
+  border-bottom-color: var(--acme-line) !important;
+}
+
+/* PatternFly paints a disabled field solid grey, which on black reads as a
+ * filled-in box rather than a waiting one. The password field arrives disabled
+ * on this flow — it is enabled once the identifier is typed — so this is the
+ * state most people see first. */
+.pf-c-form-control:disabled,
+.pf-c-form-control[disabled],
+.pf-c-form-control[readonly] {
+  background-color: rgba(0, 0, 0, 0.30) !important;
+  color: var(--acme-text-dim) !important;
+}
+
+.pf-c-form-control::placeholder {
+  color: var(--acme-text-dim) !important;
+  opacity: 1;
+}
+
+.pf-c-form-control:focus {
+  border-bottom-color: var(--acme-accent) !important;
+  box-shadow: 0 0 0 1px rgba(0, 255, 176, 0.45);
+  outline: none;
+}
+
+/* The one saturated thing on the page is the button, in the logo's green.
+ * Dark text on it because #00ffb0 is far too bright to carry white type. */
+.pf-c-button.pf-m-primary {
+  background-color: var(--acme-accent) !important;
+  color: var(--acme-ink) !important;
+  border: none;
+}
+
+.pf-c-button.pf-m-primary:hover,
+.pf-c-button.pf-m-primary:focus {
+  background-color: #4dffc9 !important;
+}
+
+a,
+.pf-c-button.pf-m-link {
+  color: var(--acme-accent) !important;
+}

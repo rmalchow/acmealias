@@ -50,7 +50,7 @@ curl -si -u "k_7f3a91c4:$ACME_KEY" -X POST https://acme-api.cloudpowered.service
 | Issuance hangs in the propagation check | [The delegation is not live yet](#issuance-hangs-in-the-propagation-check), or Traefik's `dnsChallenge.resolvers` points at a split-horizon internal resolver. |
 | A value appears in Live challenges and never disappears | [Validation failed after publish](#value-stuck-in-live-challenges) — the interesting logs are Traefik-side, not ours. |
 | CA reports no TXT record, but our logs show a successful publish | [`LEGO_DISABLE_CNAME_SUPPORT` is set](#ca-sees-no-txt-record-despite-a-logged-successful-publish), or the customer's CNAME points at the wrong alias. |
-| Console: signed in, but no permissions | The [groups claim is missing or path-style](#console-signed-in-but-no-permissions), or the person is in none of the four configured `ACME_*_GROUP` groups — the refusal page lists the groups it saw. |
+| Console: signed in, but [no account to select](#console-signed-in-but-there-is-nothing-to-work-in) | The person is not a member of any account. Groups no longer grant anything; somebody has to add them. |
 | Service refuses to start | Configuration [validation names the offending setting](#service-refuses-to-start); the special case is an API key with a CIDR restriction while `ACME_TRUSTED_PROXY_CIDRS` is empty — it fails closed on purpose. |
 
 ## Detail, per cause
@@ -177,19 +177,23 @@ correctly enabled, check where the customer's CNAME actually points:
 shown in that domain's DNS plan in the console — a typo'd or stale target sends the query to a
 different alias than the one this service is answering for that domain.
 
-### Console: signed in but no permissions
+### Console: signed in but there is nothing to work in
 
-The refusal page lists the IdP groups it saw for that sign-in — start there. Either the
-**groups claim** is missing from the ID token entirely (check
-`ACME_OIDC_GROUPS_CLAIM` matches what the IdP actually emits, and that the IdP's mapper
-is configured to add it to the ID token), or it is present but path-style
-(`/parent/child`) when the configured group names are plain — see
-`ACME_OIDC_GROUP_PREFIX` and the "Full group path" setting in
-[install & configure, step 2](installation.md#2-identity-provider). If the claim looks right and
-the groups shown are the expected ones, none of them simply match any of the four
-`ACME_*_GROUP` values in `.env` yet; an administrator needs to either add the
-person's group to one of those variables (edit `.env`, restart) or add them to a
-Keycloak group that is already mapped.
+Sign-in succeeds and the account picker is empty, or the account you expect is not in it.
+
+This is a **membership** question and never a claim question. Identity-provider groups grant
+nothing: what a person may do comes from a row saying they are a member of an account, and nothing
+in `.env` creates one. The four `ACME_*_GROUP` settings that used to do this no longer exist, and
+neither does the refusal page that listed the groups it had seen.
+
+So there are only two causes. Either nobody has added this person to an account — the fix is
+Settings → Members in an account they should be in, naming their identity-provider subject — or the
+deployment has no accounts at all, which is what a fresh database looks like now that the migration
+no longer seeds one. Create the first from the command line; see
+[install & configure, step 6](installation.md#6-first-sign-in).
+
+A person must have signed in at least once before they can be added, because that is when the
+service first learns their subject exists.
 
 ### Service refuses to start
 

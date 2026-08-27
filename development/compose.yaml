@@ -166,6 +166,23 @@ services:
     volumes:
       - ./authentik/blueprints:/blueprints/custom:ro
       - ./data/authentik_media:/media
+      # Our sign-in page, as two files over two the image already serves.
+      #
+      # /web/dist is what the server publishes at /static/dist, and every flow
+      # page loads /static/dist/custom.css — the image ships that file empty
+      # precisely so it can be replaced. The logo goes in beside it rather than
+      # into /media, because /media is ./data/, which `reset.sh` deletes: an
+      # asset the blueprint names must survive a reset or the login page comes
+      # back with a broken image.
+      - ./authentik/branding/custom.css:/web/dist/custom.css:ro
+      - ./authentik/branding/logo.png:/web/dist/brand/logo.png:ro
+      # And the third file replaces the photograph authentik puts behind the
+      # login card. That one is NOT a setting anywhere: a flow with no background
+      # of its own falls back to this exact path in the image, and a flow field
+      # left empty means "use the default", not "use nothing". So the way to get
+      # rid of the picture is to be the picture — this one is our black with the
+      # highlight painted into it.
+      - ./authentik/branding/flow_background.jpg:/web/dist/assets/images/flow_background.jpg:ro
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -331,7 +348,7 @@ services:
       # mount into a loud failure instead of a stack quietly running on
       # defaults nobody chose. The overlay is found beside it, by name —
       # config.yaml + the profile below.
-      ACME_CONFIG_FILE: /src/config.yaml
+      ACME_CONFIG_FILE: /etc/acmeservice/config.yaml
       ACME_PROFILES: development
     working_dir: /src
     command: ["air", "-c", ".air.toml"]
@@ -339,8 +356,14 @@ services:
       - ../backend:/src
       # Mounted over the bind above rather than copied into backend/, because
       # the base file belongs to the repository and not to the Go module.
-      - ../config.yaml:/src/config.yaml:ro
-      - ./config-development.yaml:/src/config-development.yaml:ro
+      # Mounted OUTSIDE /src, which is the bind-mounted backend/ tree. Docker
+      # creates a missing mount point inside the host directory it is mounting
+      # into, as root — so mounting these at /src/config.yaml left two
+      # zero-byte, root-owned files in backend/ that a developer could not
+      # delete without sudo. That is precisely the artefact lib.sh's DATA_DIRS
+      # comment exists to prevent, arriving by a route it did not anticipate.
+      - ../config.yaml:/etc/acmeservice/config.yaml:ro
+      - ./config-development.yaml:/etc/acmeservice/config-development.yaml:ro
       - ./data/go_mod:/go/pkg/mod
       - ./data/go_build:/gocache
       - ./data/air_tmp:/src/tmp

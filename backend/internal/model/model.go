@@ -130,17 +130,51 @@ func Models() []any {
 	}
 }
 
-// Account owns inventory and anchors every grant. The internal edition has exactly
-// one, seeded by the migration; the public edition has one per customer.
+// Account owns inventory and anchors every grant. There is one per customer, and
+// one per user besides — see Kind. None is seeded: design C10 removed the single
+// account the migration used to create.
 //
 // Nothing below an account may name it as the object of a grant: operations on the
 // account itself are governed by membership, not by grants (design P14).
 type Account struct {
-	ID        ID `gorm:"primaryKey"`
-	Slug      string
-	Name      string
-	CreatedAt time.Time
+	ID   ID `gorm:"primaryKey"`
+	Slug string
+	Name string
+	// Kind is fixed at creation and the database refuses to change it (design
+	// C1). A personal account is not an unpaid team account: it has no roles,
+	// no members but its owner and no balance, so the two are different things
+	// rather than two states of one thing.
+	Kind AccountKind
+	// OwnerUserID is the one person an account answers to. It is not nullable
+	// and not a membership: a member may be removed, an owner is what remains.
+	// For a personal account it is also immutable — see C1.
+	OwnerUserID ID `gorm:"column:owner_user_id"`
+	// Credits is the team account's balance, and the only thing that limits it
+	// (C3, C13). A personal account holds zero here forever; the database
+	// refuses anything else.
+	Credits int64
+	// StaffSuspended is the other suspension (design C6). It is separate state
+	// from the balance on purpose: paying must not lift a suspension for abuse,
+	// and staff forgetting to re-enable something must not make an unfunded
+	// account work. store.Usable is the only place the two are combined.
+	StaffSuspended bool
+	CreatedAt      time.Time
 }
+
+// AccountKind is the personal/team distinction of design C1. It is a string
+// rather than an integer so that the column reads as itself in a query somebody
+// runs at 3am, and so that an unknown value is a check-constraint violation
+// rather than a silently wrong account.
+type AccountKind string
+
+const (
+	// AccountKindPersonal is a user's own free workspace. There is no route
+	// that creates one — a user has one because they are a user.
+	AccountKindPersonal AccountKind = "personal"
+	// AccountKindTeam is a funded account that may hold other members, be
+	// transferred, and be suspended when its balance runs out.
+	AccountKindTeam AccountKind = "team"
+)
 
 func (Account) TableName() string { return "accounts" }
 

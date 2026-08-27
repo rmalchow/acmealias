@@ -6,15 +6,16 @@
     </a>
 
     <nav>
-      @for (item of nav; track item.path) {
+      @for (item of nav(); track item.path) {
         <a [routerLink]="item.path" routerLinkActive="active">{{ item.label }}</a>
       }
     </nav>
 
     @if (session.me(); as me) {
       <!--
-        The account switcher renders nothing when there is one account to choose from, which is
-        the whole internal edition. It is absent rather than hidden: there is no choice to offer.
+        Always rendered, including for the user who has only their personal account — inert then,
+        showing that account with nothing to open, so the bar does not change shape the day a
+        second one is bought (design C12).
       -->
       <app-account-switcher />
       <button class="account" nz-button nzType="text" nz-dropdown [nzDropdownMenu]="account">
@@ -26,11 +27,20 @@
         <ul nz-menu>
           <li nz-menu-item nzDisabled>
             <div>
-              <div>{{ me.roles.join(', ') || 'no roles' }}</div>
-              <div class="ac-hint">{{ me.groups.join(', ') }}</div>
+              <!--
+                Roles are held IN THE SELECTED ACCOUNT now and are named by whoever owns it; the
+                identity-provider groups that used to grant them are printed nowhere any more,
+                because they grant nothing (design C10).
+              -->
+              <div>{{ me.displayName }}</div>
+              <div class="ac-hint">{{ me.roles.join(', ') || 'no roles in this account' }}</div>
             </div>
           </li>
           <li nz-menu-divider></li>
+          <li nz-menu-item tabindex="0" (click)="leave()" (keydown.enter)="leave()">
+            <span nz-icon nzType="cluster"></span>
+            Leave this account
+          </li>
           <li nz-menu-item tabindex="0" (click)="session.signOut()" (keydown.enter)="session.signOut()">
             <span nz-icon nzType="logout"></span>
             Sign out
@@ -41,8 +51,26 @@
   </div>
 </header>
 
+@if (lowBalance(); as account) {
+  <!-- Before zero, not at it (task 6.10). It names the amount and the consequence, because
+       "low balance" without either is a colour rather than a warning. -->
+  <div class="low-balance">
+    <span nz-icon nzType="wallet"></span>
+    {{ account.name }} has {{ account.credits }} EUR left. At zero this account stops and
+    certificates stop renewing.
+    <a routerLink="/settings">Add credit</a>
+  </div>
+}
+
 <main class="ac-page">
-  <router-outlet />
+  <!--
+    Keyed on the selected account (task 6.2c). A switch re-mounts the routed screen, so the data
+    on it belongs to the account named in the bar above it — without a page reload, which would
+    throw away the navigation that the switch exists to change.
+  -->
+  @for (key of [accountKey()]; track key) {
+    <router-outlet />
+  }
 </main>
 
 <nz-modal

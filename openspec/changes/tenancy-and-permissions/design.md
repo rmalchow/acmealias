@@ -29,6 +29,32 @@ Constraints that shaped everything below:
 
 1. **The internal edition must not observably change.** Same screens, same answers, same roles by
    name, no account visible anywhere.
+
+   > **RETIRED — discharged, not violated.** `personal-and-team-accounts` (design C10) removed the
+   > internal edition entirely, so there is no longer a deployment for this constraint to be about.
+   > It is retired rather than broken: it held for the whole of the change it was written for, and
+   > task 11.4 proved it.
+   >
+   > It is worth recording what it bought, because two things that look like historical accidents
+   > are actually its work:
+   >
+   > - **The four roles reproduce the old permission matrix exactly.** `ADMIN`, `CONFIG_ADMIN`,
+   >   `KEY_ROTATION` and `READ_ONLY` were seeded by migration 000008 with grants transcribed from
+   >   `permissions.go`, action for action, because a role that gained one would have been an
+   >   escalation nobody asked for and a role that lost one would have been an operator who could do
+   >   their job on Friday and not on Monday. That transcription is now the default role set every
+   >   new team account is seeded with (`store.DefaultRoles`), and it is checked against the matrix —
+   >   kept as data in `internal/authz/equivalence_test.go` — rather than against code that no longer
+   >   exists.
+   > - **Migration 000009, and 000012 which repairs it.** A role that could mint an API key had to
+   >   keep being able to mint a USABLE one once keys carried grants and the subset rule applied. That
+   >   is a sentence nobody would have written down without this constraint forcing the question, and
+   >   it shipped broken once — 000009's insert was silently filtered by the row-level security it had
+   >   just enabled, so 000012 exists to write the rows it meant to.
+   >
+   > What the constraint cost is also worth naming: derived membership (P18's second branch), the
+   > group-to-role mapping, `ScopeForBootstrap`, and automatic account selection at sign-in all
+   > existed to keep it true, and all four were deleted together the moment it was retired.
 2. **The challenge path must not get slower.** `POST /present` is on a certificate issuance critical
    path and already does an alias lookup and a zone-view refresh. Authorization must add no query.
 3. **A forgotten scope must not compile, and a mis-aimed one must not return rows.** The failure

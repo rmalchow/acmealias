@@ -73,8 +73,7 @@ type Config struct {
 	// Default FALSE, which is the important half. Creating an account means
 	// creating a tenant, and a deployment that authenticates a whole
 	// organization through its identity provider does not want every one of them
-	// able to do that — the internal edition has exactly one account and expects
-	// to keep it.
+	// able to do that.
 	//
 	// This is U9's switch from `public-edition`, borrowed early because the route
 	// it governs landed here with task 7.4a and an ungated one is a hole. The
@@ -82,6 +81,24 @@ type Config struct {
 	// which is U9's actual point: a route hidden from a menu is still on the
 	// internet.
 	AllowAccountCreation bool
+
+	// ProjectsPerPersonalAccount is how many projects a personal account may
+	// hold (ACME_PROJECT_QUOTA, default 5; design C13).
+	//
+	// A number rather than a constant because it is a pricing decision wearing
+	// an engineering hat: pricing changes on a different clock from deployments,
+	// and the first time one customer needs six is the day a constant becomes a
+	// migration.
+	//
+	// It applies to PERSONAL accounts only. A team account has no project quota
+	// at all — what limits it is its balance, and capping projects on top of
+	// metering would charge twice for the same growth, once in money and once in
+	// permission.
+	//
+	// Zero or less means no quota, which is how a deployment turns it off. It is
+	// spelled that way rather than with a second boolean because "how many" and
+	// "whether" are the same question asked once.
+	ProjectsPerPersonalAccount int
 
 	// MigrateOnStart runs migrations at startup unless set to false
 	// (ACME_MIGRATE_ON_START), see design D8.
@@ -157,19 +174,21 @@ type Config struct {
 	//
 	// StaffHost is what makes the split observable to this process: it decides
 	// which console the embedded web UI serves and which OIDC client a sign-in
-	// uses. Empty means this deployment has no staff surface at all, which is the
-	// internal edition's case, and everything answers as the customer plane.
+	// uses. Empty means this deployment has no staff surface at all, and
+	// everything answers as the customer plane.
 	StaffHost             string // ACME_STAFF_HOST, e.g. admin.acmealias.com
 	StaffOIDCClientID     string // ACME_STAFF_OIDC_CLIENT_ID
 	StaffOIDCClientSecret string // ACME_STAFF_OIDC_CLIENT_SECRET
 	StaffOIDCRedirectURL  string // ACME_STAFF_OIDC_REDIRECT_URL
 
-	// Role-group mapping: which Keycloak group grants each role. An unset
-	// variable means nobody holds that role (design D10).
-	AdminGroup       string // ACME_ADMIN_GROUP
-	ConfigAdminGroup string // ACME_CONFIG_ADMIN_GROUP
-	KeyRotationGroup string // ACME_KEY_ROTATION_GROUP
-	ReadOnlyGroup    string // ACME_READ_ONLY_GROUP
+	// There is deliberately no role-group mapping here. ACME_ADMIN_GROUP and its
+	// three siblings named the identity-provider group that granted each of four
+	// global roles; design C10 removed the global roles, so there is nothing for
+	// a group to grant. Authority is a membership row in one account.
+	//
+	// The group CLAIM is still read (OIDCGroupClaim above) and still recorded on
+	// the session and in the audit trail: what the identity provider said about
+	// a person is worth keeping even when nothing is decided from it.
 
 	// Session lifetimes (design D10).
 	SessionIdleTimeout time.Duration // ACME_SESSION_IDLE_TIMEOUT
@@ -372,6 +391,23 @@ func typeCheck(errs *loadErrors, isSet func(string) bool) func(*koanf.Koanf) err
 					continue
 				}
 				set(b.path, uint32(v))
+			case kindInt:
+				// A plain count — a quota, today. Zero on an unparseable
+				// value rather than the default, for the same reason every
+				// branch here does: an operator who typed a number wrong
+				// should see the setting refused, not silently get the
+				// number they did not write.
+				if raw == "" {
+					reset(b.path, 0)
+					continue
+				}
+				v, err := strconv.Atoi(raw)
+				if err != nil {
+					errs.add(setting, err)
+					reset(b.path, 0)
+					continue
+				}
+				set(b.path, v)
 			case kindList:
 				// A list written as one string — from a placeholder, or from
 				// an operator who typed the environment form into a file.

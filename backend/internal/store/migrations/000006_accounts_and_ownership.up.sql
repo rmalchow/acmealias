@@ -25,10 +25,23 @@ create table accounts (
   created_at timestamptz not null default now()
 );
 
--- The internal edition has exactly one account, seeded here so that no code path
--- has to cope with its absence. ACME_ORG_NAME is not readable from a migration,
--- so the name is a placeholder the application corrects at startup.
-insert into accounts (slug, name) values ('internal', 'Internal');
+-- The account every pre-account row is backfilled into.
+--
+-- This was an unconditional seed: the internal edition had exactly one account,
+-- created here so that no code path had to cope with its absence. Design C10
+-- removed that edition, and with it store.ScopeForBootstrap — the producer that
+-- resolved "the one account" — so the row is no longer a mechanism. It is only a
+-- destination for the backfills below.
+--
+-- It is therefore seeded only when there is something to backfill. A deployment
+-- already past this migration is unaffected: it ran the unconditional form and
+-- has the row. A FRESH chain now starts with no accounts at all, which is what a
+-- deployment where every account is created by a person actually looks like —
+-- rather than with a stray 'internal' account that nobody owns, holds nothing,
+-- and (once credits arrive) would not even be usable.
+insert into accounts (slug, name)
+select 'internal', 'Internal'
+ where exists (select 1 from projects) or exists (select 1 from audit_entries);
 
 alter table projects add column account_id uuid;
 update projects set account_id = (select id from accounts where slug = 'internal');

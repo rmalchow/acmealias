@@ -1,9 +1,11 @@
 package authz
 
-// Action is one class of management operation. There is one Action per row of
-// the permission matrix in design D10 and in the identity-and-roles spec, and
-// no Action takes a project: no role is project-scoped, so there is nothing to
-// scope a check to.
+// Action is one class of management operation — the verb half of a grant.
+//
+// It used to be one row of a permission matrix keyed by four global role names
+// (design D10). The matrix is gone with the internal edition (design C10): an
+// action is now checked against an OBJECT for a SUBJECT by the evaluator, and
+// this list is what there is to check.
 type Action string
 
 const (
@@ -15,37 +17,20 @@ const (
 	// ActionKeyWrite creates or revokes API keys.
 	ActionKeyWrite Action = "key.write"
 	// ActionKeySecretView sees a key secret at creation, the one time it is
-	// ever shown. Separate from ActionKeyWrite because it is a separate row of
-	// the matrix, even though the two currently carry the same roles.
+	// ever shown. Separate from ActionKeyWrite because seeing the secret and
+	// being able to mint one are different powers, even though the default role
+	// set happens to hand them out together.
 	ActionKeySecretView Action = "key.secret.view"
-	// ActionSessionAdmin enumerates and revokes other people's sessions.
-	ActionSessionAdmin Action = "session.admin"
 	// ActionDNSPlan views the DNS plan and runs verification.
 	ActionDNSPlan Action = "dns.plan"
 	// ActionViewInventory views the inventory and the audit log.
 	ActionViewInventory Action = "inventory.view"
 )
 
-// permissions is the matrix, spelled out. Reading down a column answers "what
-// may this role do"; reading across a row answers "who may do this".
-//
-// An Action absent from this map is permitted to nobody, so a typo in a route's
-// required permission fails closed rather than open.
-var permissions = map[Action]RoleSet{
-	ActionProjectAdmin:   NewRoleSet(RoleAdmin),
-	ActionSessionAdmin:   NewRoleSet(RoleAdmin),
-	ActionInventoryWrite: NewRoleSet(RoleAdmin, RoleConfigAdmin),
-	ActionKeyWrite:       NewRoleSet(RoleAdmin, RoleConfigAdmin, RoleKeyRotation),
-	ActionKeySecretView:  NewRoleSet(RoleAdmin, RoleConfigAdmin, RoleKeyRotation),
-	ActionDNSPlan:        NewRoleSet(RoleAdmin, RoleConfigAdmin, RoleKeyRotation, RoleReadOnly),
-	ActionViewInventory:  NewRoleSet(RoleAdmin, RoleConfigAdmin, RoleKeyRotation, RoleReadOnly),
-}
-
-// AllActions is every Action, for tests and for the console's "what may I do"
-// answer.
+// AllActions is every Action, in a stable order, for tests and for the "what may
+// I do here" answer the console renders controls from.
 var AllActions = []Action{
 	ActionProjectAdmin,
-	ActionSessionAdmin,
 	ActionInventoryWrite,
 	ActionKeyWrite,
 	ActionKeySecretView,
@@ -53,30 +38,33 @@ var AllActions = []Action{
 	ActionViewInventory,
 }
 
-// CanRole reports whether an actor holding roles may perform action.
+// PermittedInAccount lists the actions a subject holds ACCOUNT-WIDE, which is
+// what /api/v1/me answers.
 //
-// This is the pre-grant model: a verb and nothing else, against four fixed role
-// names. It survives only until roles become rows and the route middleware that
-// calls it is removed — Can in evaluate.go is the model everything moves to. It
-// is kept, and renamed rather than deleted, so the two can be compared during
-// the migration and so a call site that still uses it is obvious at a glance.
-func CanRole(roles RoleSet, action Action) bool {
-	for r := range permissions[action] {
-		if roles[r] {
-			return true
-		}
-	}
-	return false
-}
-
-// Allowed lists the actions roles permits, in AllActions order. The console
-// uses it to decide which buttons to render; the server still checks every
-// request, because the client is not the enforcement point.
-func Allowed(roles RoleSet) []Action {
-	out := make([]Action, 0, len(AllActions))
+// "Account-wide" is a real question with a real answer, and that is why it is
+// asked this way rather than by consulting a table of roles. A wildcard object
+// matches only a grant whose type and identifier are both wildcards, so this
+// reports exactly the actions the subject may perform on anything in the
+// account — which is what the old role matrix meant and all it could mean.
+//
+// A subject holding an action on ONE project is correctly absent from this list
+// and correctly present in PermittedOn for that project. The console asks this
+// one for the shell and that one for a screen; conflating them would render a
+// button that is right on average and wrong on every row.
+func PermittedInAccount(s Subject) []string {
+	everything := Object{Type: TypeAny, AccountID: s.AccountID}
+	out := make([]string, 0, len(AllActions))
 	for _, a := range AllActions {
-		if CanRole(roles, a) {
-			out = append(out, a)
+		permitted := Can(s, string(a), everything)
+		// Project administration is governed by MEMBERSHIP of the account's
+		// unrestricted role rather than by a grant (design P14), so it is
+		// answered the way the handler answers it. PermittedOn carries the same
+		// exception, for the same reason.
+		if a == ActionProjectAdmin {
+			permitted = s.Unrestricted
+		}
+		if permitted {
+			out = append(out, string(a))
 		}
 	}
 	return out

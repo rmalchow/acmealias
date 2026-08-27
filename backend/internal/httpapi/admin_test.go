@@ -82,11 +82,14 @@ func (testConsoleAuth) CSRF() echo.MiddlewareFunc {
 
 // --- fixture ---------------------------------------------------------------
 
+// The four roles a new team account is seeded with (store.DefaultRoles). They
+// used to be reached through four ACME_*_GROUP variables and a group claim;
+// they are membership rows now, which is what adminEnv.session writes.
 const (
-	groupAdmin  = "g-admin"
-	groupConfig = "g-config"
-	groupKey    = "g-key"
-	groupRead   = "g-read"
+	roleAdmin  = "ADMIN"
+	roleConfig = "CONFIG_ADMIN"
+	roleKey    = "KEY_ROTATION"
+	roleRead   = "READ_ONLY"
 )
 
 type adminEnv struct {
@@ -104,12 +107,27 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	t.Helper()
 	db := migratedDB(t)
 	ctx := t.Context()
-	sc, err := store.ScopeForBootstrap(ctx, db)
+	// The account is created rather than found. store.ScopeForBootstrap used to
+	// hand back the one the migration seeded; design C10 removed both, so the
+	// fixture goes through the production path — which also seeds the four
+	// default roles the sessions below are given membership of.
+	owner, err := store.FindOrCreateUser(ctx, db, "fixture-owner", "Fixture Owner", "")
 	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
+		t.Fatalf("create owner: %v", err)
+	}
+	acc, err := store.CreateAccountWithOwner(ctx, db, "acme-fixture", "Acme Fixture", owner.ID, 25)
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	sc, err := store.ScopeForSelection(ctx, db, acc.ID)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if !sc.Valid() {
+		t.Fatal("fixture scope is the zero Scope; every read below would silently match nothing")
 	}
 
-	p, err := inventory.CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), "acme", "Acme")
+	p, err := inventory.CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), inventory.Limits{}, "acme", "Acme")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -126,17 +144,13 @@ func newAdminEnv(t *testing.T) *adminEnv {
 		CAAIssuers:         []string{"letsencrypt.org"},
 		SessionIdleTimeout: time.Hour,
 		SessionMaxLifetime: 8 * time.Hour,
-		AdminGroup:         groupAdmin,
-		ConfigAdminGroup:   groupConfig,
-		KeyRotationGroup:   groupKey,
-		ReadOnlyGroup:      groupRead,
 		OIDCClientSecret:   "super-secret-value",
 		DatabaseURL:        "postgres://user:hunter2@db:5432/acme",
 	}
 
 	opts := AdminOptions{
 		DB:     db,
-		Guard:  &authz.Guard{Auth: &testAuth{db: db}, Mapping: authz.MappingFromConfig(cfg), Log: discard()},
+		Guard:  &authz.Guard{Auth: &testAuth{db: db}, Log: discard()},
 		Auth:   testConsoleAuth{},
 		Config: cfg,
 		Log:    discard(),
@@ -173,7 +187,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 
 func seedProject(t *testing.T, v *adminEnv, suffix string) string {
 	t.Helper()
-	p, err := inventory.CreateProject(t.Context(), v.db, v.sc, authz.CLISubject(v.sc.AccountID()),
+	p, err := inventory.CreateProject(t.Context(), v.db, v.sc, authz.CLISubject(v.sc.AccountID()), inventory.Limits{},
 		fmt.Sprintf("seed-p%d", seedCounter.Add(1)), "Seed "+suffix)
 	if err != nil {
 		t.Fatalf("seed project: %v", err)
@@ -278,6 +292,15 @@ func seedMember(t *testing.T, v *adminEnv, suffix string) string {
 func (v *adminEnv) openAccountCreation(t *testing.T) {
 	t.Helper()
 	v.opts.Config.AllowAccountCreation = true
+	v.reregister(t)
+}
+
+// reregister rebuilds the router around whatever v.opts now says. It is how a
+// test changes a SETTING rather than a fixture: the effective configuration is
+// captured at registration, so a test that edited v.opts without this would be
+// asserting against the old value.
+func (v *adminEnv) reregister(t *testing.T) {
+	t.Helper()
 	e := echo.New()
 	e.Logger.SetOutput(io.Discard)
 	if err := RegisterAdmin(e, v.opts); err != nil {
@@ -297,22 +320,69 @@ func listAccountsFor(t *testing.T, v *adminEnv) ([]model.Account, error) {
 	return accs, err
 }
 
-// session inserts a session row in the given groups and returns a client
-// authenticated as it.
-func (v *adminEnv) session(subject string, groups ...string) *client {
+// session inserts a session row holding the named roles IN THE FIXTURE ACCOUNT,
+// and returns a client authenticated as it.
+//
+// This used to take identity-provider GROUPS, and the roles followed from the
+// four ACME_*_GROUP settings. Design C10 removed that derivation: a role is a
+// membership row now, so the fixture writes one per role name. The tests below
+// are unchanged in what they assert — a caller holding CONFIG_ADMIN and a route
+// that CONFIG_ADMIN may not reach — and changed in how that authority arrives,
+// which is the whole of the change.
+//
+// Groups are still stamped on the session because the session still records
+// them and the audit trail still reports them; nothing grants on them.
+func (v *adminEnv) session(subject string, roleNames ...string) *client {
 	v.t.Helper()
+	ctx := v.t.Context()
 	now := time.Now().UTC()
-	// The session selects the account it will act in, as sign-in does in the
-	// single-account edition (design P19). Without it every account-scoped route
-	// answers "no account selected", which is correct and is not what these
-	// tests are about.
+
+	user, err := store.FindOrCreateUser(ctx, v.db, subject, strings.ToUpper(subject), "")
+	if err != nil {
+		v.t.Fatalf("create user %s: %v", subject, err)
+	}
+	if len(roleNames) > 0 {
+		roles, err := store.RolesByName(ctx, v.db, v.sc, roleNames...)
+		if err != nil {
+			v.t.Fatalf("read roles %v: %v", roleNames, err)
+		}
+		if len(roles) != len(roleNames) {
+			v.t.Fatalf("found %d of %v in the account; a new account is seeded with all four", len(roles), roleNames)
+		}
+		// Idempotent: a person with two sessions is one person with one
+		// membership, and the unique constraint on (account, user, role) says
+		// so.
+		existing, err := store.ListMembers(ctx, v.db, v.sc)
+		if err != nil {
+			v.t.Fatalf("read members: %v", err)
+		}
+		held := map[model.ID]bool{}
+		for _, m := range existing {
+			if m.UserID == user.ID {
+				held[m.RoleID] = true
+			}
+		}
+		for _, r := range roles {
+			if held[r.ID] {
+				continue
+			}
+			if err := store.AddMember(ctx, v.db, v.sc, user.ID, r.ID); err != nil {
+				v.t.Fatalf("add %s to %s: %v", subject, r.Name, err)
+			}
+		}
+	}
+
+	// The session selects the account it will act in. Sign-in no longer does
+	// that (task 2.2) — a session begins with nothing selected — so a test that
+	// wants an account-scoped route says so here, which is what a person does
+	// through the picker.
 	account := v.sc.AccountID()
 	s := &model.Session{
 		ID: subject + "-session-" + hexish(), Subject: subject, DisplayName: strings.ToUpper(subject),
-		Groups: model.StringArray(groups), CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
+		Groups: model.StringArray(roleNames), CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour),
 		SelectedAccountID: &account,
 	}
-	if err := store.CreateSession(v.t.Context(), v.db, s); err != nil {
+	if err := store.CreateSession(ctx, v.db, s); err != nil {
 		v.t.Fatalf("create session: %v", err)
 	}
 	return &client{t: v.t, e: v.e, sessionID: s.ID}
@@ -433,15 +503,28 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 	v := newAdminEnv(t)
 
 	clients := map[string]*client{
-		"ADMIN":        v.session("admin", groupAdmin),
-		"CONFIG_ADMIN": v.session("config", groupConfig),
-		"KEY_ROTATION": v.session("keys", groupKey),
-		"READ_ONLY":    v.session("reader", groupRead),
+		"ADMIN":        v.session("admin", roleAdmin),
+		"CONFIG_ADMIN": v.session("config", roleConfig),
+		"KEY_ROTATION": v.session("keys", roleKey),
+		"READ_ONLY":    v.session("reader", roleRead),
 	}
 
 	acct := "/api/v1/accounts/" + v.sc.AccountID().String()
 	lb := acct + "/loadbalancers/" + itoa(v.lb.ID)
 	proj := acct + "/projects/" + itoa(v.projID)
+
+	// A refusal is 403 everywhere except here, and the asymmetry with transfer
+	// is the decision rather than an inconsistency. Transfer is inside the
+	// account-scoped group, so the caller has already been established as acting
+	// in this account and "you are not its owner" tells them nothing they could
+	// not work out. Checkout is deliberately OUTSIDE that group — it is the one
+	// route the owner of a suspended account has to be able to reach — so its
+	// account comes from a path parameter with no selection to check it against,
+	// and a 403 would confirm that a guessed identifier names a real account. It
+	// answers the same not-found whether the account exists or not.
+	refusedWithNotFound := map[string]bool{
+		"POST /api/v1/accounts/" + v.sc.AccountID().String() + "/checkout": true,
+	}
 
 	cases := []struct {
 		method, path, body string
@@ -506,8 +589,34 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		// Nobody: account creation is closed unless a deployment opens it, and
 		// the refusal is the same for every role because it is not about what
 		// they may do — it is about what this deployment does at all.
-		{"POST", "/api/v1/accounts", `{"slug":"fresh","name":"Fresh"}`, nil, nil},
+		{"POST", "/api/v1/accounts", `{"slug":"fresh","name":"Fresh","amount":25}`, nil, nil},
 		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/select", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+
+		// The price list is not a secret: it is what the buy screen renders,
+		// and it is readable with no account selected because that screen is
+		// reachable before there is an account to select.
+		{"GET", "/api/v1/checkout/amounts", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+
+		// Nobody, and the reason is the interesting one: these two are gated on
+		// OWNERSHIP rather than on a role, and the fixture's owner is
+		// "fixture-owner" — none of the four sessions below. An unrestricted
+		// member can administer everything inside the account and is still not
+		// the person whose account it is, which is exactly what these rows pin.
+		//
+		// A row that listed ADMIN here would be asserting the opposite: that
+		// holding the unrestricted role is enough to spend the owner's money and
+		// to give their account away.
+		//
+		// Checkout answers 404 rather than 403, and that asymmetry with transfer
+		// is deliberate. Transfer is inside the account-scoped group, so the
+		// caller has already been established as acting in this account and
+		// "you are not its owner" tells them nothing they could not work out.
+		// Checkout is outside it and takes its account from a path parameter, so
+		// a 403 there would confirm that the guessed identifier names a real
+		// account — an existence oracle for anybody with a session. It answers
+		// the same not-found whether the account exists or not.
+		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/checkout", `{"amount":25}`, nil, nil},
+		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/transfer", `{"subject":"someone-else"}`, nil, nil},
 
 		// Roles and membership change what people can do, so they are governed
 		// by membership of the unrestricted role (design P14) — reading the
@@ -521,10 +630,17 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"POST", acct + "/members", `{"subject":"someone","roleId":"` + v.roleID.String() + `"}`, []string{"ADMIN"}, nil},
 		{"DELETE", "", "", []string{"ADMIN"}, seedMember},
 
-		// Sessions: ADMIN only.
-		{"GET", "/api/v1/sessions", "", []string{"ADMIN"}, nil},
-		{"DELETE", "/api/v1/sessions?subject=nobody", "", []string{"ADMIN"}, nil},
-		{"DELETE", "/api/v1/sessions/" + strings.Repeat("0", 64), "", []string{"ADMIN"}, nil},
+		// Sessions belong to the person holding them, so every role reaches
+		// them and reaches only their own (design C10; see
+		// TestSessionsAreTheCallersOwn). They used to be ADMIN-only, on the
+		// global role that no longer exists.
+		{"GET", "/api/v1/sessions", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		// Naming somebody else is refused for every role, which is the point:
+		// there is no role that ends another person's session. Named here rather
+		// than bare so this row cannot sign the table's own client out halfway
+		// through.
+		{"DELETE", "/api/v1/sessions?subject=nobody", "", nil, nil},
+		{"DELETE", "/api/v1/sessions/" + strings.Repeat("0", 64), "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 	}
 
 	covered := map[string]bool{}
@@ -564,8 +680,12 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 					}
 					return
 				}
-				if rec.Code != http.StatusForbidden {
-					t.Fatalf("%s %s as %s: %d %s, want 403", tc.method, path, role, rec.Code, rec.Body.String())
+				want := http.StatusForbidden
+				if refusedWithNotFound[tc.method+" "+tc.path] {
+					want = http.StatusNotFound
+				}
+				if rec.Code != want {
+					t.Fatalf("%s %s as %s: %d %s, want %d", tc.method, path, role, rec.Code, rec.Body.String(), want)
 				}
 			})
 		}
@@ -578,7 +698,7 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 // asserted end to end rather than only through the matrix above.
 func TestKeyRotationMayMintAKeyButNotADomain(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("keys", groupKey)
+	cl := v.session("keys", roleKey)
 	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	rec := cl.do(http.MethodPost, lb+"/keys", `{"note":"traefik"}`)
@@ -611,28 +731,50 @@ func TestUnauthenticatedManagementRequestIs401(t *testing.T) {
 	}
 }
 
-// A user who authenticates but maps to no role is told which groups were
-// actually seen — the only thing that distinguishes a typo in
-// ACME_ADMIN_GROUP from Keycloak's "Full group path" being left on.
-func TestAuthenticatedWithNoMappedGroupIsRefusedAndTold(t *testing.T) {
+// A person who holds no role in the account is admitted and permitted nothing,
+// rather than refused at the door.
+//
+// This replaces TestAuthenticatedWithNoMappedGroupIsRefusedAndTold, which
+// asserted a 403 naming the groups the request had been seen in — the diagnostic
+// for a typo in ACME_ADMIN_GROUP, or for Keycloak's "Full group path" being left
+// on. Neither the setting nor the failure mode exists any more (design C10).
+//
+// The distinction it is worth keeping is the one this asserts: /me answers,
+// because it is about the person rather than about the account, and it answers
+// with an empty authority — which is how the console knows to render nothing
+// rather than to render everything greyed out.
+func TestMemberOfNothingIsAdmittedAndPermittedNothing(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("stranger", "some-other-group")
+	cl := v.session("stranger")
 	rec := cl.do(http.MethodGet, "/api/v1/me", "")
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status %d, want 403", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var body authz.NoRoleBody
-	decode(t, rec, &body)
-	if body.Message == "" || !contains(body.ObservedGroups, "some-other-group") {
-		t.Fatalf("403 body %s does not report the observed groups", rec.Body.String())
+	var me meView
+	decode(t, rec, &me)
+	if len(me.Roles) != 0 || len(me.Permissions) != 0 {
+		t.Errorf("roles %v / permissions %v, want neither — this person is in no role here", me.Roles, me.Permissions)
+	}
+
+	// And they cannot select the account, which is where membership is checked
+	// (design P19): the fixture put the selection on the session row directly,
+	// which is not a door a request can walk through.
+	//
+	// Not-found rather than forbidden, deliberately: whether an account exists
+	// is not something a non-member should learn by asking.
+	rec = cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/select", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("select as a non-member: %d %s, want 404", rec.Code, rec.Body.String())
 	}
 }
 
 // --- /me and the error shape -----------------------------------------------
 
+// The roles /me reports are the ones held IN THE SELECTED ACCOUNT, and they are
+// additive: holding two is normal.
 func TestMeCarriesDisplayNameGroupsAndRoles(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin, groupRead)
+	cl := v.session("admin", roleAdmin, roleRead)
 	rec := cl.do(http.MethodGet, "/api/v1/me", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -642,17 +784,17 @@ func TestMeCarriesDisplayNameGroupsAndRoles(t *testing.T) {
 	if me.DisplayName != "ADMIN" {
 		t.Errorf("displayName %q", me.DisplayName)
 	}
-	if !contains(me.Groups, groupAdmin) || !contains(me.Groups, groupRead) {
+	if !contains(me.Groups, roleAdmin) || !contains(me.Groups, roleRead) {
 		t.Errorf("groups %v do not carry the session's claim", me.Groups)
 	}
 	if !contains(me.Roles, "ADMIN") || !contains(me.Roles, "READ_ONLY") {
-		t.Errorf("roles %v: roles are additive, both groups were mapped", me.Roles)
+		t.Errorf("roles %v: roles are additive, both memberships were written", me.Roles)
 	}
 }
 
 func TestDomainErrorsMapToStatusesAndOneJSONShape(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	if rec := cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com"}`); rec.Code != http.StatusCreated {
@@ -692,7 +834,7 @@ func TestDomainErrorsMapToStatusesAndOneJSONShape(t *testing.T) {
 // into a bug report about the console.
 func TestUnknownAPIPathIsJSONNotTheConsole(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 
 	for _, path := range []string{"/api/v1/nope", "/api/v2/projects", "/api/"} {
 		rec := cl.do(http.MethodGet, path, "")
@@ -719,7 +861,7 @@ func TestUnknownAPIPathIsJSONNotTheConsole(t *testing.T) {
 
 func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	rec := cl.do(http.MethodPost, lb+"/keys", `{"note":"traefik","networks":["203.0.113.5/24"]}`)
@@ -782,7 +924,7 @@ func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 
 func TestKeyRestrictionRejectsGarbageCIDR(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/loadbalancers/"+itoa(v.lb.ID)+"/keys", `{"networks":["not-a-cidr"]}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body.String())
@@ -791,77 +933,127 @@ func TestKeyRestrictionRejectsGarbageCIDR(t *testing.T) {
 
 // --- sessions --------------------------------------------------------------
 
-func TestSessionRevocationIsImmediateAndConfined(t *testing.T) {
+// Sessions are the caller's own, and revoking one is immediate.
+//
+// This used to be an ADMIN listing every session in the deployment and revoking
+// somebody else's — the operator half of "remove them from the group AND revoke
+// their sessions". Design C10 removed the global ADMIN role, and nothing
+// per-account could replace it: a session belongs to a person rather than to an
+// account, and the listing would have disclosed every other tenant's subjects to
+// any account's administrator. Ending somebody else's session is a staff power
+// now, and the staff plane does not exist yet.
+//
+// What survives is what a person can do about their own: see them, and end them.
+func TestSessionsAreTheCallersOwn(t *testing.T) {
 	v := newAdminEnv(t)
-	admin := v.session("admin", groupAdmin)
-	alice := v.session("alice", groupRead)
-	bob := v.session("bob", groupRead)
+	admin := v.session("admin", roleAdmin)
+	aliceLaptop := v.session("alice", roleRead)
+	alicePhone := v.session("alice", roleRead)
+	bob := v.session("bob", roleRead)
 
-	rec := admin.do(http.MethodGet, "/api/v1/sessions", "")
+	rec := aliceLaptop.do(http.MethodGet, "/api/v1/sessions", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list sessions: %d %s", rec.Code, rec.Body.String())
 	}
 	var listed []sessionView
 	decode(t, rec, &listed)
-	if len(listed) < 3 {
-		t.Fatalf("listed %d sessions, want at least 3", len(listed))
+	if len(listed) != 2 {
+		t.Fatalf("alice sees %d sessions, want her two: %+v", len(listed), listed)
+	}
+	for _, s := range listed {
+		if s.Subject != "alice" {
+			t.Fatalf("alice sees a session belonging to %q", s.Subject)
+		}
+		if s.CreatedAt.IsZero() || s.ExpiresAt.IsZero() {
+			t.Fatalf("session row is missing start/expiry: %+v", s)
+		}
 	}
 	// The listing must not carry anything usable as a credential.
-	for _, s := range listed {
-		if strings.Contains(rec.Body.String(), bob.sessionID) {
+	for _, id := range []string{aliceLaptop.sessionID, alicePhone.sessionID, bob.sessionID} {
+		if strings.Contains(rec.Body.String(), id) {
 			t.Fatal("the sessions listing contains a raw session id")
 		}
-		if s.Subject == "" || s.CreatedAt.IsZero() || s.ExpiresAt.IsZero() {
-			t.Fatalf("session row is missing subject/start/expiry: %+v", s)
-		}
 	}
 
-	var bobHandle string
+	// A handle belonging to somebody else is not merely refused — it is not in
+	// the set this caller can name at all, so it reads as not-found.
+	rec = bob.do(http.MethodGet, "/api/v1/sessions", "")
+	var bobsOwn []sessionView
+	decode(t, rec, &bobsOwn)
+	if len(bobsOwn) != 1 {
+		t.Fatalf("bob sees %d sessions, want his one", len(bobsOwn))
+	}
+	if rec := aliceLaptop.do(http.MethodDelete, "/api/v1/sessions/"+bobsOwn[0].Handle, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("alice revoking bob's session: %d %s, want 404", rec.Code, rec.Body.String())
+	}
+	if rec := bob.do(http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusOK {
+		t.Fatalf("bob was signed out by alice: %d", rec.Code)
+	}
+
+	// Her own phone, though, she may end — and it takes effect at the next
+	// request rather than at the next sign-in.
+	var phoneHandle string
 	for _, s := range listed {
-		if s.Subject == "bob" {
-			bobHandle = s.Handle
+		if s.Handle != sessionHandle(aliceLaptop.sessionID) {
+			phoneHandle = s.Handle
 		}
 	}
-	if bobHandle == "" {
-		t.Fatal("bob's session was not listed")
+	if phoneHandle == "" {
+		t.Fatal("alice's other session was not listed")
 	}
-
-	if rec := admin.do(http.MethodDelete, "/api/v1/sessions/"+bobHandle, ""); rec.Code != http.StatusOK {
+	if rec := aliceLaptop.do(http.MethodDelete, "/api/v1/sessions/"+phoneHandle, ""); rec.Code != http.StatusOK {
 		t.Fatalf("revoke: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := bob.do(http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("bob after revocation: %d, want 401", rec.Code)
+	if rec := alicePhone.do(http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("the revoked session still answers: %d, want 401", rec.Code)
 	}
-	if rec := alice.do(http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusOK {
-		t.Fatalf("alice after bob's revocation: %d %s, want 200", rec.Code, rec.Body.String())
+	if rec := aliceLaptop.do(http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusOK {
+		t.Fatalf("the session that did the revoking was ended too: %d", rec.Code)
 	}
 
-	// The revocation is attributable: the administrator and the subject whose
-	// access was ended are both on the record.
-	rec = admin.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/audit?objectType=session", "")
-	var entries []auditView
-	decode(t, rec, &entries)
+	// The revocation is attributable, and it belongs to NO account.
+	//
+	// It is read straight out of the table rather than through
+	// /accounts/:id/audit, because there is no account trail it could appear in
+	// — which is the assertion. A session belongs to a person, not to a tenant:
+	// filing the entry into whichever account happened to be selected would put
+	// one person's security event into somebody else's trail, and since task 2.2
+	// the usual selection is none at all. For the same reason it records no
+	// roles: a role is authority IN an account, and claiming the one the actor
+	// held somewhere else would say the revocation was performed with an
+	// authority that has nothing to do with it.
+	_ = admin
+	var entries []model.AuditEntry
+	if err := store.CrossAccount(t.Context(), v.db, func(tx *gorm.DB) error {
+		return tx.Where("object_type = ?", authz.ObjectSession).Order("occurred_at").Find(&entries).Error
+	}); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
 	if len(entries) == 0 {
 		t.Fatal("no audit entry for the revocation")
 	}
 	e := entries[0]
-	if e.ActorSubject == nil || *e.ActorSubject != "admin" || e.ObjectLabel != "bob" {
-		t.Fatalf("audit entry does not name the administrator and the subject: %+v", e)
+	if e.ActorSubject == nil || *e.ActorSubject != "alice" || e.ObjectLabel != "alice" {
+		t.Fatalf("audit entry does not name who did it and whose access ended: %+v", e)
 	}
-	if !contains(e.ActorRoles, "ADMIN") {
-		t.Fatalf("audit entry lost the roles held at the time: %v", e.ActorRoles)
+	if e.AccountID != nil {
+		t.Fatalf("the revocation was filed into account %s; a session belongs to a person", *e.AccountID)
+	}
+	if len(e.ActorRoles) != 0 {
+		t.Fatalf("the revocation claims roles %v; it was not performed inside an account", e.ActorRoles)
 	}
 }
 
-func TestRevokingEverySessionOfOneSubject(t *testing.T) {
+// "Sign me out everywhere", after a laptop goes missing — and only the caller's
+// own everywhere.
+func TestRevokingEverySessionOfTheCaller(t *testing.T) {
 	v := newAdminEnv(t)
-	admin := v.session("admin", groupAdmin)
-	first := v.session("carol", groupRead)
-	second := v.session("carol", groupRead)
-	other := v.session("dave", groupRead)
+	first := v.session("carol", roleRead)
+	second := v.session("carol", roleRead)
+	other := v.session("dave", roleRead)
 
-	if rec := admin.do(http.MethodDelete, "/api/v1/sessions?subject=carol", ""); rec.Code != http.StatusOK {
-		t.Fatalf("revoke by subject: %d %s", rec.Code, rec.Body.String())
+	if rec := first.do(http.MethodDelete, "/api/v1/sessions", ""); rec.Code != http.StatusOK {
+		t.Fatalf("revoke my sessions: %d %s", rec.Code, rec.Body.String())
 	}
 	for _, cl := range []*client{first, second} {
 		if rec := cl.do(http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusUnauthorized {
@@ -873,11 +1065,32 @@ func TestRevokingEverySessionOfOneSubject(t *testing.T) {
 	}
 }
 
+// The ?subject= parameter is kept as a CHECK rather than a target. Dropping it
+// would have made a call naming somebody else silently sign the CALLER out,
+// which is equally destructive and harder to notice.
+func TestRevokingAnotherSubjectsSessionsIsRefused(t *testing.T) {
+	v := newAdminEnv(t)
+	admin := v.session("admin", roleAdmin)
+	victim := v.session("erin", roleRead)
+
+	rec := admin.do(http.MethodDelete, "/api/v1/sessions?subject=erin", "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("revoking erin's sessions: %d %s, want 403", rec.Code, rec.Body.String())
+	}
+	if rec := victim.do(http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusOK {
+		t.Fatalf("erin was signed out anyway: %d", rec.Code)
+	}
+	// Naming yourself is fine: it is what the console sends.
+	if rec := admin.do(http.MethodDelete, "/api/v1/sessions?subject=admin", ""); rec.Code != http.StatusOK {
+		t.Fatalf("naming my own subject: %d %s, want 200", rec.Code, rec.Body.String())
+	}
+}
+
 // --- CSRF, audit, plan -----------------------------------------------------
 
 func TestStateChangingRequestWithoutTheTokenIsRejected(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	// A client that never fetches a token: a valid session cookie alone must
 	// not be enough.
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", strings.NewReader(`{"slug":"x","name":"X"}`))
@@ -995,7 +1208,7 @@ func (r *auditRecorder) step(t *testing.T, method, path, body string, wantStatus
 // these entries and no others" is only meaningful if nothing else is running.
 func TestMutationsAreAudited(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	r := &auditRecorder{cl: cl, auditAt: "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit"}
 
 	// --- projects ---
@@ -1122,7 +1335,7 @@ func assertProjectID(t *testing.T, cl *client, auditAt, action string, projectID
 // the two questions an audit trail is actually opened for.
 func TestActionClassFilterNarrowsTheTrail(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	if rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"gamma","name":"Gamma"}`); rec.Code != http.StatusCreated {
@@ -1167,7 +1380,7 @@ func TestRolledBackChangeLeavesNoAuditEntry(t *testing.T) {
 
 	boom := errors.New("the change failed after its audit entry was written")
 	err := v.sc.Run(ctx, v.db, func(tx *gorm.DB) error {
-		p, err := inventory.CreateProject(ctx, tx, v.sc, authz.CLISubject(v.sc.AccountID()), "doomed", "Doomed")
+		p, err := inventory.CreateProject(ctx, tx, v.sc, authz.CLISubject(v.sc.AccountID()), inventory.Limits{}, "doomed", "Doomed")
 		if err != nil {
 			return err
 		}
@@ -1201,7 +1414,7 @@ func TestRolledBackChangeLeavesNoAuditEntry(t *testing.T) {
 // path a full disk or a revoked grant would take.
 func TestFailedAuditWriteRollsBackTheChange(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 
 	stmts := []string{
 		`create function refuse_audit() returns trigger language plpgsql as $$
@@ -1232,10 +1445,10 @@ func TestFailedAuditWriteRollsBackTheChange(t *testing.T) {
 
 func TestPlanIsServedStructuredAndAsAZoneSnippet(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("reader", groupRead)
+	cl := v.session("reader", roleRead)
 	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
-	admin := v.session("admin", groupAdmin)
+	admin := v.session("admin", roleAdmin)
 	for _, name := range []string{"example.com", "*.example.com"} {
 		if rec := admin.do(http.MethodPost, lb+"/domains", `{"name":"`+name+`"}`); rec.Code != http.StatusCreated {
 			t.Fatalf("seed %s: %d %s", name, rec.Code, rec.Body.String())
@@ -1331,12 +1544,19 @@ func TestParseCIDRsMasksHostBits(t *testing.T) {
 	}
 }
 
-// The effective configuration is what an operator checks when someone cannot
-// do what they should be able to — so it must carry the role mapping, and it
-// must not carry the secrets.
-func TestEffectiveConfigurationIsRedactedAndCarriesTheRoleMapping(t *testing.T) {
+// The effective configuration is a screen an operator reads, so it must not
+// carry the secrets.
+//
+// It used to carry a roleGroups block as well, naming the identity-provider
+// group behind each of the four global roles, and this test asserted both. The
+// block is gone with the mapping (design C10) and the redaction assertion is
+// deliberately NOT gone with it: the two were only ever in one test by accident
+// of what the route returned, and deleting the whole test would have quietly
+// stopped checking that the client secret and the database password stay off the
+// screen.
+func TestEffectiveConfigurationIsRedacted(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("reader", groupRead)
+	cl := v.session("reader", roleRead)
 	rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/config", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -1347,17 +1567,9 @@ func TestEffectiveConfigurationIsRedactedAndCarriesTheRoleMapping(t *testing.T) 
 			t.Errorf("the effective configuration leaked %q: %s", secret, body)
 		}
 	}
-	var cfg struct {
-		RoleGroups []authz.RoleGroup `json:"roleGroups"`
-	}
-	decode(t, rec, &cfg)
-	if len(cfg.RoleGroups) != 4 {
-		t.Fatalf("%d role rows, want all four: %+v", len(cfg.RoleGroups), cfg.RoleGroups)
-	}
-	for _, rg := range cfg.RoleGroups {
-		if rg.Role == authz.RoleAdmin && rg.Group != groupAdmin {
-			t.Errorf("ADMIN maps to %q, want %q", rg.Group, groupAdmin)
-		}
+	// And it names no group-to-role mapping, because there is none to name.
+	if strings.Contains(body, "roleGroups") {
+		t.Errorf("the effective configuration still reports a group-to-role mapping: %s", body)
 	}
 }
 
@@ -1402,7 +1614,7 @@ func totalCount(t *testing.T, rec *httptest.ResponseRecorder) int {
 // page, and a `_` that means an underscore.
 func TestListPagingFilteringAndTotals(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	// "acme" already exists from the fixture; these make six.
 	v.seedProjects(cl, "aa-first", "bb-second", "cc-third", "dd-fourth", "zz-last")
 
@@ -1475,7 +1687,7 @@ func TestListPagingFilteringAndTotals(t *testing.T) {
 // opened the screen for.
 func TestAuditTimeRangeCoversTheWholeDayNamed(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 
 	if rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"today","name":"Today"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("seed: %d %s", rec.Code, rec.Body.String())
@@ -1521,7 +1733,7 @@ func TestAuditTimeRangeCoversTheWholeDayNamed(t *testing.T) {
 // past page one.
 func TestProjectOutsideTheFirstPageIsStillReadableByID(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	ids := v.seedProjects(cl, "zz-last")
 	last := ids[0]
 
@@ -1588,7 +1800,7 @@ func (v *adminEnv) seedInteraction(label string, withdrawn bool, abandoned bool,
 // the customer's CNAME is not published.
 func TestInteractionOutcomesFilterAndTotal(t *testing.T) {
 	v := newAdminEnv(t)
-	reader := v.session("reader", groupRead)
+	reader := v.session("reader", roleRead)
 	path := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID) + "/interactions"
 
 	v.seedInteraction("validated-one", true, false, 4)
@@ -1668,7 +1880,7 @@ func TestInteractionOutcomesFilterAndTotal(t *testing.T) {
 // dropped — a script that used to set it learns the first time it runs.
 func TestDomainCreateRefusesASuppliedAliasLabel(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	rec := cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com","aliasLabel":"shop-alias"}`)
@@ -1728,7 +1940,7 @@ func TestDomainCreateIncludeWildcard(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := newAdminEnv(t)
-			cl := v.session("admin", groupAdmin)
+			cl := v.session("admin", roleAdmin)
 			lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 			rec := cl.do(http.MethodPost, lbPath+"/domains", tc.body)
@@ -1765,7 +1977,7 @@ func TestDomainCreateIncludeWildcard(t *testing.T) {
 // half is not created either.
 func TestDomainCreateIncludeWildcardRefusesTheWholeRequest(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 
 	// The premise: without the flag, `co.uk` is accepted.
@@ -1785,7 +1997,7 @@ func TestDomainCreateIncludeWildcardRefusesTheWholeRequest(t *testing.T) {
 // two objects, both from the transaction that wrote the rows (design B1).
 func TestDomainPairIsAuditedTwice(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 	r := &auditRecorder{cl: cl, auditAt: "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit"}
 	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
 	pid := &v.lb.ProjectID

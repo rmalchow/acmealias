@@ -103,7 +103,7 @@ func registeredPublicRoutes(t *testing.T) map[string]map[string]bool {
 	e := echo.New()
 	err := RegisterAdmin(e, AdminOptions{
 		DB:     &gorm.DB{},
-		Guard:  &authz.Guard{Mapping: authz.Mapping{}, Log: slog.New(slog.DiscardHandler)},
+		Guard:  &authz.Guard{Log: slog.New(slog.DiscardHandler)},
 		Auth:   testConsoleAuth{},
 		Config: config.Config{},
 		Log:    slog.New(slog.DiscardHandler),
@@ -195,7 +195,7 @@ func TestOpenAPIIsServedWithoutCredentials(t *testing.T) {
 	e := echo.New()
 	if err := RegisterAdmin(e, AdminOptions{
 		DB:     &gorm.DB{},
-		Guard:  &authz.Guard{Mapping: authz.Mapping{}, Log: slog.New(slog.DiscardHandler)},
+		Guard:  &authz.Guard{Log: slog.New(slog.DiscardHandler)},
 		Auth:   testConsoleAuth{},
 		Config: config.Config{},
 		Log:    slog.New(slog.DiscardHandler),

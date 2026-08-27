@@ -35,15 +35,55 @@ var ErrConflict = errors.New("inventory: conflict")
 // (spec "Non-empty parent is not deleted").
 var ErrNotEmpty = errors.New("inventory: not empty")
 
+// ErrNoRoom is a QUOTA refusal, and it is deliberately not ErrNotPermitted
+// (design C13, C11).
+//
+// The two questions are different and so are their remedies: a permission asks
+// "may this caller do it" and is fixed by a grant; a quota asks "is there room"
+// and is fixed by deleting something or by paying. Collapsing them produces one
+// message that is wrong for both — "ask an administrator for a grant" told to
+// somebody who already holds every grant, or "upgrade your account" told to
+// somebody whose account is fine and whose role is not.
+//
+// It maps to 409 rather than 403 for the same reason. See internal/httpapi/errors.go.
+var ErrNoRoom = errors.New("inventory: no room")
+
+// Limits is the configured room an account has (design C13).
+//
+// It is a struct with one field rather than a bare int so that the second limit,
+// whenever it arrives, does not change this signature again — and so that the
+// call site reads as `lim` rather than as an anonymous number between a subject
+// and a slug.
+type Limits struct {
+	// ProjectsPerPersonalAccount caps a PERSONAL account's projects. Zero or
+	// less is no quota. Team accounts are not subject to it at all: credit is
+	// their only limit.
+	ProjectsPerPersonalAccount int
+}
+
 // CreateProject creates a project. The slug is validated as a DNS label —
 // lowercase letters, digits and hyphens — because it is what appears in URLs,
 // CLI arguments and log lines.
-func CreateProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, slug, name string) (*model.Project, error) {
+//
+// lim is the account's configured room. It is a parameter rather than something
+// read from a package-level config because this package takes everything it
+// needs from its caller — that is what keeps the API and the CLI from diverging,
+// and a quota read from somewhere else would be a rule only one of them obeyed.
+func CreateProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, lim Limits, slug, name string) (*model.Project, error) {
 	// Membership, not a grant (design P14): a project sits at the top of the
 	// containment tree, so a grant permitting its creation would have to name
 	// the account, and an account is deliberately not an object a grant can
 	// name.
 	if err := requireUnrestricted(subj, "creating a project"); err != nil {
+		return nil, err
+	}
+	// The quota is checked AFTER authority and BEFORE validation, and the order
+	// is the one thing here worth arguing about. After authority, because a
+	// caller who may not create projects should not learn how many the account
+	// holds. Before validation, because "there is no room" is true whatever the
+	// slug says, and telling somebody their slug is malformed when a valid one
+	// would have been refused anyway sends them to fix the wrong thing.
+	if err := checkProjectQuota(ctx, db, sc, lim); err != nil {
 		return nil, err
 	}
 	if err := dnsname.ValidateLabel(slug); err != nil {
@@ -57,6 +97,41 @@ func CreateProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.
 		return nil, err
 	}
 	return p, nil
+}
+
+// checkProjectQuota refuses a personal account that is full (design C13).
+//
+// It reads the account to learn its KIND, not to learn who may do what — the
+// asymmetry between the two kinds is the whole decision. A team account is
+// metered: what it runs draws its balance down, so a project cap on top of that
+// would charge twice for the same growth, once in money and once in permission,
+// and the second charge buys nothing. The free account is the one that needs a
+// number because nothing else limits it.
+//
+// The refusal names the number and both ways out, because a quota message whose
+// only content is "no" leaves the reader to guess whether they should delete
+// something or buy something.
+func checkProjectQuota(ctx context.Context, db *gorm.DB, sc store.Scope, lim Limits) error {
+	if lim.ProjectsPerPersonalAccount <= 0 {
+		return nil
+	}
+	acc, err := store.GetAccount(ctx, db, sc)
+	if err != nil {
+		return err
+	}
+	if acc.Kind != model.AccountKindPersonal {
+		return nil
+	}
+	n, err := store.CountProjects(ctx, db, sc)
+	if err != nil {
+		return err
+	}
+	if n < int64(lim.ProjectsPerPersonalAccount) {
+		return nil
+	}
+	return fmt.Errorf("%w: a personal account holds %d projects and this one has %d; "+
+		"delete one, or use a team account, which has no project limit",
+		ErrNoRoom, lim.ProjectsPerPersonalAccount, n)
 }
 
 // ListProjects returns the whole inventory tree: projects, their load balancers,

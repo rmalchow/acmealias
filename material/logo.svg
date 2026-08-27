@@ -9,6 +9,9 @@
    id="svg1"
    inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
    sodipodi:docname="logo.svg"
+   inkscape:export-filename="logo.png"
+   inkscape:export-xdpi="100"
+   inkscape:export-ydpi="100"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -24,9 +27,9 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
      showguides="true"
-     inkscape:zoom="6.6493266"
-     inkscape:cx="282.7354"
-     inkscape:cy="221.82697"
+     inkscape:zoom="9.4035679"
+     inkscape:cx="224.48926"
+     inkscape:cy="215.55648"
      inkscape:window-width="3840"
      inkscape:window-height="2083"
      inkscape:window-x="2256"
@@ -81,18 +84,18 @@
        style="font-size:37.3333px;line-height:1.6;font-family:Sans;-inkscape-font-specification:'Sans, @wght=700';font-variation-settings:'wght' 700;letter-spacing:0px;writing-mode:lr-tb;direction:ltr;white-space:pre;shape-inside:url(#rect1);display:inline;fill:#55ffdd;stroke:none;stroke-width:0;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none"><tspan
          x="158.21094"
          y="207.74076"
-         id="tspan6"><tspan
+         id="tspan5"><tspan
            style="font-family:'Barlow Condensed';-inkscape-font-specification:'Barlow Condensed, Normal'"
-           id="tspan1">A</tspan><tspan
+           id="tspan3">A</tspan><tspan
            style="font-weight:bold;font-stretch:condensed;font-family:'Barlow Condensed';-inkscape-font-specification:'Barlow Condensed, Bold Condensed'"
-           id="tspan2">53</tspan></tspan></text>
+           id="tspan4">53</tspan></tspan></text>
     <rect
-       style="fill:none;stroke:#00ffaa;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       style="fill:none;stroke:#00ffaa;stroke-width:1.23987;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
        id="rect5"
-       width="14.179"
-       height="8.9139996"
-       x="41.028"
-       y="47.049999"
+       width="13.939129"
+       height="13.939129"
+       x="41.147934"
+       y="44.524097"
        inkscape:export-filename="logo_big.png"
        inkscape:export-xdpi="300"
        inkscape:export-ydpi="300" />

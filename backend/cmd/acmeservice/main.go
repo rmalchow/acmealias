@@ -114,18 +114,12 @@ func runService(cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
-	// The group mapping now names role ROWS rather than constants, so a
-	// configured group can point at a role nobody created. That is reported
-	// here rather than refused: configuring the group before creating the role
-	// is a reasonable order to do things in, and refusing to start would turn it
-	// into a lockout. Silence would be worse than either — the symptom is one
-	// person unable to do anything, with nothing saying why.
-	if bootstrap, err := store.ScopeForBootstrap(ctx, db); err == nil {
-		authz.ReportUnresolvedRoles(ctx, db, bootstrap, authz.MappingFromConfig(cfg), log)
-	} else {
-		log.Warn("single-account scope not resolved; the group mapping was not checked", "error", err)
-	}
-
+	// Nothing about roles is validated at startup any more, and there is nothing
+	// left to validate: roles are rows inside an account, created with it, and
+	// no configuration names one (design C10). What used to be checked here was
+	// whether the four ACME_*_GROUP variables pointed at roles that existed —
+	// a check that only made sense while a role could be named by an operator
+	// and resolved by the service.
 	metrics := obs.New()
 
 	view := zoneview.New(zoneview.FromDB(db))
@@ -137,11 +131,6 @@ func runService(cfg config.Config, log *slog.Logger) error {
 	// maintenance must not stop DNS and the challenge API coming up (design
 	// D10), so discovery happens lazily on the first sign-in.
 	auth := oidcauth.New(cfg, db)
-	mapping := authz.MappingFromConfig(cfg)
-	// The group-to-role mapping is configuration, and a typo in it is the
-	// mistake that actually happens, so it goes in the log where the operator
-	// can compare it against Keycloak.
-	mapping.Log(log)
 
 	// listenersUp gates readiness: false until every listener is serving, and
 	// false again the moment a shutdown starts.
@@ -163,7 +152,7 @@ func runService(cfg config.Config, log *slog.Logger) error {
 		Admin: httpapi.AdminOptions{
 			DB:      db,
 			Metrics: metrics,
-			Guard:   &authz.Guard{Auth: auth, Mapping: mapping, Log: log},
+			Guard:   &authz.Guard{Auth: auth, Log: log},
 			Auth:    auth,
 			View:    view,
 			Config:  cfg,

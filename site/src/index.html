@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>acmealias — certificates for domains you keep where they are</title>
+    <title>AcmeAlias — certificates for domains you keep where they are</title>
     <meta
       name="description"
       content="Let's Encrypt certificates over the DNS-01 challenge, without handing anyone your DNS credentials. One CNAME, once."
@@ -27,9 +27,20 @@
       letting an absence read as a decision.
     -->
     <header class="bar">
-      <a class="mark" href="/" aria-label="acmealias — home">
+      <!--
+        The wordmark is TEXT, not the artwork in brand/wordmark.svg. Set in the same
+        face the artwork is drawn in (Barlow Condensed 700, already served from
+        fonts/), so the two are the same shapes — and in white, because the mark
+        beside it is the only green thing the bar is allowed. Text also selects,
+        scales with the browser's font size and reads out to a screen reader as a
+        name rather than as alt text standing in for one.
+
+        brand/wordmark.svg stays in the repository: it is what a printed or emailed
+        surface uses, where no font is being served.
+      -->
+      <a class="mark" href="/" aria-label="AcmeAlias — home">
         <img class="mark-logo" src="./brand/logo.svg" alt="" />
-        <img class="mark-word" src="./brand/wordmark.svg" alt="acmealias" />
+        <span class="mark-word">AcmeAlias</span>
       </a>
       <nav>
         <!--

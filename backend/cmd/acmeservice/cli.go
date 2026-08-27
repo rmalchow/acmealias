@@ -45,13 +45,45 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   acmeservice [serve]
   acmeservice migrate up|down|version
+  acmeservice adminctl account create --slug S --name N --owner SUBJECT [--credits N]
+  acmeservice adminctl --account SLUG <noun> <verb> ...
+
+  acmeservice adminctl account   credit --credits N | transfer --owner SUBJECT | member-add --subject S --role NAME
   acmeservice adminctl project   create --slug S --name N | list | delete --slug S
   acmeservice adminctl loadbalancer    create --project S --slug S --name N | delete --loadbalancer REF | dns REF
   acmeservice adminctl node      add --loadbalancer REF --label L [--ipv4 A] [--ipv6 A] | delete --id ID
   acmeservice adminctl domain    create --loadbalancer REF --name N [--include-wildcard] | list --loadbalancer REF | delete --id ID
   acmeservice adminctl key       create [--loadbalancer REF] [--grant T:O:A]... --name N [--expires DUR] | list --loadbalancer REF | revoke --id ID
 
-REF is a load balancer reference: a numeric id, or "project-slug/loadbalancer-slug".`)
+REF is a load balancer reference: a numeric id, or "project-slug/loadbalancer-slug".
+
+--account names the account every adminctl verb acts in. ACME_ADMINCTL_ACCOUNT
+sets the default; the flag wins. There is no deployment-wide account to fall
+back on.`)
+}
+
+// takeAccount pulls a leading --account off the adminctl arguments, falling back
+// to ACME_ADMINCTL_ACCOUNT.
+//
+// It is parsed by hand, before the per-verb flag sets, because each verb builds
+// its own FlagSet from what follows the noun and the verb — threading a global
+// flag through twenty of them would mean twenty places to forget it.
+func takeAccount(args []string) (string, []string, error) {
+	account := os.Getenv("ACME_ADMINCTL_ACCOUNT")
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--account" || args[0] == "-account":
+			if len(args) < 2 {
+				return "", nil, fmt.Errorf("--account needs an account slug")
+			}
+			account, args = args[1], args[2:]
+		case strings.HasPrefix(args[0], "--account=") || strings.HasPrefix(args[0], "-account="):
+			account, args = args[0][strings.Index(args[0], "=")+1:], args[1:]
+		default:
+			return account, args, nil
+		}
+	}
+	return account, args, nil
 }
 
 // cmdServe runs the server: see serve in main.go, which owns the whole
@@ -102,11 +134,27 @@ func cmdMigrate(args []string) int {
 }
 
 func cmdAdminctl(args []string) int {
+	account, args, err := takeAccount(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
 	if len(args) < 2 {
 		usage()
 		return 2
 	}
 	noun, verb, rest := args[0], args[1], args[2:]
+	// `account create` is the one verb that cannot name an account: it is what
+	// makes the first one. Everything else refuses without one rather than
+	// guessing, because there is no deployment-wide account to guess (design
+	// C10).
+	makesTheAccount := noun == "account" && verb == "create"
+	if account == "" && !makesTheAccount {
+		fmt.Fprintln(os.Stderr,
+			"adminctl needs an account: pass --account SLUG, or set ACME_ADMINCTL_ACCOUNT.\n"+
+				"Create the first one with: acmeservice adminctl account create --slug S --name N --owner SUBJECT")
+		return 2
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -127,15 +175,23 @@ func cmdAdminctl(args []string) int {
 	}
 
 	ctx := context.Background()
-	// The CLI operates inside the deployment's single account (design P19, task
-	// 11.3). It is the break-glass path and its authority is "had the connection
+	// The CLI is the break-glass path and its authority is "had the connection
 	// string", but that is a reason to record what it did, not a reason to let it
-	// write across tenants by accident: a scope it did not choose is one fewer way
-	// to touch the wrong account at three in the morning.
-	sc, err := store.ScopeForBootstrap(ctx, db)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+	// write across tenants by accident: it is anchored to one account like every
+	// other subject.
+	//
+	// It used to take the deployment's single account, which stopped being a
+	// question with an answer when the internal edition went away (design C10).
+	// Naming the account is the replacement, and it is an improvement rather than
+	// a tax: the break-glass path should have to say which tenant it is about to
+	// write into at three in the morning, rather than inheriting one.
+	var sc store.Scope
+	if !makesTheAccount {
+		sc, err = store.ScopeForSlug(ctx, db, account)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
 	if err := dispatchAdminctl(ctx, db, sc, cfg, noun, verb, rest); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -144,15 +200,65 @@ func cmdAdminctl(args []string) int {
 	return 0
 }
 
+// limitsFrom carries the deployment's quota into the CLI's calls. It is the same
+// value the management API passes, from the same config, which is what keeps the
+// two from diverging (design P7, C13).
+func limitsFrom(cfg config.Config) inventory.Limits {
+	return inventory.Limits{ProjectsPerPersonalAccount: cfg.ProjectsPerPersonalAccount}
+}
+
 func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg config.Config, noun, verb string, args []string) error {
 	out := os.Stdout
 	switch noun + " " + verb {
+	case "account create":
+		fs := flag.NewFlagSet("account create", flag.ExitOnError)
+		slug := fs.String("slug", "", "account slug")
+		name := fs.String("name", "", "account name")
+		owner := fs.String("owner", "", "identity-provider subject of the owner")
+		// The opening balance. A team account is created by funding it (design
+		// C8), so there is no zero-credit form of this verb — an account made
+		// with nothing in it is suspended from its first instant, and its owner
+		// would sign in to the pay screen of an account they did not buy.
+		//
+		// It defaults to the smallest offered amount rather than requiring the
+		// flag, because this verb's job is to get a fresh deployment its FIRST
+		// account, before anybody can reach the console to buy one, and a
+		// bootstrap that fails on a missing flag is a bootstrap somebody has to
+		// read the source to perform.
+		credits := fs.Int64("credits", store.CheckoutAmounts[0], "opening credit balance, in EUR")
+		fs.Parse(args)
+		return adminctl.AccountCreate(ctx, db, out, *slug, *name, *owner, *credits)
+
+	// The three repair verbs. They exist for what an UPGRADE leaves behind: the
+	// internal edition's account survives migration 000013 with an owner nobody
+	// can authenticate as and an empty roster, because its membership was
+	// derived from a group claim rather than written down (design C10). Nothing
+	// in the console can mend that — every route into an account requires being
+	// in it — so it lands here, with the rest of the break-glass path. See
+	// internal/adminctl/account.go.
+	case "account credit":
+		fs := flag.NewFlagSet("account credit", flag.ExitOnError)
+		credits := fs.Int64("credits", store.CheckoutAmounts[0], "credit to add, in EUR; one of the offered amounts")
+		fs.Parse(args)
+		return adminctl.AccountCredit(ctx, db, sc, out, *credits)
+	case "account transfer":
+		fs := flag.NewFlagSet("account transfer", flag.ExitOnError)
+		owner := fs.String("owner", "", "identity-provider subject of the new owner")
+		fs.Parse(args)
+		return adminctl.AccountTransfer(ctx, db, sc, out, *owner)
+	case "account member-add":
+		fs := flag.NewFlagSet("account member-add", flag.ExitOnError)
+		subject := fs.String("subject", "", "identity-provider subject of the person to add")
+		role := fs.String("role", "", "name of a role in this account")
+		fs.Parse(args)
+		return adminctl.AccountMemberAdd(ctx, db, sc, out, *subject, *role)
+
 	case "project create":
 		fs := flag.NewFlagSet("project create", flag.ExitOnError)
 		slug := fs.String("slug", "", "project slug")
 		name := fs.String("name", "", "project name")
 		fs.Parse(args)
-		return adminctl.ProjectCreate(ctx, db, sc, out, *slug, *name)
+		return adminctl.ProjectCreate(ctx, db, sc, out, limitsFrom(cfg), *slug, *name)
 	case "project list":
 		return adminctl.ProjectList(ctx, db, sc, out)
 	case "project delete":

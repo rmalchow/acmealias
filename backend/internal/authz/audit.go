@@ -24,16 +24,20 @@ const (
 
 // Actor is who did it.
 //
-// Roles is recorded alongside Groups deliberately. Group membership changes in
-// the identity provider and the group-to-role mapping changes in the
-// environment, so an entry that records only a name — or only a group — cannot
-// answer "how was this person allowed to do that" six months later. The roles
-// held at the time can.
+// Roles is recorded alongside Groups deliberately, and it is the answer to "how
+// was this person allowed to do that" six months later. It used to come from the
+// group-to-role mapping, derived per request; it now comes from the roles they
+// held in the account at the time (SubjectForUser), which is a stronger record
+// because those rows are the authority rather than a projection of it.
+//
+// Groups is kept even though nothing grants on it any more: it is what the
+// identity provider said about this person at sign-in, and an entry that records
+// only what we concluded cannot be checked against what we were told.
 type Actor struct {
 	Subject     string
 	DisplayName string
 	Groups      []string
-	Roles       RoleSet
+	Roles       []string
 	Source      string
 	RequestID   string
 	ClientIP    string
@@ -54,10 +58,15 @@ func (a Actor) InAccount(id model.ID) Actor {
 }
 
 // ConsoleActor builds an Actor from a request that passed Authenticated.
-func ConsoleActor(c echo.Context) Actor {
+//
+// The roles are passed in rather than read off the request context, because
+// there is no longer a set of them that is true independently of an account: the
+// caller resolves the account first, and the roles it hands over are the ones
+// the request was authorized against.
+func ConsoleActor(c echo.Context, roles []string) Actor {
 	sess := SessionFromContext(c)
 	a := Actor{
-		Roles:     RolesFromContext(c),
+		Roles:     roles,
 		Source:    SourceConsole,
 		RequestID: requestID(c),
 		ClientIP:  c.RealIP(),
@@ -122,7 +131,7 @@ func Record(ctx context.Context, db *gorm.DB, m *obs.Metrics, a Actor, e Event) 
 		// are edited and deleted; an entry that pointed at one would become
 		// unreadable exactly when it mattered — after somebody removed the role
 		// whose authority is being questioned (task 8.3).
-		ActorRoles:  a.Roles.List(),
+		ActorRoles:  a.Roles,
 		ActorSource: cmp.Or(a.Source, SourceSystem),
 		RequestID:   nonEmpty(a.RequestID),
 		ClientIP:    nonEmpty(a.ClientIP),

@@ -11,10 +11,21 @@ import (
 )
 
 type meView struct {
-	Subject     string   `json:"subject"`
-	DisplayName string   `json:"displayName"`
-	Groups      []string `json:"groups"`
-	Roles       []string `json:"roles"`
+	SelectedAccountID *string  `json:"selectedAccountId"`
+	Subject           string   `json:"subject"`
+	DisplayName       string   `json:"displayName"`
+	Groups            []string `json:"groups"`
+	Roles             []string `json:"roles"`
+	Permissions       []string `json:"permissions"`
+}
+
+func (s *session) me(t *testing.T) meView {
+	t.Helper()
+	var me meView
+	if err := s.getJSON("/api/v1/me", &me); err != nil {
+		t.Fatalf("GET /api/v1/me as %s: %v", s.user, err)
+	}
+	return me
 }
 
 // TestSignInCarriesTheSession is the regression pin for signin.go's cookie jar
@@ -28,26 +39,83 @@ func TestSignInCarriesTheSession(t *testing.T) {
 	if !s.jar.has("console.localhost", oidcauth.SessionCookieName) {
 		t.Fatalf("no %s cookie held for the console origin", oidcauth.SessionCookieName)
 	}
-	var me meView
-	if err := s.getJSON("/api/v1/me", &me); err != nil {
-		t.Fatalf("GET /api/v1/me after signing in: %v", err)
-	}
-	// The realm gives admin-user a display name of its own ("Admin Dev"), so
-	// the thing that identifies WHICH user signed in is the group the token
-	// carries, not the label.
+	me := s.me(t)
+	// The group claim still arrives and is still reported, and it still says
+	// WHICH of the four indistinguishable-by-display-name users signed in. What
+	// it no longer does is grant anything (design C10): the blueprint keeps the
+	// groups because `acme-admin` gates the staff application, and because this
+	// suite wants four people it can tell apart.
 	if me.Subject == "" || me.DisplayName == "" || !slices.Contains(me.Groups, "acme-admin") {
 		t.Fatalf("GET /api/v1/me: got subject %q, display name %q, groups %v — "+
 			"expected the session of %s", me.Subject, me.DisplayName, me.Groups, adminUser)
 	}
 }
 
-// Task 2.7: the four seeded users' groups and roles through the real Keycloak,
-// and the enforcement those roles are for.
+// TestANewSessionHasChosenNothingAndIsOfferedSomewhere is P19's front door
+// (tasks 7.5, 7.6).
 //
-// The realm's group mapper is configured with full.path=false, so the claim
-// carries "acme-admin" rather than "/acme-admin" — which is what
-// ACME_ADMIN_GROUP and friends in development/.env are set to.
-func TestSeededUsersResolveToTheirRoles(t *testing.T) {
+// It used to be unreachable. Sign-in selected the deployment's one account, so
+// "no account selected" was a state the console rendered for and nobody ever
+// saw; design C10 removed the selection, and this is now the first thing every
+// user in every deployment meets. Two halves, and they say different things:
+//
+//   - NOTHING is selected, and no role or permission is held. Authority is a
+//     property of an account, so outside one there is none — where before a
+//     signed-in user carried four global roles wherever they went.
+//   - the picker is NOT EMPTY. A user always has their personal account, which
+//     nobody creates and nobody can lose (design C1). That is what makes "no
+//     account selected" mean "you have not said which" rather than "you have
+//     nothing" — the distinction P19 refused to blur, now load-bearing.
+func TestANewSessionHasChosenNothingAndIsOfferedSomewhere(t *testing.T) {
+	for user := range seededRoles {
+		t.Run(user, func(t *testing.T) {
+			s := mustSignIn(t, user, devPassword)
+			me := s.me(t)
+			if me.SelectedAccountID != nil {
+				t.Errorf("a fresh session is acting in account %s; sign-in must select nothing",
+					*me.SelectedAccountID)
+			}
+			if len(me.Roles) != 0 || len(me.Permissions) != 0 {
+				t.Errorf("with no account selected %s holds roles %v and permissions %v; "+
+					"both are per-account and must be empty here", user, me.Roles, me.Permissions)
+			}
+
+			accounts := s.accounts(t)
+			if len(accounts) == 0 {
+				t.Fatalf("the picker offered %s nothing at all — a user always has their "+
+					"personal account, so an empty picker is a materialization that did not "+
+					"happen (design C1, task 3.1), not a user with no accounts", user)
+			}
+			personal := s.personalAccount(t)
+			if !personal.Owner {
+				t.Errorf("%s does not own their own personal account", user)
+			}
+			if personal.Credits != 0 || personal.Suspended {
+				t.Errorf("personal account %s: credits %d, suspended %v — a personal account "+
+					"is free and always usable, and is outside the funded/suspended machine entirely (design C3)",
+					personal.Slug, personal.Credits, personal.Suspended)
+			}
+		})
+	}
+}
+
+// TestRolesComeFromMembershipRatherThanFromAGroup replaces
+// TestSeededUsersResolveToTheirRoles (task 7.2).
+//
+// WHAT THE OLD TEST ASSERTED, AND WHY IT COULD NOT BE REPAIRED. It walked a
+// table of {user, group, role} and checked that /me reported the role the group
+// was CONFIGURED to grant — ACME_ADMIN_GROUP and its three siblings, read at
+// startup into authz.Mapping. Design C10 deleted the mapping, the settings and
+// the global roles the mapping produced; there is nothing left for that
+// assertion to be about.
+//
+// What survives is the four names. They are the default role set every new team
+// account is seeded with (task 2.5), so the same four words mean the same four
+// things — but as rows in one account, held because of a membership rather than
+// because of a claim. This walks the same table and asserts the new mechanism:
+// the group is still on the token and grants nothing; the role appears only in
+// the account the membership is in, and only once that account is selected.
+func TestRolesComeFromMembershipRatherThanFromAGroup(t *testing.T) {
 	for _, tc := range []struct{ user, group, role string }{
 		{adminUser, "acme-admin", "ADMIN"},
 		{configAdminUser, "acme-config-admin", "CONFIG_ADMIN"},
@@ -56,16 +124,35 @@ func TestSeededUsersResolveToTheirRoles(t *testing.T) {
 	} {
 		t.Run(tc.user, func(t *testing.T) {
 			s := mustSignIn(t, tc.user, devPassword)
-			var me meView
-			if err := s.getJSON("/api/v1/me", &me); err != nil {
-				t.Fatalf("GET /api/v1/me: %v", err)
+			if before := s.me(t); slices.Contains(before.Roles, tc.role) {
+				t.Fatalf("%s already holds %q with no account selected; a role is held "+
+					"IN an account and nowhere else (design C10)", tc.user, tc.role)
 			}
+
+			// Their own personal account grants them everything in it and none
+			// of the four names: a personal account holds one unrestricted role
+			// and there is nobody to give a second one to (design C9).
+			s.selectInto(t, s.personalAccount(t))
+			if own := s.me(t); slices.Contains(own.Roles, tc.role) {
+				t.Errorf("%s holds %q in their PERSONAL account (roles %v); the four default "+
+					"roles are seeded into team accounts, not into personal ones",
+					tc.user, tc.role, own.Roles)
+			}
+
+			joinAccount(t, seededAccountSlug, s.subject, tc.role)
+			s.selectInto(t, s.accountBySlug(t, seededAccountSlug))
+			me := s.me(t)
 			if !slices.Contains(me.Groups, tc.group) {
-				t.Errorf("groups %v do not include %q", me.Groups, tc.group)
+				t.Errorf("groups %v do not include %q — the blueprint still puts this user "+
+					"in it, even though it now grants nothing", me.Groups, tc.group)
 			}
 			if !slices.Contains(me.Roles, tc.role) {
-				t.Errorf("roles %v do not include %q, which %q is configured to grant",
-					me.Roles, tc.role, tc.group)
+				t.Errorf("roles %v in %s do not include %q, which the membership row confers",
+					me.Roles, seededAccountSlug, tc.role)
+			}
+			if len(me.Permissions) == 0 {
+				t.Errorf("%s holds role %q in %s and no permissions at all; the role's grants "+
+					"are what /me answers with now (task 2.5)", tc.user, tc.role, seededAccountSlug)
 			}
 		})
 	}
@@ -79,26 +166,33 @@ func TestSeededUsersResolveToTheirRoles(t *testing.T) {
 // may write" implementation with a read-only special case. Only a user who is
 // refused one write and allowed a different one proves the permissions are per
 // action rather than per "may write at all".
+//
+// The four roles are the same four and the boundary between them is the same
+// boundary — what changed is where the authority comes from. Every session below
+// holds its role because of an account_members row in the seeded account (task
+// 7.1), so this now also proves the seeded default roles carry the grants the
+// old configured matrix did.
 func TestRoleEnforcementThroughTheManagementAPI(t *testing.T) {
-	admin := mustSignIn(t, adminUser, devPassword)
+	admin := mustSignInSeeded(t, adminUser)
 	_, lb := demoProd(t, admin)
-	// Every session below acts in the same single account, so one address
-	// serves all four users. In a multi-account edition this would have to be
-	// built per session.
+	// Every session below is a member of the SAME account and has selected it,
+	// so one address serves all four. That is now a property of the fixture
+	// rather than of the edition: a session acting in another account would be
+	// refused this path outright (design P19).
 	domains := admin.acct("/loadbalancers/" + lb + "/domains")
 
 	// A name of its own, in a zone the plan comparison in plan_test.go does not
 	// look at, and removed again either way.
 	newDomain := func(name string) map[string]string { return map[string]string{"name": name} }
 
-	readOnly := mustSignIn(t, readOnlyUser, devPassword)
+	readOnly := mustSignInSeeded(t, readOnlyUser)
 	if status, body, err := readOnly.do(http.MethodPost, domains, newDomain("acceptance-ro.example.net")); err != nil {
 		t.Fatalf("as %s: %v", readOnlyUser, err)
 	} else if status != http.StatusForbidden {
 		t.Errorf("%s creating a domain: got %d, want 403: %s", readOnlyUser, status, body)
 	}
 
-	configAdmin := mustSignIn(t, configAdminUser, devPassword)
+	configAdmin := mustSignInSeeded(t, configAdminUser)
 	var created struct {
 		ID string `json:"id"`
 	}
@@ -111,7 +205,7 @@ func TestRoleEnforcementThroughTheManagementAPI(t *testing.T) {
 		})
 	}
 
-	rotation := mustSignIn(t, keyRotationUser, devPassword)
+	rotation := mustSignInSeeded(t, keyRotationUser)
 	if status, body, err := rotation.do(http.MethodPost, domains, newDomain("acceptance-kr.example.net")); err != nil {
 		t.Fatalf("as %s: %v", keyRotationUser, err)
 	} else if status != http.StatusForbidden {

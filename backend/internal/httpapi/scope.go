@@ -3,7 +3,6 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/labstack/echo/v4"
 
@@ -21,15 +20,10 @@ import (
 // body, so the confinement of a request is decided by who is asking rather than
 // by what they asked for.
 //
-// In this edition the answer is always the same account, because there is exactly
-// one. The public edition replaces this resolver with one that reads the session's
-// selected account and the caller's membership of it; the shape here — resolve
-// once per request, from the caller rather than from the request — is what stays.
-type scopeResolver struct {
-	once sync.Once
-	sc   store.Scope
-	err  error
-}
+// The answer is the account the session has selected, checked against the
+// account the path names. Before design C10 it was always the same account,
+// because a deployment had exactly one; the shape — resolve once per request,
+// from the caller rather than from the request — is what did not change.
 
 // scope returns the account this request is confined to (design P19).
 //
@@ -81,35 +75,128 @@ func (a *admin) scope(c echo.Context) (store.Scope, error) {
 // effect at the next switch rather than at the next request. That is design
 // P19's stated trade: re-checking per request would be stricter and would put a
 // membership query on every read.
+//
+// The FUNDING check is not that trade and is made here, on every request (task
+// 4.3, design C7). Two reasons it does not follow membership into selectAccount.
+// It has to take effect without a new session — an account that runs out mid
+// session must stop, and one that is paid for must resume, neither waiting for
+// somebody to re-select (spec: "the account becomes usable without a new
+// session"). And this is the one place the account is established for every
+// account-scoped route, so a route added tomorrow is gated by existing, which is
+// the same property that made the check worth putting in scope() and not in a
+// middleware table somebody has to remember to extend.
 func (a *admin) scopeFor(c echo.Context, accountID model.ID) (store.Scope, error) {
-	return store.ScopeForSelection(c.Request().Context(), a.opts.DB, accountID)
+	ctx := c.Request().Context()
+	// One read, not two. This used to be ScopeForSelection followed by
+	// GetAccount — the same row, through two separate cross-account
+	// transactions, on every account-scoped request.
+	sc, acc, err := store.AccountForSelection(ctx, a.opts.DB, accountID)
+	if err != nil {
+		return store.Scope{}, err
+	}
+	if !store.Usable(acc) {
+		// The Scope is NOT returned. A caller that got one and a refusal could
+		// use the first and ignore the second; returning the zero value means a
+		// handler that mishandles the error reads nothing rather than reading a
+		// suspended account's inventory.
+		//
+		// Checkout is deliberately not among the routes that reach this: it
+		// hangs off /accounts/:accountId directly rather than inside the scoped
+		// group, because the owner of a suspended account has to be able to pay
+		// for it and this is exactly what would refuse them (design C4, C5).
+		return store.Scope{}, fmt.Errorf("%w: %s", store.ErrAccountSuspended, store.SuspensionReason(acc))
+	}
+	return sc, nil
+}
+
+// requireTeamAccount refuses roles, members and invitations in a personal
+// account (task 3.3, design C9).
+//
+// A refusal and not an empty list. An empty collection reads as "there are none
+// yet" and invites a client to render the Add button for something that can
+// never exist; "there cannot be any" is a different sentence, and it is the true
+// one. The account has exactly one person in it and that person is the account.
+//
+// What this must NOT be extended to is API keys and their grants. The grant
+// model stays live in a personal account — a key narrower than its holder is
+// good practice in an account of one, and the subset rule of P10 applies to it
+// regardless of kind (design C9, task 3.4). Anyone adding a route here should
+// ask whether it is about PEOPLE or about CREDENTIALS; only the first belongs.
+func (a *admin) requireTeamAccount(c echo.Context, sc store.Scope, what string) error {
+	acc, err := store.GetAccount(c.Request().Context(), a.opts.DB, sc)
+	if err != nil {
+		return err
+	}
+	if acc.Kind == model.AccountKindTeam {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", store.ErrPersonalAccountHasNoRoster, what)
+}
+
+// requireOwner gates what belongs to the person the account answers to rather
+// than to a role in it: paying for it, and handing it over.
+//
+// Ownership is not a grant and not the unrestricted flag, and conflating them
+// would be wrong in both directions. An unrestricted member can administer
+// everything inside the account and is still not the person whose account it is;
+// and the owner of a SUSPENDED account holds no usable authority at all — no
+// route that resolves a scope will serve them — yet must still be able to pay.
+// So this reads the owner column, and nothing else.
+func (a *admin) requireOwner(c echo.Context, acc *model.Account, what string) (*model.User, error) {
+	sess := authz.SessionFromContext(c)
+	if sess == nil {
+		return nil, echo.ErrUnauthorized
+	}
+	user, err := store.FindOrCreateUser(c.Request().Context(), a.db(), sess.Subject, sess.DisplayName, "")
+	if err != nil {
+		return nil, err
+	}
+	if acc.OwnerUserID != user.ID {
+		return nil, fmt.Errorf("%w: %s is the account owner's, and this account is not yours",
+			authz.ErrNotPermitted, what)
+	}
+	return user, nil
 }
 
 // subject returns the authority the caller is acting with, in the scope's
-// account.
+// account, together with the names of the roles it came from.
 //
-// In this edition it is derived per request from the session's group claim
-// (design P18): the mapping names role rows, the rows carry grants, and the
-// grants are the authority. Nothing is stored, so a group membership removed at
-// the identity provider takes effect on the next request rather than on the next
-// sign-in.
+// It is read from account_members and the roles those rows name (design P18).
+// There used to be a second derivation here — roles computed per request from
+// the session's group claim, mapped by four environment variables — and design
+// C10 removed it, so membership is now only ever rows we wrote.
 //
-// The public edition reads memberships from account_members instead. Callers
-// cannot tell which they were handed, and must not try to: that is what keeps
-// one evaluator serving both.
-func (a *admin) subject(c echo.Context) (authz.Subject, error) {
+// The role names come back with the subject because the audit trail records the
+// authority the actor held, and asking a second time could answer differently
+// from the query the request was authorized against.
+func (a *admin) subjectWithRoles(c echo.Context) (authz.Subject, []string, error) {
 	sc, err := a.scope(c)
 	if err != nil {
-		return authz.Subject{}, err
+		return authz.Subject{}, nil, err
 	}
 	sess := authz.SessionFromContext(c)
 	if sess == nil {
 		// Unreachable behind the authenticated guard, and present so that
 		// re-wiring a route without it fails closed rather than granting the
 		// empty subject's authority — which is none, but silently.
-		return authz.Subject{}, echo.ErrUnauthorized
+		return authz.Subject{}, nil, echo.ErrUnauthorized
 	}
-	return authz.SubjectForGroups(c.Request().Context(), a.opts.DB, sc, authz.MappingFromConfig(a.opts.Config), sess.Groups)
+	ctx := c.Request().Context()
+	user, err := store.FindOrCreateUser(ctx, a.db(), sess.Subject, sess.DisplayName, "")
+	if err != nil {
+		return authz.Subject{}, nil, err
+	}
+	subj, roles, err := authz.SubjectForUser(ctx, a.db(), sc, user.ID)
+	if err != nil {
+		return authz.Subject{}, nil, err
+	}
+	return subj, authz.RoleNames(roles), nil
+}
+
+// subject is subjectWithRoles for the callers that only need the authority.
+func (a *admin) subject(c echo.Context) (authz.Subject, error) {
+	subj, _, err := a.subjectWithRoles(c)
+	return subj, err
 }
 
 // authorize checks one action against one object for the acting caller.

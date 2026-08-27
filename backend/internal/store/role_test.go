@@ -53,10 +53,9 @@ func TestIntegrationLastUnrestrictedMemberIsKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	alone := seedUser(t, db, "u-alone")
-	if err := AddMember(ctx, db, sc, alone, admin.ID); err != nil {
-		t.Fatalf("add member: %v", err)
-	}
+	// The account's owner is its first unrestricted member, so the account
+	// already has exactly one and it is them.
+	alone := accountOwner(t, db, sc)
 	if err := RemoveMember(ctx, db, sc, alone, admin.ID); !errors.Is(err, ErrLastUnrestrictedMember) {
 		t.Fatalf("remove = %v, want ErrLastUnrestrictedMember", err)
 	}
@@ -77,11 +76,10 @@ func TestIntegrationConcurrentRemovalOfTheLastTwoMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, second := seedUser(t, db, "u-first"), seedUser(t, db, "u-second")
-	for _, u := range []model.ID{first, second} {
-		if err := AddMember(ctx, db, sc, u, admin.ID); err != nil {
-			t.Fatalf("add member: %v", err)
-		}
+	// The owner is already the first member, so one more makes exactly two.
+	first, second := accountOwner(t, db, sc), seedUser(t, db, "u-second")
+	if err := AddMember(ctx, db, sc, second, admin.ID); err != nil {
+		t.Fatalf("add member: %v", err)
 	}
 
 	var wg sync.WaitGroup

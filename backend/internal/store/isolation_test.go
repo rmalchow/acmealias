@@ -48,13 +48,17 @@ var crossAccountReaders = map[string]string{
 	"GetAccount":                  "reads the account a scope names, which a scope cannot confine",
 	"CreateAccountWithOwner":      "runs before the account it creates exists",
 	"IsMember":                    "answers may-this-person-act-here, which is the question a scope would beg",
+	"EnsurePersonalAccount":       "materializes the account a scope would have to name; it runs at sign-in, before one exists",
+	"Credit":                      "reachable in an account no scope-taking route will serve — its owner has to be able to pay for it (design C4)",
+	"AccountForSelection":         "reads the account a scope is about to be BUILT from; it is the producer, so it cannot take one",
+	"AccountOwnedBy":              "checkout's producer: it asks 'the account with this id that this person owns' before any scope exists, and answers not-found for every other case so the route is not an existence oracle",
 }
 
 // nonQueries are exported functions that touch no table at all.
 var nonQueries = map[string]bool{
 	"Open": true, "MigrateUp": true, "MigrateDown": true, "CheckSchemaVersion": true,
 	"EmbeddedVersion": true, "ValueDigest": true, "ScopeFor": true, "ScopeForKey": true,
-	"ScopeForBootstrap": true, "ScopeForSelection": true,
+	"ScopeForSelection": true, "ScopeForSlug": true, "DefaultRoles": true,
 	// Catalog reads about the connection itself, not about any tenant's rows.
 	"CheckTenantIsolation": true, "PoliciesInstalled": true,
 	// Sessions are global: a session belongs to a person, not to an account, and
@@ -389,4 +393,51 @@ func TestIntegrationPublishIntoAnotherAccountsAliasIsRefused(t *testing.T) {
 	if _, err := Present(ctx, db, mine, theirAlias.ID, "smuggled", "k_test", time.Minute); err == nil {
 		t.Fatal("a value was published into another account's alias")
 	}
+}
+
+// TestIntegrationCrossAccountDoesNotOutliveItsNesting is the fourth way the
+// tenant filter could be off without anybody having turned it off.
+//
+// CrossAccount lifts the policies with `set_config(..., true)` — transaction
+// local. Called on an already-open *gorm.DB it joins as a nested transaction,
+// which gorm implements as a savepoint, and PostgreSQL does NOT undo a SET LOCAL
+// at RELEASE SAVEPOINT. So a cross-account read nested inside a mutation left
+// the policies down for the rest of the OUTER transaction: every statement
+// after it, in a transaction the caller believed was confined.
+//
+// This change was the first to nest one (transferAccount and checkout both do,
+// through store.TransferOwnership and store.Credit). Nothing leaked, because
+// both carry their own account_id predicates — which is exactly the reassurance
+// that stops being true the day somebody adds a statement that does not.
+func TestIntegrationCrossAccountDoesNotOutliveItsNesting(t *testing.T) {
+	db, mine, theirs, _, _ := twoAccounts(t)
+	ctx := context.Background()
+
+	var seenInside, seenAfter []model.LoadBalancer
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := mine.Run(ctx, tx, func(tx *gorm.DB) error { return nil }); err != nil {
+			return err
+		}
+		// The escape, nested inside the caller's transaction.
+		if err := CrossAccount(ctx, tx, func(tx *gorm.DB) error {
+			return tx.Find(&seenInside).Error
+		}); err != nil {
+			return err
+		}
+		// A query with no predicate of its own, after it. The policy is what
+		// has to answer this, and it has to answer with one account's rows.
+		return tx.Find(&seenAfter).Error
+	})
+	if err != nil {
+		t.Fatalf("transaction: %v", err)
+	}
+	if len(seenInside) < 2 {
+		t.Fatalf("the nested cross-account read saw %d load balancers, want both accounts' — "+
+			"the escape did not take effect, so the assertion below proves nothing", len(seenInside))
+	}
+	if len(seenAfter) != 1 {
+		t.Fatalf("after a nested cross-account read, a predicate-less query saw %d load balancers, want 1: "+
+			"the policies were still lifted for the rest of the transaction", len(seenAfter))
+	}
+	_ = theirs
 }

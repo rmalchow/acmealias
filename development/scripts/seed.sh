@@ -87,6 +87,37 @@ if [ "$existing" != "0" ]; then
   exit 0
 fi
 
+# --- the account --------------------------------------------------------------
+#
+# The migration no longer seeds one (design C10): every account belongs to a
+# person, and the first one on a fresh deployment is made here. ACME_ADMINCTL_ACCOUNT
+# in development/.env names it, and every adminctl call below acts inside it.
+#
+# The owner is a STAND-IN, and that is a known gap rather than a shortcut. The
+# authentik provider uses sub_mode: hashed_user_id, so a person's subject is a
+# hash this script cannot know until they have signed in once — there is nothing
+# to name here. Personal accounts ARE materialized at sign-in now, so a developer
+# who signs in lands somewhere they can work — but not in THIS account, which
+# still needs an invitation nobody can send yet (account-invitations). adminctl
+# can reach it, which is what the seed is for.
+#
+# To reach it from the CONSOLE: sign in once so the provider issues your subject,
+# read it off /api/v1/me, and then hand the account over:
+#
+#   acmectl adminctl account transfer --owner "<subject from /me>"
+#
+# or, to join without taking ownership:
+#
+#   acmectl adminctl account member-add --subject "<subject>" --role ADMIN
+say "creating the account"
+# --credits is the opening balance: a team account works only while it is above
+# zero, so there is no zero-credit form of this verb. 100 rather than the default
+# 25 so that a developer running the stack for a week does not have to think
+# about it.
+acmectl adminctl account create \
+  --slug "$ACME_ADMINCTL_ACCOUNT" --name "Internal" \
+  --owner "system:dev-seed-owner" --credits 100
+
 # --- inventory ---------------------------------------------------------------
 say "seeding inventory"
 acmectl adminctl project create --slug demo --name "Demo Project"

@@ -27,10 +27,14 @@ There is no password to remember. Opening the console redirects you to the ident
 back; a deep link you followed is preserved, so a link to a specific load balancer still lands you there
 after signing in.
 
-Your permissions come from the Keycloak groups you are a member of: each configured group grants a
-role, and holding several at once is normal — they are additive, not exclusive. If you sign in
-successfully but see a refusal, the page lists the groups it saw for you, and that list is what an
-administrator needs in order to fix it.
+Signing in lands you on the **account picker** rather than inside an account. A session begins with
+nothing selected, and choosing which account you are working in is the first thing you do; the
+switcher in the navigation bar is how you change it later.
+
+Your permissions come from your **membership of that account**: somebody in it put you in one or
+more roles, and holding several at once is normal — they are additive, not exclusive. Keycloak
+groups do not grant anything. If the account you expect is not in the picker, nobody has added you
+to it yet, and that is the whole of the diagnosis.
 
 Roles are **rows in your account**, not fixed names in the software. The four below are seeded for
 you and confer exactly what they always did, but they can be edited and you can add others — see
@@ -302,9 +306,8 @@ together.
 ## Audit log
 
 Every change to inventory and keys, with who did it and when, filterable by project, actor and
-action. Secrets never appear in it. Role assignment is no longer something that changes here — it
-is a Keycloak group membership plus the `.env` mapping — so it does not appear either;
-see [Settings](#settings) for how to check who currently has what.
+action. Secrets never appear in it. Each entry also records the roles the person held at the time,
+which is what lets it answer "how was this allowed" after the role has since been edited.
 
 Besides the obvious compliance use, it is the fastest way to answer "this used to work" — a domain
 removed, a key revoked, or a restriction added usually shows up right before the failure started.
@@ -344,28 +347,24 @@ will help you do by accident.
 
 ## Settings
 
-`ADMIN` only. Roles themselves live on the [Roles](#roles) screen — they are data in this account
-now, and editable there. What is *not* editable anywhere is which Keycloak group grants which role:
-that stays a `.env` setting on the running service, because deciding who is in an account is not
-something the account may do for itself. See [install & configure, first
-sign-in](installation.md#6-first-sign-in) for the `ACME_*_GROUP` variables.
+`ADMIN` only. Roles and who holds them live on the [Roles](#roles) screen — they are data in this
+account, and editable there.
 
-What remains on this screen is more useful for exactly that reason: an **effective
-configuration** view, with secrets redacted, that shows the zone, resolver, trusted proxies
-and — now that role mapping lives in configuration too — the four `ACME_*_GROUP` values
-the running process actually loaded. If someone's access looks wrong, this is where you confirm
-whether the group name in `.env` actually matches what Keycloak reports for them, rather
-than guessing.
+What remains on this screen is an **effective configuration** view, with secrets redacted, showing
+the zone, the resolver and the trusted proxies the running process actually loaded. It no longer
+reports a group-to-role mapping, because there is none: nothing outside this account decides who is
+in it.
 
 > **Revoking access is not instant**
 >
-> Roles are read from the ID token at sign-in, so removing someone from a Keycloak group takes
-> effect at their *next* sign-in — bounded by `ACME_SESSION_MAX_LIFETIME`, up to
-> that long they keep whatever a still-live session already granted them. Editing the
-> `ACME_*_GROUP` mapping itself needs a `.env` change and a restart, and does
-> not touch existing sessions either. If access must end immediately: **Settings → Active
-> sessions** lets an `ADMIN` revoke a specific person's session outright. Sessions
-> are server-side, so a revoked session stops working on its very next request.
+> Membership is re-checked when somebody SELECTS an account, not on every request. Removing a
+> member takes effect the next time they switch accounts — bounded by
+> `ACME_SESSION_MAX_LIFETIME`, up to that long a still-live session keeps what it already had.
+>
+> **Active sessions** shows your OWN sessions and lets you end them, which is what you want after
+> losing a laptop. Ending somebody else's is deliberately not here: a session belongs to a person
+> rather than to an account, so no role in this account carries authority over one. If access must
+> stop immediately, remove the membership and ask them to sign out.
 
 ## Recipes
 
@@ -395,9 +394,9 @@ than guessing.
 2. If neither does, make a role that does. **Roles → New role**, then add grants: naming one project
    and ticking "reaches contained objects" gives someone everything inside it and nothing outside.
    This is the answer to "that is too broad" — it no longer has to be.
-3. Ask the Keycloak group owner to add them to the group configured for that role.
-4. They have access from their next sign-in. Removing them from the group takes effect at their next
-   sign-in too, so if access must end now, revoke their session as well.
+3. Ask them to sign in to the console once, so the service learns their identity-provider subject.
+4. **Roles → Members → Add**, naming that subject and the role. They have access as soon as they
+   select the account. Removing the membership takes effect the next time they switch accounts.
 
 ### Investigate a renewal that is not happening
 

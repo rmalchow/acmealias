@@ -73,7 +73,7 @@ func mintKey(t *testing.T, s *session, lb string, note string, networks []string
 }
 
 func TestChallengeAuthorizationBoundaries(t *testing.T) {
-	s := mustSignIn(t, adminUser, devPassword)
+	s := mustSignInSeeded(t, adminUser)
 	project, lb := demoProd(t, s)
 
 	// --- (a) a valid key belonging to a different load balancer ------------

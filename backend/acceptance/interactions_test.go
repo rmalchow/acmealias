@@ -38,7 +38,7 @@ type interactionRow struct {
 func TestBothAuthorizationsAreCreditedForTheOneQuery(t *testing.T) {
 	iss := forcedIssuance(t)
 
-	s := mustSignIn(t, adminUser, devPassword)
+	s := mustSignInSeeded(t, adminUser)
 	_, lb := demoProd(t, s)
 
 	var rows []interactionRow

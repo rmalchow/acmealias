@@ -84,16 +84,32 @@ func migratedDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// scopedDB is migratedDB plus the scope every call now takes. The migration
-// seeds one account and the bootstrap producer is the only honest way to reach
-// it: a test able to mint a Scope from an identifier would be exercising a
-// constructor production code does not have.
+// scopedDB is migratedDB plus the scope every call now takes.
+//
+// The account is CREATED, through the production path, rather than resolved out
+// of a migration seed: design C10 deleted store.ScopeForBootstrap along with the
+// single-account edition it served. The Valid check is not ceremony — row-level
+// security is on, and a zero Scope reads no rows and raises no error, so a
+// fixture that quietly produced one would make a whole file pass against empty
+// result sets.
 func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
 	t.Helper()
 	db := migratedDB(t)
-	sc, err := store.ScopeForBootstrap(context.Background(), db)
+	ctx := context.Background()
+	owner, err := store.FindOrCreateUser(ctx, db, "inventory-fixture-owner", "Fixture Owner", "")
 	if err != nil {
-		t.Fatalf("bootstrap scope: %v", err)
+		t.Fatalf("create owner: %v", err)
+	}
+	acc, err := store.CreateAccountWithOwner(ctx, db, "inventory-fixture", "Fixture", owner.ID, 25)
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	sc, err := store.ScopeForSelection(ctx, db, acc.ID)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if !sc.Valid() {
+		t.Fatal("fixture scope is the zero Scope; every read below would silently match nothing")
 	}
 	return db, sc
 }
@@ -110,7 +126,7 @@ func testSubject(sc store.Scope) authz.Subject {
 func loadBalancerFixture(t *testing.T, db *gorm.DB, sc store.Scope, slug string) model.ID {
 	t.Helper()
 	ctx := context.Background()
-	p, err := CreateProject(ctx, db, sc, testSubject(sc), slug, "Project "+slug)
+	p, err := CreateProject(ctx, db, sc, testSubject(sc), Limits{}, slug, "Project "+slug)
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -351,5 +367,66 @@ func TestIntegrationUpdateNodeAddressValidation(t *testing.T) {
 	}
 	if updated.IPv4 == nil || *updated.IPv4 != "203.0.113.20" || updated.IPv6 != nil {
 		t.Fatalf("after renumbering the node reads %v/%v, want 203.0.113.20 and no v6", updated.IPv4, updated.IPv6)
+	}
+}
+
+// TestIntegrationAnotherTenantsDomainIsRefusedWithoutNamingThem is the
+// isolation break that opened the moment every user got a personal account.
+//
+// aliases.challenge_fqdn is unique across the deployment while domains are
+// unique per account, so two accounts asking for example.com is a real conflict:
+// the challenge name is answered by a CNAME into one zone, and it has one
+// target. What must NOT happen is the second asker learning who the first was.
+// CreateDomain resolved the alias cross-account and put the other tenant's load
+// balancer in the refusal — telling account B both that account A exists and
+// that it holds example.com. Unreachable while a deployment had one account,
+// which is why it survived this long.
+func TestIntegrationAnotherTenantsDomainIsRefusedWithoutNamingThem(t *testing.T) {
+	db, first := scopedDB(t)
+	ctx := context.Background()
+	firstLB := loadBalancerFixture(t, db, first, "acme")
+	if _, err := CreateDomain(ctx, db, first, testSubject(first), firstLB, "example.com", derived, false); err != nil {
+		t.Fatalf("the first account claims example.com: %v", err)
+	}
+
+	owner, err := store.FindOrCreateUser(ctx, db, "second-tenant-owner", "Second", "")
+	if err != nil {
+		t.Fatalf("create the second owner: %v", err)
+	}
+	acc, err := store.CreateAccountWithOwner(ctx, db, "second-tenant", "Second", owner.ID, 25)
+	if err != nil {
+		t.Fatalf("create the second account: %v", err)
+	}
+	second, err := store.ScopeForSelection(ctx, db, acc.ID)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	secondLB := loadBalancerFixture(t, db, second, "other")
+
+	_, err = CreateDomain(ctx, db, second, testSubject(second), secondLB, "example.com", derived, false)
+	if err == nil {
+		t.Fatal("the second account was allowed to claim a challenge name the first already holds")
+	}
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("refused with %v, want a conflict", err)
+	}
+	// Nothing about the other tenant: not its slug, not its project, not its
+	// load balancer, and not the phrase that names one.
+	for _, leak := range []string{"acme-prod", "inventory-fixture", firstLB.String(), "load balancer"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("the refusal %q names another account's inventory (%q)", err, leak)
+		}
+	}
+
+	// And the same refusal inside ONE account still names the load balancer,
+	// because there it is the whole value of the message: it is where the
+	// operator goes to fix it. The name is the wildcard rather than the apex, so
+	// that it is the ALIAS conflict that fires — `*.example.com` is a different
+	// domain deriving the same challenge name, which is the case this branch is
+	// about; the apex would be caught one check earlier as a duplicate domain.
+	sibling := loadBalancerFixture(t, db, first, "sibling")
+	_, err = CreateDomain(ctx, db, first, testSubject(first), sibling, "*.example.com", derived, false)
+	if err == nil || !strings.Contains(err.Error(), "already owned by") {
+		t.Fatalf("within one account the conflict was reported as %v; it must say which load balancer holds it", err)
 	}
 }

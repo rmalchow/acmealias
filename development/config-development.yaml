@@ -18,8 +18,8 @@
 #     resolver, the two OIDC issuer/redirect URLs and the staff hostname are
 #     all container-network facts, and `.env` is the one place both the stack
 #     and the host scripts that print them can read.
-#   - The four role-group names. development/scripts/status.sh reads them from
-#     the host shell to print the sign-in table, and it cannot read YAML.
+#   - The adminctl account. development/scripts/seed.sh reads it from the host
+#     shell, and it cannot read YAML.
 #
 # The environment still wins over everything here (G1), so anything below can
 # be overridden from `.env` without editing this file.

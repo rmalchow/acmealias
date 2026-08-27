@@ -7,7 +7,7 @@ account.
 
 This change is about the people who nevertheless have to. Support engineers diagnosing a customer's
 CNAME, abuse handlers suspending an account, billing operators granting a credit, platform engineers
-enrolling a satellite, and whoever has to repair an account whose only administrator has left.
+and whoever has to repair an account whose only administrator has left.
 
 Today all of that is done by `internal/adminctl` against the datastore, authorized by possession of
 the connection string. That works while every row belongs to us and stops working the day one does
@@ -215,7 +215,7 @@ S3 gives staff time-boxed, reason-carrying access into one account, which is the
 *support* — someone asks for help and an employee looks at what they see. Abuse response is a
 different shape and must not borrow that mechanism.
 
-The distinction matters at 03:00 when a phishing report arrives. The action needed is "stop this
+The distinction matters when a report arrives out of hours. The action needed is "stop this
 account", and nothing about it requires reading the customer's data. Routing it through support access
 would mean impersonating a tenant in order to shut one down, which pollutes the record — the
 transparency trail would show a support session where there was an enforcement action — and makes the
@@ -227,7 +227,7 @@ report what it is about to affect.
 
 **One button, and it reaches everything.** Suspending an account:
 
-- marks the account suspended, with a reason and the staff identity, which `satellite-sync` Y10
+- marks the account suspended, with a reason and the staff identity, which the challenge path's
   distributes as a single event that overrides every nested `active` flag without rewriting one;
 - blocks every user whose only membership is that account, so the same people cannot simply create a
   fresh account and continue;
@@ -243,8 +243,10 @@ had, including zones the customer had themselves disabled.
 person who sleeps can actually honour. A shorter number that is missed is worse than a longer one that
 is met.
 
-**The centre being down defers it, and that is accepted.** A suspension cannot reach the fleet while
-the fleet cannot be reached. The alternative — a hand-editable denylist on each satellite — is a second
+**Nothing is deferred any more, and that paragraph is gone.** It argued that a suspension cannot
+reach the fleet while the fleet cannot be reached. There is no fleet: suspension sets a flag that the
+challenge path reads on the next publish, in the same process that would answer it. The alternative
+it rejected — a hand-editable denylist on each satellite — is a second
 authority path that drifts from the centre and lets the internet's answers be changed without a record
 of who changed them. A centre outage long enough to matter inside twelve hours is itself an emergency
 already being worked.
@@ -252,7 +254,7 @@ already being worked.
 ### S11. Blocking the users is deliberate, and the button says what else it will break
 
 S10 blocks the account's users, not only the account. That is stricter than confining the block to the
-account, and it is the right default: the members of an account created to run phishing are the
+account, and it is the right default: the members of an account created to misuse the service are the
 abuser, not bystanders, and leaving their identities usable means the next account is created within
 the minute.
 

@@ -131,13 +131,26 @@
     U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* The palette is the sign-in page's, deliberately and to the value: the same
+ * black ground, the same #00ffb0 out of the logo, the same dark-grey panels. A
+ * visitor crosses from here to auth.localhost mid-sentence, and the two surfaces
+ * being one design is the only thing that makes that crossing unremarkable. The
+ * blue that used to be the accent here belonged to the console's component
+ * library rather than to us.
+ *
+ * The other copy of these values is development/authentik/branding/custom.css.
+ * There is no mechanism keeping them in step — a shared file would have to be
+ * served by both a static site and an identity provider that only reads its own
+ * — so a change to one is a change to make twice, on purpose. */
 :root {
-  --ground: #0b0d0e;
-  --raised: #14181a;
+  --ground: #05070a;
+  --raised: #16191d;
+  --raised-2: #1c2026;
   --line: rgb(255 255 255 / 12%);
-  --ink: rgb(255 255 255 / 88%);
-  --ink-dim: rgb(255 255 255 / 55%);
-  --accent: #1890ff;
+  --ink: #fff;
+  --ink-dim: rgb(255 255 255 / 62%);
+  --accent: #00ffb0;
+  --accent-bright: #4dffc9;
   --page: 62rem;
 }
 
@@ -147,7 +160,22 @@
 
 body {
   margin: 0;
-  background: var(--ground);
+  /* THE SAME FILE the sign-in page is lit by, not a CSS approximation of it.
+   * brand/background.jpg is a copy of development/authentik/branding/flow_background.jpg
+   * — black with a green wash off the top left and a cool specular under the
+   * first screenful. Copied rather than shared because the two are served by
+   * different things (busybox httpd here, authentik there) and neither can read
+   * the other's directory; regenerate both together or they drift.
+   *
+   * `fixed` and `cover` so the light belongs to the window rather than to the
+   * document: it stays put while the page scrolls, which is what stops the lower
+   * half of a long page from looking like a different, unlit site. */
+  background-color: var(--ground);
+  background-image: url("./brand/background.jpg");
+  background-size: cover;
+  background-position: 50% 0;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color: var(--ink);
   font-family: Barlow, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   line-height: 1.6;
@@ -157,7 +185,8 @@ body {
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
-  background: var(--raised);
+  color: var(--accent);
+  background: var(--raised-2);
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 0.05em 0.35em;
@@ -167,12 +196,16 @@ a {
   color: var(--accent);
 }
 
+/* Solid, and opaque on purpose: the bar is chrome, and chrome that the page's
+ * lighting shows through reads as part of the content. It is the one band on the
+ * page that is flat colour — everything below it sits on the gradient. */
 .bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 1rem 1.5rem;
+  background: var(--ground);
   border-block-end: 1px solid var(--line);
 }
 
@@ -187,33 +220,53 @@ a {
   text-decoration: none;
 }
 
-/* One height for both pieces, because the logo carries its own box and the wordmark is set
- * to sit beside it at the box's full height — not at its cap height. Changing the mark's
- * size is changing this one number. */
-.mark-logo,
-.mark-word {
-  block-size: 1.9rem;
+/* The logo keeps the height it had; the wordmark now has to match it as TYPE rather
+ * than as a second image, which is a different problem: 1.9rem of box is not 1.9rem
+ * of cap height. The font size is set to the value that puts the word's caps level
+ * with the glyph's box, and the line-height to 1 so the box is the type and nothing
+ * more. */
+.mark-logo {
+  block-size: 2rem;
 }
 
-/* The one action the bar carries, so it looks like an action rather than a link in a row of
- * links. Ghost-bordered rather than filled: the page's only filled surface should be the
- * thing a visitor is reading, not the chrome around it. */
+.mark-word {
+  font-family: "Barlow Condensed", Barlow, sans-serif;
+  font-weight: 700;
+  /* A shade taller than the glyph's box rather than level with it: condensed
+   * caps at the same measurement read smaller than the box beside them, so
+   * matching the numbers is what makes the word look undersized. */
+  font-size: 2.25rem;
+  line-height: 1;
+  letter-spacing: 0.005em;
+  color: #fff;
+  /* The bar is the one place a link is not the accent colour: white beside the
+   * green mark, so the mark is what the eye lands on. */
+  text-decoration: none;
+}
+
+/* The one action the bar carries, and now filled rather than ghost-bordered — for
+ * the same reason the sign-in page's `Log in` is filled: on black, one saturated
+ * rectangle is where the eye goes, and this is where it should go. The label is
+ * near-black on it because #00ffb0 is far too bright to carry white type; that is
+ * a contrast fact, not a preference. */
 .button {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.4rem 0.85rem;
-  border: 1px solid var(--accent);
+  padding: 0.45rem 0.95rem;
+  border: 1px solid transparent;
   border-radius: 4px;
-  color: var(--accent);
-  font-weight: 500;
+  background: var(--accent);
+  color: #05070a;
+  font-weight: 600;
   text-decoration: none;
   line-height: 1;
 }
 
-.button:hover {
-  background: var(--accent);
-  color: var(--ground);
+.button:hover,
+.button:focus-visible {
+  background: var(--accent-bright);
+  color: #05070a;
 }
 
 .icon {
@@ -271,8 +324,14 @@ h1 {
   counter-increment: step;
   background: var(--raised);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 8px;
   padding: 1.25rem;
+  /* Lit from above and floating, the same two shadows the sign-in card uses. On
+   * black a panel that is only a shade lighter needs the highlight to read as a
+   * panel at all. */
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 6%) inset,
+    0 18px 40px rgb(0 0 0 / 45%);
 }
 
 .steps li::before {
@@ -306,7 +365,9 @@ h1 {
   font-size: 1.35rem;
 }
 
+/* The footer is chrome too, and closes the page the way the bar opens it. */
 footer {
+  background: var(--ground);
   border-block-start: 1px solid var(--line);
   margin-block-start: 2rem;
   padding: 1.5rem;

@@ -123,16 +123,15 @@ type OIDCClient struct {
 	GroupPrefix  string `koanf:"group_prefix"`
 }
 
-// oidcBlock is the console's OIDC client plus what the identity provider is
-// used to decide: which group grants which global role, and how long a session
-// minted from it lives.
+// oidcBlock is the console's OIDC client plus how long a session minted from it
+// lives.
+//
+// It used to carry four *_group keys naming the identity-provider group behind
+// each global role. Design C10 removed both the roles and the mapping: nothing
+// an identity provider says grants authority any more, so there is no key here
+// that could.
 type oidcBlock struct {
 	OIDCClient `koanf:",squash"`
-
-	AdminGroup       string `koanf:"admin_group"`
-	ConfigAdminGroup string `koanf:"config_admin_group"`
-	KeyRotationGroup string `koanf:"key_rotation_group"`
-	ReadOnlyGroup    string `koanf:"read_only_group"`
 
 	SessionIdleTimeout time.Duration `koanf:"session_idle_timeout"`
 	SessionMaxLifetime time.Duration `koanf:"session_max_lifetime"`
@@ -185,15 +184,12 @@ type limitsBlock struct {
 	// migration. Team accounts have no project quota at all; credit is their
 	// only limit, so nothing here applies to them.
 	//
-	// Nothing reads it yet, deliberately. It is in the schema because G7 put
-	// it there, and toConfig does NOT carry it onto Config: binding it would
-	// be a new setting, and the proposal adds none. The change that enforces
-	// the quota is the one that gets to name its ACME_* override and wire it
-	// through — until then it is loaded and discarded, and the schema's own
-	// nested form, ACME_LIMITS_PROJECTS_PER_PERSONAL_ACCOUNT, reaches it and
-	// is equally inert. That is the same standing as staff.oidc's three
-	// unwired fields above, and it is recorded in docs/installation.md so an
-	// operator setting one is not left wondering why nothing happened.
+	// It is read now. G7 put it in the schema and deliberately left it
+	// inert, saying that the change which ENFORCES the quota is the one that
+	// carries it onto the runtime Config and names its override; this is that
+	// change (task 3.5a). toConfig projects it, and ACME_PROJECT_QUOTA is the
+	// flat override beside the nested ACME_LIMITS_PROJECTS_PER_PERSONAL_ACCOUNT
+	// the schema resolves on its own.
 	ProjectsPerPersonalAccount int `koanf:"projects_per_personal_account"`
 
 	AllowAccountCreation bool `koanf:"allow_account_creation"`
@@ -236,7 +232,8 @@ func (f fileConfig) toConfig() Config {
 		DatabaseURL:    f.Database.URL,
 		MigrateOnStart: f.Database.MigrateOnStart,
 
-		AllowAccountCreation: f.Limits.AllowAccountCreation,
+		AllowAccountCreation:       f.Limits.AllowAccountCreation,
+		ProjectsPerPersonalAccount: f.Limits.ProjectsPerPersonalAccount,
 
 		AliasUseDomain:          f.Challenge.AliasUseDomain,
 		ChallengeTTL:            f.Challenge.TTL,
@@ -259,11 +256,6 @@ func (f fileConfig) toConfig() Config {
 		StaffOIDCClientSecret: f.Staff.OIDC.ClientSecret,
 		StaffOIDCRedirectURL:  f.Staff.OIDC.RedirectURL,
 
-		AdminGroup:       f.OIDC.AdminGroup,
-		ConfigAdminGroup: f.OIDC.ConfigAdminGroup,
-		KeyRotationGroup: f.OIDC.KeyRotationGroup,
-		ReadOnlyGroup:    f.OIDC.ReadOnlyGroup,
-
 		SessionIdleTimeout: f.OIDC.SessionIdleTimeout,
 		SessionMaxLifetime: f.OIDC.SessionMaxLifetime,
 
@@ -281,6 +273,7 @@ const (
 	kindBool
 	kindDuration
 	kindUint32
+	kindInt
 	kindList
 )
 
@@ -332,10 +325,6 @@ var envBindings = []envBinding{
 	{"ACME_OIDC_REDIRECT_URL", "oidc.redirect_url", kindString},
 	{"ACME_OIDC_GROUPS_CLAIM", "oidc.groups_claim", kindString},
 	{"ACME_OIDC_GROUP_PREFIX", "oidc.group_prefix", kindString},
-	{"ACME_ADMIN_GROUP", "oidc.admin_group", kindString},
-	{"ACME_CONFIG_ADMIN_GROUP", "oidc.config_admin_group", kindString},
-	{"ACME_KEY_ROTATION_GROUP", "oidc.key_rotation_group", kindString},
-	{"ACME_READ_ONLY_GROUP", "oidc.read_only_group", kindString},
 	{"ACME_SESSION_IDLE_TIMEOUT", "oidc.session_idle_timeout", kindDuration},
 	{"ACME_SESSION_MAX_LIFETIME", "oidc.session_max_lifetime", kindDuration},
 
@@ -353,6 +342,7 @@ var envBindings = []envBinding{
 	{"ACME_ALIAS_USE_DOMAIN", "challenge.alias_use_domain", kindBool},
 
 	{"ACME_ALLOW_ACCOUNT_CREATION", "limits.allow_account_creation", kindBool},
+	{"ACME_PROJECT_QUOTA", "limits.projects_per_personal_account", kindInt},
 
 	{"ACME_LOG_LEVEL", "log.level", kindString},
 }

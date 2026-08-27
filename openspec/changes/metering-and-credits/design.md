@@ -1,3 +1,20 @@
+> **Read this document against its own proposal, which superseded parts of it.**
+>
+> `zone.active` is gone with the DNS product. It was the only charge that could drain a balance while
+> the customer did nothing, and much of the machinery below was built for it — the tick job, its
+> idempotent period key, the backfill-across-an-outage rule, and a good deal of the urgency behind
+> soft suspension.
+>
+> Two things have also moved underneath this document since it was written. The **balance itself
+> arrives earlier**, with `personal-and-team-accounts`: that change adds the credits column, the
+> checkout that raises it, and what happens at zero. What waits for this change is the ledger that
+> draws it down.
+>
+> And the **overdraft argued for below was reversed** — deliberately, in that change's design C4,
+> which explains why. An account now stops at zero rather than coasting. The reasoning here is worth
+> reading anyway, because C4 keeps its conclusion about warnings: *"The mitigation is not a different
+> overdraft, it is a different warning."*
+
 ## Context
 
 Four earlier changes each introduced something that costs money to provide: challenge publishes

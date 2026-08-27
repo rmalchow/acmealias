@@ -39,19 +39,6 @@ func RolesByName(ctx context.Context, db *gorm.DB, sc Scope, names ...string) ([
 	return rs, nil
 }
 
-// RoleNames lists the names of every role in the account, for reporting a
-// mapping that names one nobody created.
-func RoleNames(ctx context.Context, db *gorm.DB, sc Scope) ([]string, error) {
-	var names []string
-	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		return sc.Where(tx.Model(&model.Role{})).Order("name").Pluck("name", &names).Error
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store: role names: %w", err)
-	}
-	return names, nil
-}
-
 // GrantCheck decides whether one grant may be written. It is a parameter rather
 // than a rule this package knows, because the rule lives in the permission model
 // and this package must not import it — but it is a REQUIRED parameter, so a new

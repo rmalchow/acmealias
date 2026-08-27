@@ -30,15 +30,26 @@ type session struct {
 	client *http.Client
 	jar    *laxJar
 	csrf   string
+	// subject is the identity-provider subject the service knows this person by.
+	//
+	// It is read from /me rather than assembled from the username, because the
+	// provider is configured with sub_mode: hashed_user_id — the subject is a
+	// hash, and nothing outside authentik can compute it. Every fixture that has
+	// to name a person (a membership, a transfer, an invitation) needs it, which
+	// is why signing in is the only way to get one.
+	subject string
 	// account is the account this session acts in, as a UUID string.
 	//
 	// Every inventory route lives under /api/v1/accounts/{accountId}/… and the
 	// service refuses a path naming an account other than the session's
 	// selection (design P19), so the id is not decoration: it is part of every
-	// address below. The internal edition selects its single account at sign-in
-	// (internal/oidcauth/flow.go), so this is populated by the time signIn
-	// returns and a session with an empty one is a bug rather than a state to
-	// handle.
+	// address below.
+	//
+	// It is EMPTY when signIn returns, and that is the front door rather than an
+	// edge case (design C10, task 7.5). Sign-in used to select the deployment's
+	// single account; there is no such account any more, so a session begins
+	// having chosen nothing and something has to choose — see selectInto in
+	// accounts_test.go.
 	account string
 }
 
@@ -332,21 +343,26 @@ func signIn(user, password string) (*session, error) {
 	}
 
 	var me struct {
+		Subject           string  `json:"subject"`
 		SelectedAccountID *string `json:"selectedAccountId"`
 	}
 	if err := json.Unmarshal(raw, &me); err != nil {
 		return nil, fmt.Errorf("decoding /api/v1/me: %w", err)
 	}
-	if me.SelectedAccountID == nil || *me.SelectedAccountID == "" {
-		// Not a state this edition reaches: one account exists and sign-in
-		// selects it. Reaching here means either the bootstrap scope could not
-		// be resolved (an empty accounts table) or this stack is no longer the
-		// single-account edition the suite is written against.
-		return nil, fmt.Errorf("signed in as %s but no account is selected — "+
-			"the internal edition selects its single account at sign-in (design P19); "+
-			"is the accounts table seeded?", user)
+	// A fresh session has selected NOTHING, and this asserts it rather than
+	// tolerating it (design C10, task 7.5). Sign-in used to select the single
+	// account a deployment had; a selection appearing here again would mean
+	// something is choosing on the user's behalf, which is the behaviour that
+	// made "no account selected" unreachable and left the console's picker — now
+	// the front door — exercised by nothing.
+	if me.SelectedAccountID != nil {
+		return nil, fmt.Errorf("signed in as %s and an account (%s) was already selected; "+
+			"sign-in must select nothing (design P19, task 2.2)", user, *me.SelectedAccountID)
 	}
-	s.account = *me.SelectedAccountID
+	if me.Subject == "" {
+		return nil, fmt.Errorf("GET /api/v1/me as %s answered no subject", user)
+	}
+	s.subject = me.Subject
 	return s, nil
 }
 

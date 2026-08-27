@@ -36,11 +36,20 @@ func TestIntegrationMigrationsAreIdempotent(t *testing.T) {
 func TestIntegrationMigrateDownReverses(t *testing.T) {
 	db, dsn := migratedDB(t)
 
-	// The row graph starts at an account now: projects reference one, and the
-	// migration seeds exactly one for this deployment.
-	var account model.Account
-	if err := db.First(&account).Error; err != nil {
-		t.Fatalf("read seeded account: %v", err)
+	// The row graph starts at an account, and the migration no longer seeds one:
+	// design C10 made 000006's seed conditional on there being something to
+	// backfill, so a fresh chain has none. The graph therefore begins by making
+	// the account and its owner, which is also what a real deployment does.
+	owner := model.User{Subject: "sub-owner", DisplayName: "Owner"}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	account := model.Account{
+		Slug: "acme", Name: "Acme",
+		Kind: model.AccountKindTeam, OwnerUserID: owner.ID,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("insert account: %v", err)
 	}
 
 	project := model.Project{AccountID: account.ID, Slug: "acme-shop", Name: "Acme Shop"}

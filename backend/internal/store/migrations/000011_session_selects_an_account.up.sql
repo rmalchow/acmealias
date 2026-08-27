@@ -13,8 +13,10 @@
 -- members out of the service. They fall back to having no selection, which is
 -- exactly what is true.
 --
--- The internal edition never enters the unselected state — it has one account
--- and the session selects it at sign-in — which is what keeps constraint 1 true.
+-- When this migration was written the unselected state was unreachable: the
+-- deployment had one account and sign-in selected it, which is what kept
+-- constraint 1 true. Design C10 removed both, so this column's null is now the
+-- state every session starts in and the picker is the front door.
 alter table sessions add column selected_account_id uuid
   references accounts (id) on delete set null;
 

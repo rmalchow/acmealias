@@ -103,15 +103,46 @@ func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 	// Both names derive the same challenge name, so one alias serves the pair.
 	challenge := dnsname.ChallengeName(primary)
 
-	alias, err := store.FindAliasByChallengeName(ctx, db, challenge)
+	// SCOPED first, and the unscoped question asked separately afterwards.
+	//
+	// aliases.challenge_fqdn is unique across the whole deployment while domains
+	// are unique per account, so two accounts can ask for example.com and only
+	// one can have it — that part is real, and it is real because the challenge
+	// name is answered by a CNAME into a zone this service publishes, which has
+	// one target.
+	//
+	// What is NOT allowed is telling the second asker who the first was. Reading
+	// the alias cross-account and naming its load balancer in the refusal
+	// disclosed to account B both that account A exists and that A holds
+	// example.com — an isolation break that was simply unreachable while a
+	// deployment had one account, and became reachable the moment every user got
+	// a personal one. store.ScopedAlias exists precisely for this and is what is
+	// used here; the cross-account lookup below is what turns "not in your
+	// account" into the right refusal instead of a unique-violation from the
+	// insert, and it deliberately learns nothing it puts in the message.
+	alias, err := store.ScopedAlias(ctx, db, sc, challenge)
 	switch {
 	case err == nil:
 		if alias.LoadBalancerID != loadBalancerID {
+			// Inside the caller's own account, naming the load balancer is the
+			// whole value of the message: it is where they go to fix it.
 			owner := describeLoadBalancer(ctx, db, sc, alias.LoadBalancerID)
 			return nil, fmt.Errorf("%w: the challenge name %q for %q is already owned by %s; "+
 				"an alias belongs to exactly one load balancer", ErrConflict, challenge, primary, owner)
 		}
 	case errors.Is(err, gorm.ErrRecordNotFound):
+		// Nobody in this account holds it. Somebody elsewhere might, and the
+		// insert would fail on the unique index with a constraint name; refuse
+		// it here instead, in a sentence, and without saying who or where.
+		switch _, err := store.FindAliasByChallengeName(ctx, db, challenge); {
+		case err == nil:
+			return nil, fmt.Errorf("%w: the challenge name %q for %q is already claimed and cannot be "+
+				"claimed twice; a challenge name resolves to one place in the zone this service publishes",
+				ErrConflict, challenge, primary)
+		case errors.Is(err, gorm.ErrRecordNotFound):
+		default:
+			return nil, err
+		}
 		alias = nil
 	default:
 		return nil, err

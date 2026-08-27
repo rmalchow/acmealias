@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
 
 // TestIntegrationAccountCreationIsClosedByDefault covers the half of U9 that
@@ -17,9 +18,9 @@ import (
 // which is what a caller who has read the bundle would do.
 func TestIntegrationAccountCreationIsClosedByDefault(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 
-	rec := cl.do(http.MethodPost, "/api/v1/accounts", `{"slug":"sneaky","name":"Sneaky"}`)
+	rec := cl.do(http.MethodPost, "/api/v1/accounts", `{"slug":"sneaky","name":"Sneaky","amount":25}`)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("POST /api/v1/accounts: %d %s, want 403 — account creation is closed unless a deployment opens it",
 			rec.Code, rec.Body.String())
@@ -43,9 +44,9 @@ func TestIntegrationAccountCreationIsClosedByDefault(t *testing.T) {
 func TestIntegrationAccountCreationWorksWhenOpened(t *testing.T) {
 	v := newAdminEnv(t)
 	v.openAccountCreation(t)
-	cl := v.session("admin", groupAdmin)
+	cl := v.session("admin", roleAdmin)
 
-	rec := cl.do(http.MethodPost, "/api/v1/accounts", `{"slug":"opened","name":"Opened"}`)
+	rec := cl.do(http.MethodPost, "/api/v1/accounts", `{"slug":"opened","name":"Opened","amount":50}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST /api/v1/accounts with creation enabled: %d %s, want 201", rec.Code, rec.Body.String())
 	}
@@ -54,6 +55,48 @@ func TestIntegrationAccountCreationWorksWhenOpened(t *testing.T) {
 	decode(t, rec, &created)
 	if !created.Selected {
 		t.Fatal("a newly created account was not selected — someone who just made one meant to act in it")
+	}
+	// Created AND funded, in one act (design C8, task 5.4). An account that
+	// exists but was never funded is a state with no purpose, so the creation
+	// carrying the balance is the assertion rather than a detail of it.
+	if created.Credits != 50 {
+		t.Fatalf("a newly bought account holds %d credits, want 50 — creating and buying are one act", created.Credits)
+	}
+	if created.Suspended {
+		t.Fatal("a newly bought account is suspended; it was funded in the same transaction that made it")
+	}
+	if created.Kind != model.AccountKindTeam {
+		t.Fatalf("a bought account is %q, want team — a personal account is materialized, never requested", created.Kind)
+	}
+}
+
+// TestIntegrationCheckoutRefusesAnAmountNobodyOffered is design C8: the amount
+// is a fixed choice, not a number the caller supplies.
+//
+// There is no payment processor in the way to notice a body saying 1000000
+// instead of 100, so the only thing between the balance and an arbitrary number
+// is that no arbitrary number is accepted. The test calls the endpoint directly
+// with a number no screen offers, which is what somebody who read the bundle
+// would do.
+func TestIntegrationCheckoutRefusesAnAmountNobodyOffered(t *testing.T) {
+	v := newAdminEnv(t)
+	v.openAccountCreation(t)
+	cl := v.session("admin", roleAdmin)
+
+	for _, amount := range []string{"1000000", "0", "-25", "26"} {
+		rec := cl.do(http.MethodPost, "/api/v1/accounts", `{"slug":"greedy","name":"Greedy","amount":`+amount+`}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v1/accounts with amount %s: %d %s, want 400", amount, rec.Code, rec.Body.String())
+		}
+	}
+	accounts, err := listAccountsFor(t, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range accounts {
+		if a.Slug == "greedy" {
+			t.Fatal("a refused amount created an account anyway")
+		}
 	}
 }
 
@@ -71,9 +114,9 @@ func TestIntegrationPermittedActionsAccompanyEveryRow(t *testing.T) {
 		wantWrite   bool
 		wantAdmin   bool
 	}{
-		{"ADMIN", groupAdmin, true, true},
-		{"CONFIG_ADMIN", groupConfig, true, false},
-		{"READ_ONLY", groupRead, false, false},
+		{"ADMIN", roleAdmin, true, true},
+		{"CONFIG_ADMIN", roleConfig, true, false},
+		{"READ_ONLY", roleRead, false, false},
 	} {
 		t.Run(tc.role, func(t *testing.T) {
 			cl := v.session("perm-"+tc.role, tc.group)
@@ -110,7 +153,7 @@ func TestIntegrationPermittedActionsAccompanyEveryRow(t *testing.T) {
 // offer is still refused when it arrives.
 func TestIntegrationTheReportDoesNotAuthorize(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("reporter", groupRead)
+	cl := v.session("reporter", roleRead)
 
 	rec := cl.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", "")
 	var projects []projectView
@@ -143,7 +186,7 @@ func TestIntegrationARefusedEscalationWritesNoEntry(t *testing.T) {
 	v := newAdminEnv(t)
 	// KEY_ROTATION may mint keys but holds no inventory write, so a role granting
 	// one is an escalation it cannot issue.
-	cl := v.session("escalator", groupKey)
+	cl := v.session("escalator", roleKey)
 	auditAt := "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit"
 
 	before := entriesAt(t, cl, auditAt)
@@ -172,7 +215,7 @@ func entriesAt(t *testing.T, cl *client, auditAt string) []auditView {
 // for. A reference to a grant row would go stale the moment the role was edited.
 func TestIntegrationGrantsAreRecordedInFull(t *testing.T) {
 	v := newAdminEnv(t)
-	cl := v.session("roler", groupAdmin)
+	cl := v.session("roler", roleAdmin)
 	acct := "/api/v1/accounts/" + v.sc.AccountID().String()
 
 	body := `{"name":"readers","grants":[{"type":"*","action":"inventory.view","inheritable":true}]}`

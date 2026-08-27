@@ -16,6 +16,7 @@ import { NzModalModule } from 'ng-zorro-antd/modal';
 import { NzMessageModule } from 'ng-zorro-antd/message';
 import {
   CheckOutline,
+  ClusterOutline,
   DeleteOutline,
   EditOutline,
   CloseCircleOutline,
@@ -27,10 +28,13 @@ import {
   PlusOutline,
   ReloadOutline,
   SearchOutline,
+  ShoppingCartOutline,
   UserOutline,
+  WalletOutline,
 } from '@ant-design/icons-angular/icons';
 import { routes } from './app.routes';
 import { SessionService, authInterceptor } from '@acme/shared';
+import { AccountsService } from './features/accounts/accounts.service';
 registerLocaleData(en);
 
 export const appConfig: ApplicationConfig = {
@@ -53,6 +57,11 @@ export const appConfig: ApplicationConfig = {
     // components. Adding an `nz-icon` to a template means adding it to this list.
     provideNzIcons([
       CheckOutline,
+      // The switcher has always drawn `cluster` and it was never registered here — which never
+      // threw only because the switcher used to render nothing below two accounts. It renders
+      // always now (design C12), so this line is what stands between the first sign-in and a
+      // broken screen.
+      ClusterOutline,
       DeleteOutline,
       EditOutline,
       CloseCircleOutline,
@@ -64,7 +73,9 @@ export const appConfig: ApplicationConfig = {
       PlusOutline,
       ReloadOutline,
       SearchOutline,
+      ShoppingCartOutline,
       UserOutline,
+      WalletOutline,
     ]),
     // NzModalService and NzMessageService are NOT `providedIn: 'root'` — they come with their
     // modules. A component that injects one without this gets a NullInjectorError at
@@ -80,8 +91,25 @@ export const appConfig: ApplicationConfig = {
       withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' }),
       withInterceptors([authInterceptor]),
     ),
-    // One `/api/v1/me` before the first screen renders, so role-gated navigation and guards
-    // never have to reason about "roles not known yet".
-    provideAppInitializer(() => inject(SessionService).load()),
+    // Two requests before the first screen renders, in this order and both blocking.
+    //
+    // `/api/v1/me` says who is signed in and which account is selected, and the guards would
+    // otherwise have to reason about "not known yet". `/api/v1/accounts` says what that account
+    // IS — its kind, its balance, whether it is suspended — and the navigation is computed from
+    // exactly that (design C11): a personal account gets Projects and Upgrade, a team account
+    // gets Projects, Audit and Settings. Loading the list from a screen's ngOnInit, as the
+    // switcher used to, would render the bar in one shape and then change it under the pointer.
+    //
+    // Neither is allowed to stop the application from starting. A signed-out caller gets a 401
+    // here, which the auth interceptor turns into sign-in; a failure to reach the service is a
+    // screen that says so, not a blank page.
+    provideAppInitializer(() => {
+      const session = inject(SessionService);
+      const accounts = inject(AccountsService);
+      return session.load().then(
+        () => accounts.load().catch(() => undefined),
+        () => undefined,
+      );
+    }),
   ],
 };

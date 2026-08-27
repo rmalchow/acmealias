@@ -89,9 +89,9 @@ interface RoleEditorData {
     `,
   ],
 })
-export class RoleEditorModal {
+export class RoleEditorModalComponent {
   protected readonly data = inject<RoleEditorData>(NZ_MODAL_DATA);
-  private readonly ref = inject(NzModalRef<RoleEditorModal, boolean>);
+  private readonly ref = inject(NzModalRef<RoleEditorModalComponent, boolean>);
   private readonly api = inject(ApiService);
 
   protected readonly name = signal(this.data.role?.name ?? '');
@@ -131,14 +131,14 @@ export class RoleEditorModal {
 export function openRoleEditor(
   modal: NzModalService,
   data: RoleEditorData,
-): NzModalRef<RoleEditorModal, boolean | undefined> {
-  return modal.create<RoleEditorModal, RoleEditorData>({
+): NzModalRef<RoleEditorModalComponent, boolean | undefined> {
+  return modal.create<RoleEditorModalComponent, RoleEditorData>({
     nzTitle: data.role ? `Edit ${data.role.name}` : 'New role',
-    nzContent: RoleEditorModal,
+    nzContent: RoleEditorModalComponent,
     nzData: data,
     // Wide, because a grant is five fields across and reading a list of them
     // wrapped over two lines each is how a permission gets misread.
     nzWidth: '56rem',
     nzMaskClosable: false,
-  }) as NzModalRef<RoleEditorModal, boolean | undefined>;
+  }) as NzModalRef<RoleEditorModalComponent, boolean | undefined>;
 }

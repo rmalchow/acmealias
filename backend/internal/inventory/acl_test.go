@@ -22,11 +22,11 @@ func TestIntegrationAListingShowsOnlyWhatTheGrantsReach(t *testing.T) {
 	ctx := context.Background()
 	admin := authz.CLISubject(sc.AccountID())
 
-	mine, err := CreateProject(ctx, db, sc, admin, "mine", "Mine")
+	mine, err := CreateProject(ctx, db, sc, admin, Limits{}, "mine", "Mine")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CreateProject(ctx, db, sc, admin, "theirs", "Theirs"); err != nil {
+	if _, err := CreateProject(ctx, db, sc, admin, Limits{}, "theirs", "Theirs"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -67,7 +67,7 @@ func TestIntegrationAListingShowsOnlyWhatTheGrantsReach(t *testing.T) {
 func TestIntegrationAListingWithNoGrantsIsEmptyRatherThanRefused(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	if _, err := CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), "hidden", "Hidden"); err != nil {
+	if _, err := CreateProject(ctx, db, sc, authz.CLISubject(sc.AccountID()), Limits{}, "hidden", "Hidden"); err != nil {
 		t.Fatal(err)
 	}
 

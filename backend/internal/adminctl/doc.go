@@ -12,11 +12,38 @@
 //
 // # Accounts
 //
-// Every object belongs to an account, and the CLI operates inside exactly one:
-// the single account of the deployment, resolved at startup by
-// store.ScopeForBootstrap. It cannot be pointed at another, and a deployment
-// holding more than one makes the lookup fail rather than pick — "the single
-// account" is not a question with an answer there.
+// Every object belongs to an account, and the CLI operates inside exactly one,
+// named by --account SLUG (or ACME_ADMINCTL_ACCOUNT) and resolved by
+// store.ScopeForSlug.
+//
+// It used to be resolved without being asked for: the deployment had a single
+// account and store.ScopeForBootstrap found it. Design C10 removed that edition,
+// so there is nothing to fall back on, and every verb but one refuses rather
+// than guessing. The exception is AccountCreate, which is what makes the first
+// account on a fresh deployment — a job that had no owner once the migration
+// stopped seeding one.
+//
+// AccountCreate makes a TEAM account, and it funds it in the same breath,
+// because a team account works only while its balance is above zero (design C3)
+// and one created empty would be suspended from the moment it existed. In the
+// console the same act is a purchase; --credits is what stands in for that on a
+// deployment where nobody can reach the console yet (design C8).
+//
+// AccountCredit, AccountTransfer and AccountMemberAdd are the repair verbs. They
+// exist for the state an UPGRADE leaves behind rather than for day-to-day
+// administration: migration 000013 turns the internal edition's shared account
+// into a team account whose owner is a stand-in nobody can authenticate as and
+// whose roster is empty, because membership used to be derived from a group
+// claim rather than written down (design C10). The console cannot mend that by
+// construction — every route into an account requires already being in it — so
+// the repair belongs with the rest of the break-glass path. They are also what
+// restores a suspended account when nobody can reach checkout.
+//
+// There is no verb that makes a PERSONAL account, and there never will be: a
+// user has one because they are a user, materialized at their first sign-in
+// (design C1). Nothing here can create one, and neither the transfer nor the
+// credit will touch one — store.TransferOwnership and store.Credit both refuse
+// it, and migration 000013's trigger is the floor under the first.
 //
 // That confinement is real but it is not a security boundary against the person
 // running the CLI. The authority behind a CLI change is "had the connection

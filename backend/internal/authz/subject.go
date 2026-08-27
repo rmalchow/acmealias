@@ -3,7 +3,7 @@ package authz
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
+	"slices"
 
 	"gorm.io/gorm"
 
@@ -132,51 +132,56 @@ func Ancestors(o Object) map[ObjectType]model.ID {
 	return out
 }
 
-// SubjectForGroups resolves an identity provider's group claim into the subject
-// a person acts as in one account.
+// SubjectForUser resolves what a person may do in one account, from the rows we
+// wrote for them.
 //
-// This is the internal edition's membership derivation (design P18): memberships
-// are computed per request from the claim and stored nowhere. The public edition
-// reads them from account_members instead, and the evaluator cannot tell which
-// it was handed — that is the point of returning a Subject rather than a set of
-// rows.
+// This is P18 without its exception. There used to be a second producer here,
+// SubjectForGroups, which computed a membership per request from the identity
+// provider's group claim and stored nothing — the internal edition's derivation.
+// Design C10 removed it, so the only answer to "what may this person do here" is
+// the account_members rows and the roles they name.
 //
-// A claim naming no configured group yields a subject holding nothing, which is
-// refused upstream with the observed groups reported, because "you are in none
-// of the groups that grant anything" is only actionable if you can see which
-// groups you were in.
-func SubjectForGroups(ctx context.Context, db *gorm.DB, sc store.Scope, m Mapping, groups []string) (Subject, error) {
-	names := m.RoleNamesFor(groups)
-	if len(names) == 0 {
-		return Subject{AccountID: sc.AccountID()}, nil
-	}
-	roles, err := store.RolesByName(ctx, db, sc, names...)
+// The roles are returned alongside the subject rather than being looked up again
+// by whoever wants them: the audit trail records the role NAMES the actor held at
+// the time, and a second query for them could disagree with the one the request
+// was authorized against.
+//
+// No membership is not an error. It is the ordinary answer for a person who is
+// not in this account, and it yields a subject holding nothing — which every
+// check then refuses. The caller decides whether that is a 403 or a 404; the
+// evaluator has no opinion.
+func SubjectForUser(ctx context.Context, db *gorm.DB, sc store.Scope, userID model.ID) (Subject, []model.Role, error) {
+	ms, err := store.MembershipsFor(ctx, db, sc.AccountID(), userID)
 	if err != nil {
-		return Subject{}, err
+		return Subject{}, nil, err
 	}
-	return SubjectFromRoles(sc.AccountID(), roles), nil
+	var roleIDs []model.ID
+	for _, m := range ms {
+		roleIDs = append(roleIDs, m.RoleIDs()...)
+	}
+	if len(roleIDs) == 0 {
+		return Subject{AccountID: sc.AccountID()}, nil, nil
+	}
+	roles, err := store.RolesFor(ctx, db, sc, roleIDs...)
+	if err != nil {
+		return Subject{}, nil, err
+	}
+	return SubjectFromRoles(sc.AccountID(), roles), roles, nil
 }
 
-// ReportUnresolvedRoles logs the configured role names that match no role row.
+// RoleNames renders a subject's roles for the audit trail, in a stable order.
 //
-// Not an error: an operator may configure a group before creating the role, and
-// refusing to start would turn that ordering into a lockout. It is logged at
-// warn because the symptom otherwise is one person unable to do anything, with
-// nothing anywhere saying why.
-func ReportUnresolvedRoles(ctx context.Context, db *gorm.DB, sc store.Scope, m Mapping, log *slog.Logger) {
-	if log == nil {
-		log = slog.Default()
+// Names as written, not references: a role is a row, rows are edited and
+// deleted, and an entry pointing at one would become unreadable exactly when it
+// mattered — after somebody removed the role whose authority is being questioned
+// (task 8.3).
+func RoleNames(roles []model.Role) []string {
+	out := make([]string, 0, len(roles))
+	for _, r := range roles {
+		out = append(out, r.Name)
 	}
-	existing, err := store.RoleNames(ctx, db, sc)
-	if err != nil {
-		log.WarnContext(ctx, "role names not read; the group mapping was not checked", slog.Any("error", err))
-		return
-	}
-	for _, r := range m.Unresolved(existing) {
-		log.WarnContext(ctx, "configured group maps to a role that does not exist",
-			slog.String("role", string(r)), slog.String("group", m[r]),
-			slog.String("consequence", "nobody in that group holds any permission"))
-	}
+	slices.Sort(out)
+	return out
 }
 
 // CLISubject is the authority `internal/adminctl` acts with.
@@ -190,7 +195,9 @@ func ReportUnresolvedRoles(ctx context.Context, db *gorm.DB, sc store.Scope, m M
 //
 // What the CLI does NOT get is a way past tenancy: it is anchored to one
 // account, like every other subject, and the Scope it was built from decides
-// which.
+// which. That Scope used to be the deployment's only account; since design C10
+// there is no such thing, and the account is named on the command line
+// (store.ScopeForSlug).
 func CLISubject(accountID model.ID) Subject {
 	return Subject{AccountID: accountID, Unrestricted: true}
 }

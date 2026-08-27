@@ -76,6 +76,27 @@ nav a.active {
   border-bottom-color: #177ddc;
 }
 
+/* The switcher carries the auto margin that pushes this group to the right — it is the first of
+ * them now, and it is always present (design C12), so the bar's right-hand group starts there
+ * whether or not there is a choice to make. */
 .account {
-  margin-left: auto;
+  margin-inline-start: 0.25rem;
+}
+
+/* Warned before zero, not at it (task 6.10): a strip under the bar rather than a toast, because
+ * a toast is gone by the time the person is in a position to act on it. */
+.low-balance {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem var(--ac-page-gutter);
+  background: rgb(250 173 20 / 12%);
+  border-bottom: 1px solid rgb(250 173 20 / 35%);
+  color: var(--ac-warn);
+  font-size: 0.875rem;
+}
+
+.low-balance a {
+  color: inherit;
+  text-decoration: underline;
 }

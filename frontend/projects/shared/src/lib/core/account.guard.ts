@@ -9,8 +9,10 @@ import { SessionService } from './session.service';
  * an empty result, so without this guard every screen would render its own version of the same
  * error. One redirect, to the one screen that can resolve it.
  *
- * A single-account deployment selects at sign-in and never reaches here, which is what keeps the
- * internal edition's behaviour unchanged.
+ * This is the most travelled path in the console, not the least. Sign-in used to select the one
+ * account there was, so the state was unreachable; nothing selects an account now (design C10),
+ * so every session arrives here once and the picker it leads to always has at least the user's
+ * personal account in it (C1).
  */
 export const accountGuard: CanActivateFn = () => {
   const session = inject(SessionService);

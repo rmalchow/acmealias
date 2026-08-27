@@ -171,17 +171,35 @@ func (s *Service) createSession(ctx context.Context, id *Identity) (*model.Sessi
 		LastSeenAt:  now,
 		ExpiresAt:   now.Add(s.cfg.SessionMaxLifetime),
 	}
-	// A single-account deployment selects it at sign-in (design P19), so the
-	// internal edition never enters the "no account selected" state and renders
-	// neither a switcher nor a selection screen. Constraint 1: no observable
-	// change.
+	// A new session selects nothing, and that is the front door rather than an
+	// edge case (design P19, task 2.2).
 	//
-	// A deployment with several accounts leaves the selection empty, and the
-	// console shows the picker. Failing to resolve one is not fatal — the person
-	// is signed in either way, and lands on the picker rather than on an error.
-	if sc, err := store.ScopeForBootstrap(ctx, s.db); err == nil {
-		id := sc.AccountID()
-		sess.SelectedAccountID = &id
+	// It used to select the deployment's only account here, which is why the
+	// "no account selected" state has never actually been reached in practice —
+	// the least-exercised path in the console is now the most-travelled one.
+	// What makes that acceptable is that the picker it leads to is never empty:
+	// every user has a personal account (design C1), so "no account selected"
+	// means "you have not yet said which" and never "you have nothing".
+	//
+	// Which is materialized right here, and this is the only place it happens
+	// (task 3.1). There is no create-personal-account route and no form: a user
+	// has one because they are a user, and sign-in is the one moment "this
+	// person exists" becomes true from the service's point of view. Doing it
+	// before the session row is written means the picker the session lands on
+	// cannot be empty even for the very first request of the very first
+	// sign-in — the alternative, materializing lazily when /accounts is asked,
+	// puts the creation on a GET and leaves a window where it has not happened.
+	//
+	// It is idempotent, so this is a read for everyone but the first-time
+	// caller. It is NOT fatal-free: a sign-in that could not give somebody
+	// anywhere to work is a sign-in into an empty console, and failing loudly
+	// here is better than a session that appears to work and shows nothing.
+	user, err := store.FindOrCreateUser(ctx, s.db, sess.Subject, sess.DisplayName, "")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := store.EnsurePersonalAccount(ctx, s.db, user); err != nil {
+		return nil, err
 	}
 	if err := store.CreateSession(ctx, s.db, sess); err != nil {
 		return nil, err

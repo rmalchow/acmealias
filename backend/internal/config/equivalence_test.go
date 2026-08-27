@@ -31,6 +31,14 @@ import (
 // legacyLoad is the pre-change loader, verbatim, parameterised on its
 // environment. Do not "fix" anything in it — its bugs, if it has any, are the
 // behaviour this change promised not to alter.
+//
+// One edit has been made since it was frozen, and it is not a fix. The four
+// ACME_*_GROUP settings were REMOVED from Config by design C10, so the four
+// lines that read them no longer compile. A setting that does not exist cannot
+// be loaded equivalently, and leaving them here would mean keeping the field on
+// Config purely so a frozen copy could assign to it. Their fixture values are
+// removed from the two environments below for the same reason; nothing else
+// about them changed.
 func legacyLoad(lookup LookupFunc) (Config, error) {
 	var errs loadErrors
 
@@ -136,11 +144,6 @@ func legacyLoad(lookup LookupFunc) (Config, error) {
 		StaffOIDCClientSecret: str("ACME_STAFF_OIDC_CLIENT_SECRET", ""),
 		StaffOIDCRedirectURL:  str("ACME_STAFF_OIDC_REDIRECT_URL", ""),
 
-		AdminGroup:       str("ACME_ADMIN_GROUP", ""),
-		ConfigAdminGroup: str("ACME_CONFIG_ADMIN_GROUP", ""),
-		KeyRotationGroup: str("ACME_KEY_ROTATION_GROUP", ""),
-		ReadOnlyGroup:    str("ACME_READ_ONLY_GROUP", ""),
-
 		SessionIdleTimeout: dur("ACME_SESSION_IDLE_TIMEOUT", time.Hour),
 		SessionMaxLifetime: dur("ACME_SESSION_MAX_LIFETIME", 8*time.Hour),
 
@@ -176,11 +179,32 @@ func envFromMap(env map[string]string) ([]string, LookupFunc) {
 // diffConfig lists the fields on which two Configs disagree. reflect.DeepEqual
 // answers "not equal" and a %+v dump of forty fields is not much better; what
 // a failure here has to say is WHICH setting moved.
+// settingsTheLegacyLoaderNeverHad are Config fields added AFTER the frozen copy
+// above, which therefore cannot produce a value for them and cannot be expected
+// to.
+//
+// This is the mirror image of the note on legacyLoad about the four removed
+// ACME_*_GROUP settings, and it is deliberately a short, named list rather than
+// a general "ignore new fields" rule: the promise this test makes is that the
+// settings that existed before the layered loader still load identically, and a
+// rule that quietly excused every new field would let a REGRESSION in an old
+// one hide behind a rename.
+//
+// projects_per_personal_account was in the file schema already, loaded and
+// discarded (design C13). Task 3.5a carries it onto Config with a default of
+// five, so the legacy loader — which knows nothing about it — reads zero.
+var settingsTheLegacyLoaderNeverHad = map[string]string{
+	"ProjectsPerPersonalAccount": "added by personal-and-team-accounts task 3.5a; the frozen loader predates the field",
+}
+
 func diffConfig(want, got Config) []string {
 	var out []string
 	t := reflect.TypeOf(Config{})
 	w, g := reflect.ValueOf(want), reflect.ValueOf(got)
 	for i := 0; i < t.NumField(); i++ {
+		if _, skip := settingsTheLegacyLoaderNeverHad[t.Field(i).Name]; skip {
+			continue
+		}
 		a, b := w.Field(i).Interface(), g.Field(i).Interface()
 		if !reflect.DeepEqual(a, b) {
 			out = append(out, fmt.Sprintf("%s: was %#v, now %#v", t.Field(i).Name, a, b))
@@ -218,15 +242,11 @@ func developmentEnv() map[string]string {
 		"ACME_STAFF_OIDC_CLIENT_ID":     "acmeservice-admin",
 		"ACME_STAFF_OIDC_CLIENT_SECRET": "dev-admin-secret",
 		"ACME_STAFF_OIDC_REDIRECT_URL":  "http://admin.localhost/api/admin/auth/callback",
-		"ACME_ADMIN_GROUP":              "acme-admin",
-		"ACME_CONFIG_ADMIN_GROUP":       "acme-config-admin",
-		"ACME_KEY_ROTATION_GROUP":       "acme-key-rotation",
-		"ACME_READ_ONLY_GROUP":          "acme-read-only",
 		"ACME_LOG_LEVEL":                "debug",
 	}
 }
 
-// everyVariableEnv sets all forty bindings to a value distinguishable from
+// everyVariableEnv sets every binding to a value distinguishable from
 // both the default and every other setting's value, so a variable landing on
 // the wrong path shows up as a mismatch rather than as two settings that
 // happened to agree.
@@ -256,10 +276,6 @@ func everyVariableEnv() map[string]string {
 		"ACME_OIDC_REDIRECT_URL":        "https://console.example.com/api/v1/auth/callback",
 		"ACME_OIDC_GROUPS_CLAIM":        "roles",
 		"ACME_OIDC_GROUP_PREFIX":        "/acme/",
-		"ACME_ADMIN_GROUP":              "grp-admin",
-		"ACME_CONFIG_ADMIN_GROUP":       "grp-config-admin",
-		"ACME_KEY_ROTATION_GROUP":       "grp-key-rotation",
-		"ACME_READ_ONLY_GROUP":          "grp-read-only",
 		"ACME_SESSION_IDLE_TIMEOUT":     "97m",
 		"ACME_SESSION_MAX_LIFETIME":     "98h",
 		"ACME_STAFF_HOST":               "admin.example.com",
@@ -400,7 +416,8 @@ func errorLines(err error) []string {
 // with it by producing nothing on both sides.
 //
 // So this reads development/.env itself, and requires every ACME_* name in it
-// to be a binding that resolves to a path the schema has.
+// to be a binding that resolves to a path the schema has — except the few that
+// are deliberately not service settings at all.
 func TestDevelopmentEnvVariablesAreStillRead(t *testing.T) {
 	names := acmeNamesIn(t, "../../../development/.env")
 	if len(names) == 0 {
@@ -414,6 +431,9 @@ func TestDevelopmentEnvVariablesAreStillRead(t *testing.T) {
 	sc, aliases := envSchema(), envAliases()
 
 	for _, name := range names {
+		if notASetting[name] {
+			continue
+		}
 		path, ok := bound[name]
 		if !ok {
 			t.Errorf("%s is set in development/.env and is in no binding", name)
@@ -423,6 +443,21 @@ func TestDevelopmentEnvVariablesAreStillRead(t *testing.T) {
 			t.Errorf("%s reaches %q, want %q", name, got, path)
 		}
 	}
+}
+
+// notASetting is the short list of ACME_* names in development/.env that this
+// process deliberately never reads, with the reason each one is there.
+//
+// It is a list rather than a prefix rule on purpose: the failure this test
+// exists to catch is a setting that quietly reaches nothing, and a rule that
+// exempted a whole shape of name would eventually exempt a real one.
+var notASetting = map[string]bool{
+	// Read by cmd/acmeservice's adminctl dispatch, not by config.Load: it names
+	// the account the CLI acts in (design C10), which is a per-invocation target
+	// rather than a property of the running service. Putting it in the schema
+	// would also put it on the effective-configuration screen, where it would
+	// describe nothing about the process serving that screen.
+	"ACME_ADMINCTL_ACCOUNT": true,
 }
 
 // acmeNamesIn returns the ACME_* variable names assigned in a .env file. It is

@@ -34,7 +34,7 @@ But six ordinary jobs require exactly that:
 | **Enforcement** — abuse, suspension | Suspend an account, disable a key, remove a domain | Writes into a tenant *against* the tenant's wishes |
 | **Billing operations** | Grant credits, adjust balances, resolve disputes | Concerns the account, not anything inside it |
 | **Lifecycle** | Create an account for a sales-led customer, erase one on request | Acts on the account itself |
-| **Platform** | The satellite fleet, the served zone, the alias label namespace | Not tenant data at all — it has no owning account |
+| **Platform** | The served zone and the alias label namespace | Not tenant data at all — it has no owning account |
 | **Recovery** | Reassign account ownership | Deliberately breaks an invariant the tenant plane enforces |
 
 The last row is the sharpest illustration. `tenancy-and-permissions` requires the unrestricted role
@@ -48,9 +48,9 @@ tenant plane enforces*. That is not a flaw in either design. It is why the const
 
 ### Why now
 
-`satellite-sync`, `dns-records`, `health-checks` and `metering-and-credits` each introduce objects
-with no owning account — satellites, the served zone, the price book — and each introduces an
-operational job that is nobody's tenant permission: enrol a satellite, suspend an account, grant a
+`health-checks` and `metering-and-credits` each introduce objects
+with no owning account — the served zone, the price book — and each introduces an
+operational job that is nobody's tenant permission: suspend an account, grant a
 credit. Without this plane those land as ad-hoc environment variables and CLI subcommands, which is
 how "possession of the connection string" became the authorization model the first time.
 
@@ -88,7 +88,7 @@ account.suspend              suspend or restore an account
 account.credit.grant         adjust an account's credit balance
 account.ownership.reassign   the recovery escape hatch
 account.lifecycle            create, erase, export an account
-platform.admin               satellites, the served zone, the price book
+platform.admin               the served zone, the price book
 staff.audit.read             read the staff activity trail
 ```
 
@@ -186,11 +186,24 @@ in that tenant's trail too, attributed the same way as any other staff action.
 
 ### The button that stops an account, and why it is not a support session
 
-Selling DNS to strangers means that sooner or later — realistically within weeks of opening — someone
-registers an account, points a zone at a phishing page, and the abuse report arrives naming *our*
-nameservers. That message is answered by one person, who may be asleep, and what they need is a single
-action that stops the account. Not an investigation, not a session inside the customer's console: a
-stop.
+> **The abuse case this was written for no longer exists, and the button survives it.** The original
+> argument was that selling DNS to strangers means somebody eventually points a zone at a phishing
+> page and the report arrives naming our nameservers. The service does not host zones: a customer can
+> only add a domain they already control, because the delegation they must publish is the proof. That
+> scenario is gone with `dns-records`.
+>
+> What replaced it is three cheap controls that compose — five projects on a personal account,
+> per-domain billing on a team account, and `domain-activation`, which keeps a domain offline until
+> its delegation has been seen. Together they make the *volume* abuse manageable without anybody
+> being awake.
+>
+> The button is still needed, for a narrower and slower case: a customer who is doing something we
+> will not be party to, and whom the three controls happily serve because they are paying and their
+> delegations are real. That is a decision somebody makes, not an alarm somebody answers.
+
+Sooner or later somebody uses the service for something we will not continue to serve, and what is
+needed is a single action that stops the account. Not an investigation, not a session inside the
+customer's console: a stop.
 
 It would be easy to reach for the mechanism this change already builds — time-boxed access into an
 account — and shut things off from inside. That is the wrong shape. It means impersonating a tenant in
@@ -199,19 +212,28 @@ urgent operation in the system depend on the most carefully constrained one. So 
 own permission and its own route**, taking an account and a reason, opening no session and reading
 nothing inside the account.
 
-**One press reaches everything**, because a stop that leaves a way to continue is not a stop. It marks
-the account suspended, which the satellite fleet applies as a single event that overrides every zone,
-recordset, check and key without rewriting any of them; it blocks the identities behind that account
-so the same people cannot register again in the next minute; and it adds the offending zone names to a
-list so those names cannot be re-added elsewhere. Because it overrides rather than rewrites, lifting
-it puts everything back exactly as it was — including the one zone the customer had disabled
-themselves, which a cascade would have quietly re-enabled.
+**One press reaches everything**, because a stop that leaves a way to continue is not a stop — and it
+is now much cheaper to build than when this was written, because the mechanism already exists.
+`personal-and-team-accounts` C4 puts a usability check on the challenge path immediately after the
+alias is resolved and before anything is published, and C6 reserves staff suspension as state separate
+from the credit balance, which paying cannot lift. So suspension marks one flag and the existing
+chokepoint does the rest: every publish for every domain of that account is refused at the same
+place, in the same way, with no fleet to co-ordinate.
+
+The refusal must be its own answer. The challenge path already distinguishes an unfunded account
+(`402`, paying fixes it) from a domain that was never activated (`409`, publish the delegation); a
+staff suspension is `403`, because nothing the customer can do fixes it and a `402` would invite an
+abuser to buy their way back in.
+
+It also blocks the identities behind that account, so the same people cannot register again in the
+next minute. Because it overrides rather than rewrites, lifting it puts everything back exactly as it
+was.
 
 **Blocking the people is deliberate, and it has a victim worth naming.** Belonging to two accounts is
 ordinary: invitations exist precisely to create that. So the person you are blocking may also be an
 operator at a legitimate, paying customer — and if they happen to be that customer's only owner, that
 account now has nobody who can sign in, add a member, or buy credits, while it keeps accruing charges.
-A paying customer, taken offline by someone else's phishing, silently.
+A paying customer, taken offline by somebody else's misuse, silently.
 
 The answer is not to soften the block, because an abuser with a foothold in a legitimate account would
 keep it. The answer is that **the button tells you what else it is about to break** before you press
@@ -280,7 +302,7 @@ instead of a surprise.
 **An instance level above the account, staff grants anchored there.** Add a root to the containment
 hierarchy so `[account, *, support.read]` anchored at the instance inherits into every account. One
 evaluator, one audit vocabulary, and it would give the genuinely unowned state — the served zone, the
-alias label namespace, the satellite fleet, the price book — somewhere to live. Rejected because it
+alias label namespace, the price book — somewhere to live. Rejected because it
 makes cross-tenant reach a *writable value*: one grant row, one wildcard, one bug in the inheritance
 walk away. `tenancy-and-permissions` argues that over-permission inside a tenant is a mistake while
 cross-tenant is a breach, and that the two should not be reachable through the same mechanism. An
