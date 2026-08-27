@@ -43,6 +43,58 @@ hostname naming the wrong product is a trap for the next reader, and over `authe
 because the production design already uses `auth.acmealias.de` and the development name should
 rhyme with it.
 
+## K1a. Rejected: Pocket ID, evaluated properly and turned down on one property
+
+Both Keycloak and authentik feel sluggish — authentik's login page noticeably so at times — and that
+is a real cost paid on every development reset and by every customer at every sign-in. Pocket ID was
+evaluated as the lighter alternative. It was stood up and taken apart rather than read about, and it
+is recorded here in some detail because the attractive half is genuinely attractive and somebody will
+propose it again.
+
+**What it got right, measured rather than assumed:**
+
+- **One container.** A Go binary over SQLite, healthy twelve seconds after `docker run`. authentik is
+  four services and a much longer boot. Against the reset cost that made `tenancy-and-permissions`
+  task 11.4 unprovable, that is not a small difference.
+- **The role model needs no change.** Its discovery document lists `groups` in `claims_supported`,
+  so group-derived roles work exactly as they do today.
+- **Self-registration exists** — disabled, signup-token, or open registration.
+- **The acceptance suite would NOT have needed a WebAuthn implementation**, which was the first
+  objection raised against it and turned out to be wrong. `POST /api/users/:id/one-time-access-token`
+  mints a token as an administrator and `POST /api/one-time-access-token/:token` exchanges it for a
+  session — roughly twenty lines of Go and no cryptography. Pocket ID's own end-to-end tests drive
+  Chrome DevTools virtual authenticators only because they already run Playwright.
+
+**What decided it: there is no password authentication, and it is not a setting.**
+
+Two independent pieces of evidence, both from the running instance rather than from documentation:
+the `users` table has columns for `username`, `email`, names, `is_admin`, `ldap_id`, `locale`,
+`disabled` and `email_verified` and **no password column at all**, so there is nowhere for one to be
+stored; and the only login routes the server registers are `/api/webauthn/login/start` and
+`/api/webauthn/login/finish`.
+
+The real model is therefore passkey as primary with an emailed one-time link as the fallback. That is
+a coherent modern design, and it is even *closer* to something `public-edition` already wanted —
+U12's reasoning for delegating authentication includes "the breach consequences of holding password
+hashes for strangers", and Pocket ID goes further by holding none. It is nonetheless a requirement
+placed on every customer at the moment they are least willing to accept friction, and this service
+sells to people who arrived wanting a certificate, not wanting to enrol an authenticator.
+
+**Two further consequences, either of which would have needed answering anyway:**
+
+- **`public-edition` U12 would have to be redesigned.** Its staff-and-customer separation rests on
+  authentik's `internal`/`external` user types and on brands separating hostnames. Pocket ID has
+  neither: one instance, one look, no user-type distinction.
+- **Branding is a logo, a colour and a name**, not control of the pages.
+
+**What is kept from the exercise.** The sluggishness complaint was legitimate and is not answered by
+rejecting the alternative. Most of what is felt in development is start-up rather than steady-state,
+which `dev.sh up` already avoids paying per run, and task 2.6 exists to say so out loud if the
+authentik stack makes a reset materially slower. If login latency remains annoying in production once
+authentik is actually deployed, that is a reason to revisit this section — with the note that the
+technical objection recorded against Pocket ID's test story was investigated and disproved, so a
+future evaluation starts from a shorter list.
+
 ## K2. The configuration is a blueprint, not a clicked UI and not a database dump
 
 Keycloak's configuration lives in `development/realm/acmeservice-realm.json` and is imported by

@@ -45,6 +45,8 @@
 - [ ] 5.2 Place enrolled users in **no group**, and add an acceptance test asserting that a self-registered user authenticates successfully at the identity provider and is then refused by our service — the P18 property, demonstrated rather than assumed
 - [ ] 5.3 Review the wording of the no-mapped-group refusal. It was previously seen only by a misconfigured colleague and is now what every self-registered person sees; "you are in none of the configured groups" is the wrong sentence for someone who just signed up
 - [ ] 5.4 Add a brand bound to the console hostname carrying the title and logo, written so that a second brand for a staff hostname is an addition rather than a restructuring (design K7)
+- [ ] 5.5 Point authentik's outbound mail at the stack's mail sink — `mailpit:1025`, no credentials, no TLS — so verification and recovery messages are captured rather than delivered. The SMTP host is the compose service name, NOT `mail.localhost`: that hostname is the web interface and is served through the HTTP overlay, which SMTP does not pass through
+- [ ] 5.6 Walk the enrolment flow once by hand and read the resulting message at `http://mail.localhost`, so the fallback path is known to work before it is the only way a stranger recovers an account
 
 ## 6. Documentation — blocked on 11.4
 
