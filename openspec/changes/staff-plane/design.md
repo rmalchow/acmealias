@@ -369,8 +369,8 @@ first is a fact about our business and the second is a map of our customers'.
 
 The account list has a single filter box. Its contents are split on whitespace,
 and **every part must be a substring of at least one of** the account's owner
-email, its slug, or its id. Parts are ANDed; which field each part matched is not
-required to be the same one.
+email, its slug, its name, or its id. Parts are ANDed; which field each part
+matched is not required to be the same one.
 
 ```
   "acme ruben"   →  keeps accounts where "acme"  is in the email, slug or id
@@ -399,12 +399,17 @@ accounts and stops being correct at some size, at which point the answer is a
 trigram index rather than a different interface. Worth knowing before somebody
 concludes the design was wrong.
 
-**Which fields, and one that is deliberately missing.** Owner email, slug and id.
-Account *name* is not among them, and that is worth a second look: a company name
-is often exactly what a customer says on the phone. It is left out because a slug
-is chosen by the customer and a name is free text — but if support finds itself
-asking "what is your slug?", the name belongs in the list, and adding it is one
-more `OR` rather than a redesign.
+**Which fields, and why the name is one of them.** Owner email, slug, name and
+id.
+
+The name earns its place on the telephone. A customer says "we're Acme GmbH";
+they do not say their slug, and asking somebody for one is asking them to know
+how we store their account. Support should be able to type what they were told.
+
+It is the weakest of the four and that is fine: a name is free text, is not
+unique, and two customers may share one. The filter does not promise a single
+result — it promises a shorter list — and the other three fields are there to
+disambiguate when the name alone does not.
 
 Note what this means for a personal account: it has no slug (C1), so it is found
 by its owner's email or its id, which is the same conclusion S18 reaches from the
