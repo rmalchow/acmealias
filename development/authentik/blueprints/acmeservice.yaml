@@ -228,6 +228,19 @@ entries:
       client_secret: dev-console-secret
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
+      # WITHOUT THIS THE ID TOKEN IS SIGNED HS256 AND SIGN-IN FAILS WITH A 500.
+      #
+      # An authentik OAuth2 provider with no signing key falls back to signing the
+      # identity token symmetrically with the client secret. go-oidc, which this
+      # service verifies with, accepts RS256 only — so the callback fails with
+      # `malformed jwt: unexpected signature algorithm "HS256"`, which arrives as
+      # a 500 AFTER a completely successful login and reads like our bug.
+      #
+      # Asymmetric is also the right answer independently: an HS256 token is
+      # verifiable by anyone holding the client secret, so every party that can
+      # READ a token could also mint one.
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       redirect_uris:
         - url: http://console.localhost/api/v1/auth/callback
           matching_mode: strict
@@ -270,6 +283,19 @@ entries:
       client_secret: dev-admin-secret
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
+      # WITHOUT THIS THE ID TOKEN IS SIGNED HS256 AND SIGN-IN FAILS WITH A 500.
+      #
+      # An authentik OAuth2 provider with no signing key falls back to signing the
+      # identity token symmetrically with the client secret. go-oidc, which this
+      # service verifies with, accepts RS256 only — so the callback fails with
+      # `malformed jwt: unexpected signature algorithm "HS256"`, which arrives as
+      # a 500 AFTER a completely successful login and reads like our bug.
+      #
+      # Asymmetric is also the right answer independently: an HS256 token is
+      # verifiable by anyone holding the client secret, so every party that can
+      # READ a token could also mint one.
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       redirect_uris:
         - url: http://admin.localhost/api/admin/auth/callback
           matching_mode: strict
