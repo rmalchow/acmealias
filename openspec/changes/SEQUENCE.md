@@ -29,16 +29,22 @@ the bottom.
 4. **`account-invitations`** — the entry path into a TEAM account. While self-registration is
    closed, an invitation is the only way a person joins one. It now depends on the change above,
    because team accounts do not exist without it.
-5. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+5. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
+   sits immediately before the first customers rather than after them, because the very first thing
+   any customer does is publish one `CNAME`, and this is the only thing that tells them whether they
+   did it right. Without it the failure is silent for weeks and then arrives as an expired
+   certificate. It depends on nothing above it — the check is already built and merely hidden — so
+   its position here is about when it is NEEDED, not what it needs.
+6. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-6. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+7. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-7. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+8. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-8. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
+9. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
 
 `staff-plane` sits outside the numbering. Its suspension button and blocklists are needed **before
 the first customer we do not know personally**, wherever that falls; its support-access machinery
