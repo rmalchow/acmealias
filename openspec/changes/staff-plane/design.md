@@ -365,6 +365,55 @@ accounts is fine — they are ours. A listing of all *domains* is not, and is no
 offered: domains are reachable only by supplying one. The difference is that the
 first is a fact about our business and the second is a map of our customers'.
 
+### S17. One box, because support pastes rather than chooses
+
+An account has three identifiers and is about to have a fourth, and which one is
+usable depends on what kind of account it is:
+
+| Handle | Unique | Speakable on a call | Works for a personal account |
+| --- | --- | --- | --- |
+| id (UUIDv7) | yes | **no** — 36 characters of hex | yes |
+| slug | yes | yes | **no** — C1 makes a personal account not slug-addressable |
+| name | no | yes | derived from the user |
+| owner email | yes — one personal account per user | yes | **yes, and it is the natural key** |
+
+So there is no single answer, and the handle differs by kind: a team account is
+found by its slug, and a personal account has none but its owner's email — which
+is fitting, since a personal account *is* its user.
+
+**The search takes one box, not four labelled fields.** A support engineer has
+something in their clipboard that a customer gave them and does not know, and
+should not have to decide, which of our four categories it belongs to. Four
+inputs makes that their problem; one makes it ours, and ours is trivial because
+the shapes barely overlap:
+
+```
+  contains @        →  owner email
+  36 chars, dashes  →  account id
+  contains a dot    →  domain name
+  otherwise         →  slug, then account name, then project name
+```
+
+**Rejected: four fields.** It reads as more precise and is worse in the only
+moment that matters, which is somebody pasting a string mid-conversation.
+
+### S18. There is deliberately no account number yet, and a constraint for when there is
+
+A short, speakable account reference is the obvious missing thing, and it is not
+added here.
+
+Support already has a better handle than any number we could invent: the address
+the person is writing from, which they cannot mistype and we do not have to teach
+them. Team accounts additionally have slugs. What actually forces a reference is
+**invoicing**, and that arrives with payment in `public-edition` — inventing one
+now means guessing what a document we have not designed needs to carry.
+
+**The constraint to carry forward, whenever it is added: an account reference
+must never become an authentication factor.** Knowing it must grant nothing. This
+is the failure mode where "quote your account number" quietly becomes a password
+spoken over the phone to whoever answered — and it arrives by drift, one helpful
+shortcut at a time, not by anybody deciding it.
+
 ### S14. A search is audited once, in the staff plane, not once per account it touched
 
 S6 records staff reads separately from the tenant audit trail. A cross-account
