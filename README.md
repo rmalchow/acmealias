@@ -4,6 +4,38 @@
 challenge, for domains whose DNS we do not administer — without ever collecting a customer's DNS
 credentials.
 
+## The goal
+
+**To be a piece of software that is ready to deploy as a commercial offering** — sold to and run for
+paying customers who are not us — rather than an internal tool that could in principle be opened up
+later.
+
+That goal is why several things in this repository look heavier than the feature set appears to
+justify, and it is worth naming them, because each one is far cheaper to build now than to retrofit:
+
+- **Every row belongs to an account**, and reads are confined to it in the query itself rather than
+  filtered afterwards. Multi-tenancy is not a mode that gets switched on; it is the shape of the
+  schema.
+- **Permissions are data, not four hard-coded roles.** A customer administers their own roles and
+  grants, and nobody can grant more than they hold themselves.
+- **Account membership is written by us, never inferred from the identity provider.** A compromised
+  directory can create a user; it cannot place that user inside somebody's account.
+- **Everything privileged is recorded** in an audit trail that names the acting account.
+
+The service currently runs in a **single-account "internal" edition**, which is the same code with one
+account in it. The path from here to strangers signing up — invitations, metering and credits, self
+registration, payment, abuse limits — is planned, sequenced and mostly unbuilt. What that path is,
+what order it goes in, and what triggers each step, is
+[`openspec/changes/SEQUENCE.md`](openspec/changes/SEQUENCE.md); read it before starting work on
+anything in it.
+
+Two consequences worth stating plainly, since a reader will otherwise infer the wrong thing from the
+paragraph above. The product is deliberately **narrower** than this repository once planned for: it
+answers ACME DNS-01 challenges and observes the certificates that result, and it does *not* host
+customers' DNS. And "ready to deploy commercially" is a description of the **architecture**, not a
+claim about today's state — there is no payment integration, no self-registration and no customer
+using it yet.
+
 ## The CNAME aliasing model, in five lines
 
 1. Let's Encrypt validates a domain by asking for a TXT record at `_acme-challenge.<domain>`.
