@@ -168,9 +168,64 @@ export interface CheckResult {
   found?: string;
 }
 
+/**
+ * The delegation's five states, on an axis of presence (design D2).
+ *
+ * `not-checked` is the one the checker cannot produce: it means the deployment configured no
+ * resolver, or the answer has not arrived yet. We are the ones who did not look, so it is never
+ * a finding about the customer's DNS (design D4).
+ *
+ * `missing` and `incorrect` stay apart because their fixes have nothing in common — one sends
+ * somebody to add a record, the other to a record they already published and therefore believe
+ * is done.
+ */
+export type DelegationStatus = 'not-checked' | 'missing' | 'incorrect' | 'correct' | 'undetermined';
+
+/**
+ * CAA's four states, on an axis of permission — plus `not-checked` for the same reason as above.
+ *
+ * This is deliberately NOT `DelegationStatus` (design D3). CAA answers "who may issue", not "is
+ * something published", and `not-published` — by far the commonest state — is entirely correct:
+ * an absent CAA record lets anyone issue. Sharing one union with the delegation is how
+ * `not-published` would come to be rendered as "not configured", warning nearly every customer
+ * and burying `blocking`, the one state here that actually stops issuance.
+ */
+export type CAAStatus = 'not-checked' | 'correct' | 'not-published' | 'blocking' | 'undetermined';
+
+/** One record type's answer for one domain. `expected` is that domain's own value, not a sample. */
+export interface RecordCheck<S> {
+  name: string;
+  status: S;
+  expected?: string[];
+  found?: string;
+}
+
+/**
+ * One domain's answer, one field per record type.
+ *
+ * `caa` is absent, rather than carrying some status, when the plan holds no CAA row for this
+ * domain: with no issuer configured there is nothing to authorise and so nothing to say.
+ */
+export interface DomainCheck {
+  domainId: string;
+  name: string;
+  challengeName: string;
+  aliasId: string;
+  delegation: RecordCheck<DelegationStatus>;
+  caa?: RecordCheck<CAAStatus>;
+}
+
+/**
+ * `results` is the whole plan, one row per question asked of DNS — what the manual "Run
+ * verification" control shows. `domains` is the same answers redistributed onto the rows a
+ * customer reads, and the join is done by the server: a wildcard and its apex share one
+ * challenge name and therefore one delegation, which no name match in the console could
+ * reconstruct without reporting one of the two as absent.
+ */
 export interface VerificationResult {
   resolver: string;
   results: CheckResult[];
+  domains: DomainCheck[];
 }
 
 export interface ChallengeEntry {

@@ -10,6 +10,7 @@
 package resolvercheck
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -61,8 +62,15 @@ type AddressCheck struct {
 }
 
 // Checker resolves plan rows against one configured resolver and caches raw
-// answers briefly (cache.go) — configurable per design D5 so a check can run
-// against a public resolver as well as the system default.
+// answers briefly (cache.go) — configurable per design D5 (the DNS plan) so a
+// check can run against a public resolver as well as the system default.
+//
+// One Checker is meant to be kept and shared: the cache is what makes the
+// per-domain check affordable now that it runs whenever a screen opens
+// (domain-setup-feedback D1), and a Checker built per request would carry an
+// empty cache every time. It is safe for concurrent use — the cache is the
+// only mutable state and takes a lock — and the fields must not be written
+// after the first lookup.
 type Checker struct {
 	// Resolver is the "host:port" address queried, e.g. "1.1.1.1:53" or a
 	// test server's ephemeral loopback address.
@@ -85,12 +93,21 @@ func (c *Checker) timeout() time.Duration {
 // exchange sends one question to the configured resolver. A transport error
 // or a resolver-side failure (SERVFAIL and friends) is returned as an error;
 // NXDOMAIN is a normal, successful answer meaning "does not exist".
-func (c *Checker) exchange(name string, qtype uint16) (*dns.Msg, error) {
+//
+// The context is the caller's — for the management API, the HTTP request's. A
+// customer who closes the tab must not leave a blackholing resolver being
+// waited on for the full timeout per question: the check runs on page load
+// now, so the work nobody is waiting for is work that piles up
+// (domain-setup-feedback D1's cost argument only holds if abandoned checks
+// stop).
+func (c *Checker) exchange(ctx context.Context, name string, qtype uint16) (*dns.Msg, error) {
 	client := &dns.Client{Timeout: c.timeout()}
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(name), qtype)
 	m.RecursionDesired = true
-	resp, _, err := client.Exchange(m, c.Resolver)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout())
+	defer cancel()
+	resp, _, err := client.ExchangeContext(ctx, m, c.Resolver)
 	if err != nil {
 		return nil, fmt.Errorf("query %s %s: %w", dns.TypeToString[qtype], name, err)
 	}
@@ -101,19 +118,19 @@ func (c *Checker) exchange(name string, qtype uint16) (*dns.Msg, error) {
 }
 
 // lookup is exchange with the short result cache (cache.go) in front.
-func (c *Checker) lookup(name string, qtype uint16) (*dns.Msg, error) {
+func (c *Checker) lookup(ctx context.Context, name string, qtype uint16) (*dns.Msg, error) {
 	key := cacheKey{resolver: c.Resolver, name: strings.ToLower(dns.Fqdn(name)), qtype: qtype}
 	if e, ok := c.cache.get(key); ok {
 		return e.msg, e.err
 	}
-	msg, err := c.exchange(name, qtype)
+	msg, err := c.exchange(ctx, name, qtype)
 	c.cache.put(key, cacheEntry{msg: msg, err: err})
 	return msg, err
 }
 
 // CheckCNAME verifies one challenge-delegation row.
-func (c *Checker) CheckCNAME(check CNAMECheck) Result {
-	resp, err := c.lookup(check.Name, dns.TypeCNAME)
+func (c *Checker) CheckCNAME(ctx context.Context, check CNAMECheck) Result {
+	resp, err := c.lookup(ctx, check.Name, dns.TypeCNAME)
 	if err != nil {
 		return Result{Status: StatusUndetermined, Found: err.Error()}
 	}
@@ -140,12 +157,12 @@ func (c *Checker) CheckCNAME(check CNAMECheck) Result {
 }
 
 // CheckAddress verifies one A or AAAA row against the load balancer's node addresses.
-func (c *Checker) CheckAddress(check AddressCheck) Result {
+func (c *Checker) CheckAddress(ctx context.Context, check AddressCheck) Result {
 	qtype := dns.TypeA
 	if check.Family == "AAAA" {
 		qtype = dns.TypeAAAA
 	}
-	resp, err := c.lookup(check.Name, qtype)
+	resp, err := c.lookup(ctx, check.Name, qtype)
 	if err != nil {
 		return Result{Status: StatusUndetermined, Found: err.Error()}
 	}

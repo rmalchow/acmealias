@@ -14,6 +14,11 @@ import (
 // a fresh answer.
 const cacheTTL = 20 * time.Second
 
+// sweepAbove is where expiry-on-write starts paying for itself: comfortably
+// more than the questions one plan asks, so a single screen's burst never
+// walks the map.
+const sweepAbove = 256
+
 type cacheKey struct {
 	resolver string
 	name     string
@@ -48,6 +53,20 @@ func (c *cache) put(key cacheKey, e cacheEntry) {
 	defer c.mu.Unlock()
 	if c.entries == nil {
 		c.entries = make(map[cacheKey]cacheEntry)
+	}
+	// A Checker now outlives the request that built it, so nothing else would
+	// ever drop an entry: without this the map grows by one key per distinct
+	// name for the life of the process. Sweeping on write, and only once the
+	// map is big enough for the walk to be worth it, keeps the common path a
+	// single insert. Rejected: a background goroutine — a twenty-second memo
+	// does not deserve a lifecycle to manage.
+	if len(c.entries) >= sweepAbove {
+		now := time.Now()
+		for k, v := range c.entries {
+			if now.Sub(v.at) > cacheTTL {
+				delete(c.entries, k)
+			}
+		}
 	}
 	e.at = time.Now()
 	c.entries[key] = e

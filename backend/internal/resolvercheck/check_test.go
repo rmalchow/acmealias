@@ -1,6 +1,7 @@
 package resolvercheck
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -64,7 +65,7 @@ func TestCheckCNAME(t *testing.T) {
 		{"_acme-challenge.missing.example.com", "target.acmeservice.cloudpowered.services.", StatusMissing, ""},
 	}
 	for _, tc := range tests {
-		got := c.CheckCNAME(CNAMECheck{Name: tc.name, Expected: tc.expected})
+		got := c.CheckCNAME(context.Background(), CNAMECheck{Name: tc.name, Expected: tc.expected})
 		if got.Status != tc.wantStatus {
 			t.Errorf("CheckCNAME(%q) status = %q, want %q", tc.name, got.Status, tc.wantStatus)
 		}
@@ -86,7 +87,7 @@ func TestCheckCNAMEUndetermined(t *testing.T) {
 	_ = pc.Close() // nothing will answer at this address now
 
 	c := &Checker{Resolver: resolver, Timeout: 300 * time.Millisecond}
-	got := c.CheckCNAME(CNAMECheck{Name: "_acme-challenge.example.com", Expected: "target.example.net."})
+	got := c.CheckCNAME(context.Background(), CNAMECheck{Name: "_acme-challenge.example.com", Expected: "target.example.net."})
 	if got.Status != StatusUndetermined {
 		t.Fatalf("status = %q, want %q", got.Status, StatusUndetermined)
 	}
@@ -131,7 +132,7 @@ func TestCheckAddress(t *testing.T) {
 		{"missing.example.com", "A", []net.IP{net.ParseIP("203.0.113.10")}, StatusMissing},
 	}
 	for _, tc := range tests {
-		got := c.CheckAddress(AddressCheck{Name: tc.name, Family: tc.family, Want: tc.want})
+		got := c.CheckAddress(context.Background(), AddressCheck{Name: tc.name, Family: tc.family, Want: tc.want})
 		if got.Status != tc.wantStatus {
 			t.Errorf("CheckAddress(%q,%s) status = %q, want %q (found %q)", tc.name, tc.family, got.Status, tc.wantStatus, got.Found)
 		}
@@ -169,7 +170,7 @@ func TestCheckCAA(t *testing.T) {
 		{"absent.example.com", CAANotPublished},
 	}
 	for _, tc := range tests {
-		got := c.CheckCAA(CAACheck{Domain: tc.domain, Issuers: []string{"letsencrypt.org"}})
+		got := c.CheckCAA(context.Background(), CAACheck{Domain: tc.domain, Issuers: []string{"letsencrypt.org"}})
 		if got.Status != tc.wantStatus {
 			t.Errorf("CheckCAA(%q) status = %q, want %q (found %q)", tc.domain, got.Status, tc.wantStatus, got.Found)
 		}
@@ -177,10 +178,10 @@ func TestCheckCAA(t *testing.T) {
 
 	// The one place this table is backwards on purpose: absent is fine,
 	// present-but-wrong is fatal (design D5).
-	if got := c.CheckCAA(CAACheck{Domain: "absent.example.com", Issuers: []string{"letsencrypt.org"}}); got.Status == CAABlocking {
+	if got := c.CheckCAA(context.Background(), CAACheck{Domain: "absent.example.com", Issuers: []string{"letsencrypt.org"}}); got.Status == CAABlocking {
 		t.Fatal("an absent CAA record must never be reported as blocking")
 	}
-	if got := c.CheckCAA(CAACheck{Domain: "otherauthority.example.com", Issuers: []string{"letsencrypt.org"}}); got.Found == "" {
+	if got := c.CheckCAA(context.Background(), CAACheck{Domain: "otherauthority.example.com", Issuers: []string{"letsencrypt.org"}}); got.Found == "" {
 		t.Fatal("a blocking CAA result must report what was found")
 	}
 }
@@ -194,7 +195,7 @@ func TestCheckCAAUndetermined(t *testing.T) {
 	_ = pc.Close()
 
 	c := &Checker{Resolver: resolver, Timeout: 300 * time.Millisecond}
-	got := c.CheckCAA(CAACheck{Domain: "example.com", Issuers: []string{"letsencrypt.org"}})
+	got := c.CheckCAA(context.Background(), CAACheck{Domain: "example.com", Issuers: []string{"letsencrypt.org"}})
 	if got.Status != CAAUndetermined {
 		t.Fatalf("status = %q, want %q", got.Status, CAAUndetermined)
 	}

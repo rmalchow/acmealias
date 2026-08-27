@@ -192,3 +192,56 @@ func TestChallengeNameSharedByWildcardAndApex(t *testing.T) {
 		t.Fatalf("%q != %q", a, b)
 	}
 }
+
+func TestPlanDomainsShareOneDelegation(t *testing.T) {
+	// The join the per-domain verification depends on: the apex and its
+	// wildcard must name the same delegation, or one of the two rows reports a
+	// record the other one already covers as absent (design D1).
+	project, lb, domains, aliases := fixture(nil)
+	p := buildPlan(project, lb, nil, domains, aliases, PlanOptions{
+		Zone: "acmeservice.example.net.", CAAIssuers: []string{"letsencrypt.org"},
+	})
+
+	if len(p.Domains) != len(domains) {
+		t.Fatalf("DomainPlans = %d, want one per domain (%d)", len(p.Domains), len(domains))
+	}
+	byName := map[string]DomainPlan{}
+	for _, d := range p.Domains {
+		byName[d.Name] = d
+	}
+	apex, wild := byName["example.com"], byName["*.example.com"]
+	if apex.ChallengeName != wild.ChallengeName || apex.Target != wild.Target {
+		t.Errorf("apex %+v and wildcard %+v do not share a delegation", apex, wild)
+	}
+	if apex.Target != "example-com.acmeservice.example.net" {
+		t.Errorf("target = %q", apex.Target)
+	}
+	if shop := byName["shop.example.com"]; shop.ChallengeName == apex.ChallengeName {
+		t.Errorf("an unrelated domain shares the apex delegation: %+v", shop)
+	}
+
+	// Every domain reads the one CAA set at the registrable domain.
+	for _, d := range p.Domains {
+		if d.Registrable != "example.com" {
+			t.Errorf("%s: registrable = %q, want example.com", d.Name, d.Registrable)
+		}
+	}
+}
+
+func TestPlanDomainWithoutAliasStillAppears(t *testing.T) {
+	// A domain whose alias has gone missing keeps its row and asks for
+	// nothing, rather than dropping out of the verification silently.
+	project, lb, domains, _ := fixture(nil)
+	p := buildPlan(project, lb, nil, domains, nil, PlanOptions{Zone: "z.example.net"})
+	if len(p.Domains) != len(domains) {
+		t.Fatalf("DomainPlans = %d, want %d", len(p.Domains), len(domains))
+	}
+	for _, d := range p.Domains {
+		if d.Target != "" {
+			t.Errorf("%s: target = %q, want empty with no alias", d.Name, d.Target)
+		}
+	}
+	if got := count(p, "CNAME"); got != 0 {
+		t.Errorf("CNAMEs = %d, want none without aliases", got)
+	}
+}

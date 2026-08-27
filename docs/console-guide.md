@@ -12,6 +12,7 @@ for, and the handful of recipes that cover almost everything you will actually d
 - [Projects and load balancers](#projects-and-load-balancers)
 - [Domains](#domains)
 - [Wildcards](#wildcards)
+- [What each domain's row says](#what-each-domains-row-says)
 - [The DNS plan and verification](#the-dns-plan-and-verification)
 - [API keys](#api-keys)
 - [Recent interactions](#recent-interactions)
@@ -183,6 +184,42 @@ Two limits to mention when proposing this to a customer, because both routinely 
 On the Traefik side a wildcard must be requested explicitly with `tls.domains`; a routing
 rule alone will not produce one. See [per-load-balancer setup](load-balancer-setup.md#wildcards).
 
+## What each domain's row says
+
+Every domain in the table checks itself when you open the load balancer, with no button to
+press. Nothing is stored: the row is what a resolver answered a moment ago, and reopening the
+screen asks again.
+
+Each record type gets its own chip, because they answer different questions.
+
+**Delegation** — is the one `CNAME` the customer publishes actually there?
+
+| Chip | What is true | Who fixes it |
+| --- | --- | --- |
+| **configured correctly** | It resolves to this domain's alias. | Nobody. |
+| **not configured** | Nothing resolves at the challenge name. | The customer publishes the record. |
+| **configured incorrectly** | Something resolves, but not the alias we need. | The customer changes a record they already have — and the commonest cause is a domain deleted and added again, which issues a *new* alias while the old delegation stays published, well-formed, and permanently invalid. |
+| **could not check** | Our lookup failed. | Us, or the resolver. Nothing for the customer to change. |
+| **not checked** | We have not looked — no verification resolver is configured, or the answer has not arrived. | Nobody; it is not a statement about their DNS. |
+
+"not configured" and "configured incorrectly" are deliberately never merged. One sends somebody
+to add a record; the other sends them to a record they published and therefore believe is done.
+
+**CAA** — who may issue for this name. This is *not* the same vocabulary, and the difference
+matters: a CAA record is optional, and its absence means anyone may issue.
+
+| Chip | What is true | Who fixes it |
+| --- | --- | --- |
+| **authorises us** | A CAA set exists and names our issuer. | Nobody. |
+| **no restriction** | No CAA record is published. This is the commonest state and is entirely correct — not something to add. | Nobody. |
+| **blocks us** | A CAA set exists and does not name our issuer. Issuance is refused however perfect the delegation is. | The customer adds our issuer to their CAA set. |
+| **could not check** | The lookup failed. | Us, or the resolver. |
+
+**What does this mean?** beside the chips opens the fix, with *that domain's* own challenge name
+and alias in it, ready to paste. For a blocking CAA it offers `issue` and `issuewild` lines —
+`issuewild` governs wildcard issuance instead of `issue` when it is present, and wildcards are
+the case this service exists for.
+
 ## The DNS plan and verification
 
 The **DNS plan** panel on a load balancer page is the answer to "what exactly do I ask the
@@ -212,8 +249,9 @@ failure modes belong in the same table. A node recorded with an IPv6 address get
 `AAAA` row alongside its `A` row, automatically; a node with IPv4 only gets
 just the `A` row.
 
-**Verify** resolves every row live and reports what it found. Results are never stored:
-DNS is somebody else's mutable state, and a green tick from yesterday means nothing.
+**Run verification** resolves every row of the whole plan live and reports what it found —
+addresses included, which the per-domain chips above deliberately leave out. Results are never
+stored: DNS is somebody else's mutable state, and a green tick from yesterday means nothing.
 
 | Status | Meaning | What to do |
 | --- | --- | --- |
@@ -221,6 +259,12 @@ DNS is somebody else's mutable state, and a green tick from yesterday means noth
 | **Missing** | The name does not resolve at all. | The customer has not published it yet, or it has not propagated. Re-check later before escalating. |
 | **Incorrect** | Something is there, but not what we need — shown with what was found. | Usually a typo in the target, or a TXT record created directly instead of a CNAME. Send the observed value back to the customer; it is normally self-explanatory to them. |
 | **Undetermined** | The lookup itself failed or timed out. | Not a customer problem. Retry; if it persists, the service's own resolver is unreachable. |
+| **Not-published** | CAA rows only: no CAA record exists. | Nothing. An absent CAA record lets any authority issue, which is the default state of the internet. |
+| **Blocking** | CAA rows only: a CAA set exists and does not name our issuer. | The customer adds our issuer. This one stops issuance whatever the rest of the table says. |
+
+A deployment with no `ACME_VERIFY_RESOLVER` and no readable system resolver leaves every row
+reading **not checked** rather than raising an error: it has declined the feature, not broken
+itself.
 
 ## API keys
 
@@ -375,7 +419,9 @@ in it.
    are added in the one action. It is off by default; see **Domains** above for what the customer
    is agreeing to publish.
 2. Copy the DNS plan and send it to whoever administers that zone.
-3. Click **Verify** until the CNAME row is green.
+3. Wait for the domain's **Delegation** chip to read *configured correctly* — the row checks
+   itself each time you open the load balancer. *Configured incorrectly* means they published
+   something, at the wrong target; **What does this mean?** shows both values side by side.
 4. Only then point the Traefik router at the `acmesvc` resolver.
 5. Watch **Live challenges** for one full publish-and-withdraw cycle.
 
@@ -402,7 +448,9 @@ in it.
 
 1. **Live challenges** — is anything being published at all?
 2. **Audit log**, filtered to the project — did somebody change something?
-3. The load balancer's **DNS plan → Verify** — did the customer's records change?
+3. The domain's chips, and **DNS plan → Run verification** for the addresses — did the
+   customer's records change? A **blocks us** on CAA stops issuance no matter how right
+   everything else looks.
 4. The key's **last used** — is that load balancer talking to us at all?
 5. Still stuck: [troubleshooting](troubleshooting.md).
 

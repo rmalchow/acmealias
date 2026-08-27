@@ -506,6 +506,10 @@ paths:
       - { $ref: "#/components/parameters/id" }
     get:
       summary: What the plan's records actually resolve to right now
+      description: >
+        Answers per plan record and again per domain. With no verification
+        resolver configured it still answers 200, with every domain reading
+        "not-checked": a deployment that declined the feature is not broken.
       responses:
         "200": { description: OK }
 

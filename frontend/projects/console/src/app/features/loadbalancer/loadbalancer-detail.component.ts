@@ -7,13 +7,14 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAN_WRITE, CheckResult, DNSPlan, Domain, LBNode, LoadBalancer, PageHeaderComponent, Project, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
+import { ApiService, CAAStatus, CAN_WRITE, CheckResult, DNSPlan, DelegationStatus, Domain, LBNode, LoadBalancer, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { InteractionsPanelComponent } from './interactions-panel.component';
 import { openNodeCreateModal } from './node-create.modal';
 import { openNodeEditModal } from './node-edit.modal';
-import { domainStatus as computeDomainStatus } from './domain-status';
+import { openDomainHelpModal } from './domain-help.modal';
+import { StatusChip, caaChip, delegationChip, domainCheckFor } from './domain-status';
 
 /**
  * 19.2 — a load balancer: its nodes, its domain table, the DNS plan panel (records, live
@@ -160,18 +161,22 @@ import { domainStatus as computeDomainStatus } from './domain-status';
               <td class="ac-mono">{{ d.challengeName }}</td>
               <td>{{ d.aliasLabel }}</td>
               <td>
-                @switch (domainStatus(d)) {
-                  @case ('ok') {
-                    <nz-tag nzColor="green">verified</nz-tag>
+                @if (checks(d); as ch) {
+                  <div class="check">
+                    <span class="check-label">Delegation</span>
+                    <nz-tag [nzColor]="ch.delegation.colour" nz-tooltip [nzTooltipTitle]="ch.delegation.tooltip">
+                      {{ ch.delegation.label }}
+                    </nz-tag>
+                  </div>
+                  @if (ch.caa; as caa) {
+                    <div class="check">
+                      <span class="check-label">CAA</span>
+                      <nz-tag [nzColor]="caa.colour" nz-tooltip [nzTooltipTitle]="caa.tooltip">{{ caa.label }}</nz-tag>
+                    </div>
                   }
-                  @case ('problem') {
-                    <nz-tag nzColor="red">not verified</nz-tag>
-                    <div class="ac-hint">see the DNS plan below</div>
-                  }
-                  @default {
-                    <nz-tag nzColor="gold">never validated</nz-tag>
-                    <div class="ac-hint">run verification below to see what is missing</div>
-                  }
+                  <button nz-button nzType="link" nzSize="small" class="explain" (click)="explain(d)">
+                    What does this mean?
+                  </button>
                 }
               </td>
               <td class="row-actions">
@@ -249,7 +254,7 @@ import { domainStatus as computeDomainStatus } from './domain-status';
                     <span class="ac-hint">not checked yet</span>
                   }
                 </td>
-                <td class="ac-mono">{{ statusFor(r.name, r.type)?.found || '—' }}</td>
+                <td class="ac-mono">{{ foundFor(r.name, r.type) }}</td>
               </tr>
             }
           </tbody>
@@ -293,6 +298,23 @@ import { domainStatus as computeDomainStatus } from './domain-status';
         font-size: 1.125rem;
         font-weight: 500;
       }
+      /* A chip per record type, each labelled, because the two answer different questions on
+       * different axes: whether the delegation is published, and what CAA permits (design D3). */
+      .check {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        margin-bottom: 0.25rem;
+      }
+      .check-label {
+        width: 5.5rem;
+        color: var(--ac-muted);
+        font-size: 0.8125rem;
+      }
+      .explain {
+        padding: 0;
+        height: auto;
+      }
       /* Row actions are icons only — the label is in the tooltip and the aria-label, so a table
        * of twenty rows is not twenty repetitions of the word "Delete". */
       .row-actions {
@@ -325,6 +347,15 @@ export class LoadBalancerDetailComponent implements OnChanges {
   readonly verification = signal<VerificationResult | null>(null);
   readonly verifying = signal(false);
   readonly verifyError = signal<string | null>(null);
+  /**
+   * The automatic check's request itself failed — the network, not the resolver.
+   *
+   * It is kept apart from `verifyError` on purpose: `verifyError` is a banner, and a banner is
+   * the right answer to a button somebody pressed and the wrong one to a check that runs whenever
+   * this screen opens. A lookup that fails degrades the rows it concerns and never the page
+   * (design D1), so this only turns the chips into "could not check".
+   */
+  readonly checkFailed = signal(false);
   readonly error = signal<string | null>(null);
 
   /**
@@ -349,8 +380,18 @@ export class LoadBalancerDetailComponent implements OnChanges {
   };
 
   ngOnChanges(): void {
+    // The id is a routed input and this component is reused across ids, so the previous load
+    // balancer's answers have to go before the new one's arrive — a stale chip is a claim about
+    // somebody else's DNS.
+    this.verification.set(null);
+    this.checkFailed.set(false);
     this.load();
     this.loadPlan();
+    // Opening the screen asks the question (design D1). It was a button below the table whose
+    // rows it explained, so a customer who mistyped a CNAME read "never validated" — which
+    // sounds like "nothing has happened yet" and means "this will never work". The check stores
+    // nothing, so running it on load changes when it happens, not what it does.
+    this.verify(false);
   }
 
   load(): void {
@@ -374,17 +415,37 @@ export class LoadBalancerDetailComponent implements OnChanges {
     });
   }
 
-  verify(): void {
-    this.verifying.set(true);
+  /**
+   * One route, two readers: the per-domain chips and the whole-plan table below.
+   *
+   * `manual` is whether somebody pressed the button. It decides only whether a failure is worth a
+   * banner — an answer that was asked for and did not come deserves one, an answer nobody asked
+   * for does not (design D1). A deployment with no resolver is not an error either way: the route
+   * answers "not checked" for every row rather than refusing (design D4).
+   */
+  verify(manual = true): void {
+    // The screen is reused across ids and this request now takes as long as DNS does, so an
+    // answer can arrive after somebody has navigated to another load balancer. Dropping it is the
+    // whole fix: the plan table joins its rows by NAME, so a late answer for the previous load
+    // balancer would annotate this one's rows wherever the two share a name.
+    const asked = this.id();
+    // Only a press spins the button. The automatic pass used to set it too, so every screen open
+    // showed a spinner on a control nobody had touched — which reads as if something were
+    // running on the customer's behalf, and is exactly the manual control task 2.9 keeps honest.
+    if (manual) this.verifying.set(true);
     this.verifyError.set(null);
-    this.api.get<VerificationResult>(`/loadbalancers/${this.id()}/verification`).subscribe({
+    this.api.get<VerificationResult>(`/loadbalancers/${asked}/verification`).subscribe({
       next: (v) => {
-        this.verifying.set(false);
+        if (manual) this.verifying.set(false);
+        if (this.id() !== asked) return;
+        this.checkFailed.set(false);
         this.verification.set(v);
       },
       error: (err) => {
-        this.verifying.set(false);
-        this.verifyError.set(apiErrorMessage(err));
+        if (manual) this.verifying.set(false);
+        if (this.id() !== asked) return;
+        this.checkFailed.set(true);
+        if (manual) this.verifyError.set(apiErrorMessage(err));
       },
     });
   }
@@ -393,13 +454,17 @@ export class LoadBalancerDetailComponent implements OnChanges {
     return this.verification()?.results.find((r) => r.name === name && r.type === type);
   }
 
-  /** The five states the verifier can report, coloured by what they mean for the operator. */
+  /** The states the verifier can report, coloured by what they mean for the operator. */
   statusColour(status: string): string {
     switch (status) {
       case 'correct':
         return 'green';
       case 'missing':
       case 'incorrect':
+      // A CAA set that names somebody else stops issuance however perfect the delegation is, so
+      // it is red here as well as in the chips. It used to fall through to grey, which put the
+      // one blocking state in the same colour as "not checked" (design D3).
+      case 'blocking':
         return 'red';
       case 'not-published':
         return 'blue';
@@ -408,8 +473,78 @@ export class LoadBalancerDetailComponent implements OnChanges {
     }
   }
 
-  domainStatus(d: Domain): 'ok' | 'problem' | 'never' {
-    return computeDomainStatus(d, this.verification()?.results ?? null);
+  /**
+   * What was found for a plan row, and never why a lookup failed.
+   *
+   * `found` on `undetermined` is our resolver's error text — an address and a transport failure,
+   * written for an operator. Rendering it verbatim reads as a verdict on the customer's zone when
+   * it is a verdict on our lookup, and this table is now painted on every screen open rather than
+   * only when somebody pressed the button (design D4).
+   */
+  foundFor(name: string, type: string): string {
+    const s = this.statusFor(name, type);
+    if (!s || s.status === 'undetermined') return '—';
+    return s.found || '—';
+  }
+
+  /**
+   * A chip per record type for one row. CAA is rendered only where the server sent one: with no
+   * issuer configured there is no CAA row in the plan, and so nothing about CAA is true or false
+   * for this domain — saying "not checked" there would claim we meant to look.
+   */
+  checks(d: Domain): { delegation: StatusChip; caa: StatusChip | null } {
+    const a = this.answerFor(d);
+    return {
+      // Whether this domain has an alias at all is known from the row itself, not from the
+      // check: without one there is no target, nothing is ever asked, and the chip would sit at
+      // "not checked" forever unless it says why.
+      delegation: delegationChip(a.delegation.status, !!d.aliasLabel),
+      caa: a.caa ? caaChip(a.caa.status) : null,
+    };
+  }
+
+  /**
+   * This row's answer for both record types, or the state we are in when none arrived.
+   *
+   * Three things are folded together here on purpose:
+   *
+   *   - The expected target comes from the plan when no answer has arrived, which is what lets
+   *     the help modal print the record to publish on a deployment that never configured a
+   *     resolver: which record a domain needs is known without asking DNS anything.
+   *   - A request that FAILED is "could not check" — we looked and could not. One still in
+   *     flight, or a deployment without a resolver, is "not checked": we have not looked, and
+   *     that must never read as a fault in the customer's setup (design D4).
+   *   - A failed re-check degrades an answer we already have rather than leaving it standing.
+   *     The previous answer is kept only for its SHAPE — which record types this domain has, and
+   *     what its target is — because the alternative is the CAA chip vanishing from a row that
+   *     said "blocks us" a second ago. Its statuses are not kept: an answer we could not refresh
+   *     is not an answer, and chips that go on asserting one while the page says the check failed
+   *     are two claims about the same moment.
+   */
+  private answerFor(d: Domain): { delegation: RecordCheck<DelegationStatus>; caa: RecordCheck<CAAStatus> | null } {
+    const answered = domainCheckFor(d.id, this.verification());
+    const failed = this.checkFailed();
+    if (answered) {
+      return {
+        delegation: failed ? { ...answered.delegation, status: 'undetermined' } : answered.delegation,
+        caa: answered.caa ? (failed ? { ...answered.caa, status: 'undetermined' } : answered.caa) : null,
+      };
+    }
+    const planned = this.plan()?.records.find((r) => r.type === 'CNAME' && r.name === d.challengeName);
+    return {
+      delegation: {
+        name: d.challengeName,
+        status: failed ? 'undetermined' : 'not-checked',
+        expected: planned ? [planned.value] : undefined,
+      },
+      caa: null,
+    };
+  }
+
+  /** The prescription behind the chips, carrying this domain's own values (design D5). */
+  explain(d: Domain): void {
+    const a = this.answerFor(d);
+    openDomainHelpModal(this.modal, { domain: d, delegation: a.delegation, caa: a.caa });
   }
 
   copyPlan(p: DNSPlan): void {
@@ -445,6 +580,9 @@ export class LoadBalancerDetailComponent implements OnChanges {
       if (!created) return;
       this.load();
       this.loadPlan();
+      // The answers are per domain now, so a set of domains that changed leaves them describing
+      // a table that no longer exists — and the new row is the one somebody is waiting on.
+      this.verify(false);
     });
   }
 
@@ -477,6 +615,7 @@ export class LoadBalancerDetailComponent implements OnChanges {
       next: () => {
         this.load();
         this.loadPlan();
+        this.verify(false);
       },
       error: (err) => this.error.set(apiErrorMessage(err)),
     });

@@ -38,6 +38,24 @@ type PlanOptions struct {
 	TTL        int
 }
 
+// DomainPlan is one domain's own share of the plan: which record in Records
+// answers for it. Records are deduplicated — one CNAME per challenge name, one
+// CAA set per registrable domain — so a domain cannot be found in them by its
+// own name, and a row that looked itself up that way would report a delegation
+// somebody else's row already covers as absent.
+//
+// Two domains that share an alias carry the identical ChallengeName and
+// Target: `example.com` and `*.example.com` validate at one name and publish
+// one CNAME between them, so both read the state of that one delegation.
+type DomainPlan struct {
+	DomainID      model.ID
+	Name          string   // "shop.example.com", "*.example.com"
+	ChallengeName string   // the CNAME's Name — the join key into Records
+	AliasID       model.ID // shared by a wildcard and its apex
+	Target        string   // what the CNAME must point at, "" when no alias exists yet
+	Registrable   string   // the CAA set governing this domain, "" when the name has none
+}
+
 // DNSPlan is the complete set of records for one load balancer, plus enough context
 // to render a legible header.
 type DNSPlan struct {
@@ -47,9 +65,15 @@ type DNSPlan struct {
 	LoadBalancerName string
 	Nodes            []model.LBNode
 	Records          []Record
+
+	// Domains maps each domain onto the records above. It is not rendered into
+	// the zone snippet — a zone file has no room for who asked for a record —
+	// but it is what lets a verification result be reported per domain instead
+	// of per record (domain-setup-feedback D1).
+	Domains []DomainPlan
 }
 
-// Plan generates the DNS plan for a load balancer (design D5).
+// Plan generates the DNS plan for a load balancer (acme-alias-service D5).
 func Plan(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, loadBalancerID model.ID, opts PlanOptions) (*DNSPlan, error) {
 	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
 	if err != nil {
@@ -116,6 +140,34 @@ func buildPlan(project *model.Project, lb *model.LoadBalancer, nodes []model.LBN
 	seen := make(map[model.ID]bool, len(aliases))
 	for _, d := range domains {
 		a, ok := byID[d.AliasID]
+
+		// Every domain gets a DomainPlan, including one whose alias has gone
+		// missing: the row still exists on the screen and still deserves an
+		// answer, and an empty Target says "we have nothing to ask you for"
+		// rather than dropping the domain out of the verification silently.
+		dp := DomainPlan{
+			DomainID: d.ID, Name: d.Name,
+			ChallengeName: dnsname.ChallengeName(d.Name), AliasID: d.AliasID,
+		}
+		if ok {
+			// Taken from the alias, not recomputed, because ChallengeName is
+			// the key a result is joined back on and the CNAME row below is
+			// emitted under a.ChallengeFQDN. The two agree — an alias is
+			// created from ChallengeName(d.Name) and never re-labelled — but
+			// agreeing by construction beats agreeing by an equality some
+			// other test has to keep defending, and the failure if they ever
+			// diverged would be silent: every row reading "not checked" for a
+			// delegation the plan below shows as correct.
+			dp.ChallengeName = a.ChallengeFQDN
+			dp.Target = a.Label + "." + zone
+		}
+		if r, err := dnsname.RegistrableDomain(d.Name); err == nil {
+			// Recorded even when no CAA row is emitted (no issuer configured):
+			// this says where CAA for the domain lives, not that we checked it.
+			dp.Registrable = r
+		}
+		plan.Domains = append(plan.Domains, dp)
+
 		if !ok || seen[a.ID] {
 			continue
 		}

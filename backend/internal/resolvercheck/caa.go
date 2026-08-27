@@ -1,6 +1,7 @@
 package resolvercheck
 
 import (
+	"context"
 	"strings"
 
 	"github.com/miekg/dns"
@@ -50,8 +51,8 @@ type CAACheck struct {
 // here is expected to already be one (dnsname.RegistrableDomain) — so the
 // only "above" a real plan needs is covered. Add the walk if a scenario ever
 // needs CAA authority inherited from a grandparent zone.
-func (c *Checker) CheckCAA(check CAACheck) CAAResult {
-	resp, err := c.lookup(check.Domain, dns.TypeCAA)
+func (c *Checker) CheckCAA(ctx context.Context, check CAACheck) CAAResult {
+	resp, err := c.lookup(ctx, check.Domain, dns.TypeCAA)
 	if err != nil {
 		return CAAResult{Status: CAAUndetermined, Found: err.Error()}
 	}

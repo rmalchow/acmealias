@@ -15,6 +15,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/resolvercheck"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/zoneview"
 )
@@ -98,6 +99,12 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 		o.Log = slog.Default()
 	}
 	a := &admin{opts: o, resolver: verificationResolver(o.Config, o.Log)}
+	// One Checker for the process, not one per request: its twenty-second memo
+	// of raw answers is what keeps a check that runs on every page open
+	// affordable, and a Checker built inside the handler would start empty
+	// every time and cache nothing anybody ever read (domain-setup-feedback
+	// D1). Safe to share — see resolvercheck.Checker.
+	a.checker = &resolvercheck.Checker{Resolver: a.resolver}
 
 	e.HTTPErrorHandler = a.handleError
 
@@ -278,9 +285,14 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 type admin struct {
 	opts AdminOptions
 	// resolver is the "host:port" live verification queries, resolved once at
-	// registration. Empty means none could be determined and the verification
-	// route says so rather than silently querying nothing.
+	// registration. Empty means none could be determined, and the verification
+	// route then answers "not checked" for every row rather than querying
+	// nothing or refusing: a deployment that never configured one has declined
+	// the feature, not broken itself (domain-setup-feedback D4).
 	resolver string
+	// checker is shared across requests for its cache; see the comment where
+	// it is built.
+	checker *resolvercheck.Checker
 }
 
 func (a *admin) db() *gorm.DB      { return a.opts.DB }

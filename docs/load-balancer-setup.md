@@ -221,9 +221,18 @@ services:
 
 4. **Verify, rather than believe**
 
-   Click **Verify** on the DNS plan panel. Each record comes back as correct, missing,
-   incorrect (with what was found instead), or undetermined. Do not proceed until the CNAME row is
-   green — everything downstream depends on it, and a wrong CNAME is far commoner than a missing one.
+   The domain's row checks itself whenever you open the load balancer, and reports the
+   delegation as *configured correctly*, *not configured*, *configured incorrectly* (with what
+   was found instead), *could not check*, or *not checked*. Do not proceed until it reads
+   configured correctly — everything downstream depends on it, and a wrong CNAME is far commoner
+   than a missing one. **What does this mean?** beside the chip shows the exact record for this
+   domain.
+
+   Watch the CAA chip too: **blocks us** means a CAA record set names some other authority, and
+   issuance is refused however right the delegation is. **no restriction** is the normal state
+   and needs nothing.
+
+   **Run verification** on the DNS plan panel answers the whole plan, addresses included.
 
    The same check from a shell:
 
