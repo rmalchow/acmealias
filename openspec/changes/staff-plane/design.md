@@ -324,6 +324,116 @@ top-level domain is an ordinary business that we will turn away. That is accepte
 option to be selective is worth more here than the marginal customer — and it is written down so the
 first refused signup is a known consequence rather than a surprise.
 
+### S13. Finding is not reading, and the two need different rules
+
+Support begins with a question that names something a customer said — a domain
+that will not renew, a company name on an invoice, an email address on a ticket —
+and ends at an account. Nothing in S3's access grants helps with that step: a
+grant names ONE account, so it presupposes the answer to the question being
+asked.
+
+So there is a second read path, and it is deliberately shaped so that it cannot
+become the first one:
+
+| | Search (this decision) | Access (S3, S4) |
+| --- | --- | --- |
+| Spans | every account | exactly one |
+| Needs a reason | no | **yes**, and an expiry |
+| Returns | identifiers and status | the tenant's own data |
+| Answers | *which account is this?* | *what is in it?* |
+
+**What search may return is the whole of the decision.** It answers with the
+things you must already know to be asking:
+
+- **Projects** — by project name, and by domain name. A domain name is customer
+  data, and looking one up is nonetheless the single most common support entry
+  point: "our certificate for `shop.example.com` stopped renewing". The
+  justification is that the searcher supplies it — this is a LOOKUP, not a
+  listing, and a query that returns nothing tells you nothing you did not have.
+- **Accounts** — by account name and by owner. With, per account: its projects,
+  its owner, and its credit status.
+
+**What search must never return is contents.** Not a load balancer's nodes, not
+an API key, not an audit entry, not a challenge value. The moment it does, it is
+S3's access grant without the reason or the expiry, and the argument for those
+collapses — a support engineer who can read everything by searching has no
+incentive to open a grant, and the audit trail stops describing what anybody
+actually did.
+
+**Enumeration is the risk and it is bounded by the same rule.** A listing of all
+accounts is fine — they are ours. A listing of all *domains* is not, and is not
+offered: domains are reachable only by supplying one. The difference is that the
+first is a fact about our business and the second is a map of our customers'.
+
+### S14. A search is audited once, in the staff plane, not once per account it touched
+
+S6 records staff reads separately from the tenant audit trail. A cross-account
+search sharpens why that separation matters: a query matching forty accounts must
+not write forty tenant audit rows.
+
+It would be wrong twice over. Those tenants' trails would fill with entries about
+a question that was not about them — we looked at your account because somebody
+typed three letters — and the tenant whose account was the actual answer would
+find their own entry indistinguishable from the thirty-nine coincidences.
+
+So a search writes **one** staff-plane read record: who searched, for what, and
+how many results came back. The tenant learns nothing, and correctly: nobody
+looked *into* their account. When somebody does, S3's grant is what records it,
+in their trail, attributed to `Support` with a reason.
+
+### S15. Credit status is shown because it is the commonest explanation
+
+An account's credit status appears in search results and on the account view,
+beside its owner and its projects.
+
+It earns that place: once a team account stops working when it runs out of
+credit (`personal-and-team-accounts` C4), "it has stopped working" and "it has run
+out of credit" are the same incident most of the time. A support surface that
+makes the answer to the most frequent question a second lookup is a support
+surface that wastes the first minute of every ticket.
+
+It also shows what the customer cannot: whether the account is suspended by US
+rather than by its balance (C6). Those two look identical from inside the
+console — the account does not work — and only staff can tell them apart, which
+means only staff can tell the customer which one it is.
+
+### S16. Components go in `shared` by default; only a reason keeps one out
+
+A workspace convention rather than a staff-plane decision, recorded here because
+the staff console is the first thing that will be tempted to break it.
+
+`frontend/projects/shared` is the default home for a component. A component lives
+in `console` or `admin` only when there is a stated reason — it encodes a screen
+that exists in one surface and would be meaningless in the other.
+
+**This does not undo the reason there are two applications.** That reason was
+that a customer's browser never downloads the staff bundle, and it survives
+intact, because the boundary is what each application IMPORTS, not what the
+library CONTAINS. Angular builds each app separately and carries only what is
+reachable from its entry point, so a component in `shared` that only `admin`
+imports never reaches a customer. The library is a shelf, not a bundle.
+
+**Components and providers are opposite cases, and the existing comment in
+`projects/admin/src/app/app.config.ts` should be read as being about the second.**
+It argues that the two applications' provider lists are deliberately separate
+copies rather than a shared factory, and that stays true: a shared `appConfig`
+applies to both whether they want it or not, so it re-couples the dependency
+graphs the split exists to keep apart. A shared *component* is opt-in at each
+import and couples nothing until somebody imports it.
+
+| | Shared? | Why |
+| --- | --- | --- |
+| A table, a chip, a modal shell, a form control | **yes, by default** | opt-in per import; identical behaviour in both surfaces is a feature |
+| Api, session, guards, models | yes, already | they must not diverge |
+| A provider list / `appConfig` | **no** | applies whether wanted or not; re-couples the graphs |
+| A screen only one surface has | no | it would be meaningless in the other, and saying so is the reason |
+
+The practical payoff is the one that matters for support: a staff member reading
+an account and a customer reading the same account should be looking at the same
+table, with the same columns and the same empty state. Two implementations drift,
+and the drift is discovered during an incident when the two people on the call
+are describing different screens.
+
 ### S9. Staff routes are served on the existing management listener
 
 `service-operations` specifies three HTTP surfaces on separate listeners. Staff routes go on the

@@ -68,3 +68,16 @@
 - [ ] 6.9 Restrict blocklist reads to the staff plane and give entries a stated retention
 - [ ] 6.10 Tests: suspend/restore round-trips a customer-disabled zone as disabled; a suspension opens no access grant; a suffix entry catches a subdomain; adding an entry serves an existing matching zone unchanged
 - [ ] 6.11 Document the abuse response commitment of twelve hours alongside the operation; it is published on the public site by `public-edition` tasks 7.6 and U11
+
+## Search and the account view (design S13, S14, S15)
+
+- [ ] Implement cross-account search: projects by project name and by domain name, accounts by account name and by owner. It requires NO access grant — a grant names one account and therefore presupposes the answer to the question being asked (S13)
+- [ ] Return identifiers and status ONLY. Never a load balancer's nodes, a credential, an audit entry or a challenge value. The moment search returns contents it is S3's access grant without the reason or the expiry, and a support engineer who can read everything by searching has no incentive to open one (S13)
+- [ ] A domain is reachable only by SUPPLYING one. Offer no listing of all domains: a list of our accounts is a fact about our business, a list of our customers' domains is a map of theirs (S13)
+- [ ] These are cross-account reads over policied tables, so they go through `store.CrossAccount` and are written to be obvious. RLS empties rather than fails, and a scopeless read here would return nothing and look like "no results" (tenancy-and-permissions 2.12)
+- [ ] The account view shows owner, projects and credit status together (S15)
+- [ ] Credit status distinguishes an exhausted balance from a staff suspension. Those are identical from inside the customer's console, and only staff can tell the customer which one it is (S15, personal-and-team-accounts C6)
+- [ ] A search writes ONE staff-plane read record, never one per matched account. Forty tenants must not each find an entry about a question that was not about them, and the tenant who was the answer must not find theirs indistinguishable from thirty-nine coincidences (S14)
+- [ ] Build these in the staff console at `frontend/projects/admin`, which exists with a single overview screen
+- [ ] Put every component this change adds in `frontend/projects/shared` unless there is a stated reason it belongs to one surface. The staff account view and the customer's own views should be the SAME table — two implementations drift, and the drift is found during an incident when the two people on the call are describing different screens (S16)
+- [ ] Do NOT share the provider lists. `app.config.ts` stays a separate copy per application: a shared one applies to both whether they want it or not and re-couples the dependency graphs the two-application split exists to separate (S16)
