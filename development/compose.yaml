@@ -103,6 +103,30 @@ services:
       timeout: 3s
       retries: 40
 
+  # The marketing site, at http://www.localhost.
+  #
+  # busybox httpd, which is about as small as a web server gets while still being
+  # something you already trust: one static binary, no configuration file, and no
+  # image to keep patched beyond busybox itself. `-f` keeps it in the foreground
+  # so Docker supervises it rather than watching a daemon exit successfully.
+  #
+  # It serves site/dist, which is gitignored build output — so `./site/build.sh`
+  # has to have run. up.sh runs it, and the volume is read-only because nothing
+  # here should ever write back into a build directory.
+  www:
+    image: busybox:1.37
+    restart: unless-stopped
+    dns: ["172.28.0.53"]
+    working_dir: /site
+    command: ["httpd", "-f", "-v", "-p", "8080", "-h", "/site"]
+    volumes:
+      - ../site/dist:/site:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.www.rule: "Host(`www.localhost`)"
+      traefik.http.routers.www.entrypoints: web
+      traefik.http.services.www.loadbalancer.server.port: "8080"
+
   # Where every mail the stack sends ends up, and where none of it leaves from.
   #
   # An identity provider that can enrol people sends mail — a verification link,
@@ -310,6 +334,7 @@ services:
           - acme-api.localhost
           - acme-challenge.localhost
           - keycloak.localhost
+          - www.localhost
           - mail.localhost
     command:
       - "--configFile=/etc/traefik/traefik.yaml"

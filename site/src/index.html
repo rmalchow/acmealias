@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>acmealias — certificates for domains you keep where they are</title>
+    <meta
+      name="description"
+      content="Let's Encrypt certificates over the DNS-01 challenge, without handing anyone your DNS credentials. One CNAME, once."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!--
+      PLACEHOLDER. This is the shape of the marketing site, not its content.
+
+      It exists now for one reason: `public-edition` U7 says the site is static,
+      has its own pipeline and shares only a link into the registration route
+      with the console. A hostname that serves nothing is a hostname nobody has
+      tested the routing, the certificate or the links of, and the first time
+      that matters should not be the first time anybody looks.
+
+      U11 lists what this site is obliged to carry before it faces strangers —
+      the published commitments several other changes refer to. None of that is
+      here yet, and the note at the bottom of the page says so rather than
+      letting an absence read as a decision.
+    -->
+    <header class="bar">
+      <a class="mark" href="/">
+        <span class="dot" aria-hidden="true"></span>
+        acmealias
+      </a>
+      <nav>
+        <a href="http://console.localhost">Sign in</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">DNS-01, without the credentials</p>
+        <h1>Certificates for domains whose DNS you keep exactly where it is.</h1>
+        <p class="lede">
+          Publish one <code>CNAME</code>, once. Every renewal after that is invisible to you — and we
+          never ask for access to your DNS provider, because the design does not need it.
+        </p>
+      </section>
+
+      <section class="steps">
+        <ol>
+          <li>
+            <h2>You publish one record</h2>
+            <p>
+              <code>_acme-challenge.example.com</code> becomes a <code>CNAME</code> pointing into our
+              zone. That is the entire integration, and it is permanent.
+            </p>
+          </li>
+          <li>
+            <h2>We answer the one question</h2>
+            <p>
+              When a certificate authority follows that record, we answer with the challenge value for
+              as long as the validation lasts, then withdraw it.
+            </p>
+          </li>
+          <li>
+            <h2>You see what happened</h2>
+            <p>
+              Every publication, every query a certificate authority made, and — afterwards — whether a
+              certificate was actually installed and what names it covers.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="why">
+        <h2>Why a CNAME and not an API token</h2>
+        <p>
+          Handing a certificate tool your DNS credentials gives it the power to change every record you
+          have, in order to change one. The alias model gives away exactly one thing: the right to
+          answer one name that exists for this purpose alone.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        <strong>Placeholder.</strong> This page exists so the hostname, its routing and its build are
+        real. The published commitments this site is required to carry are listed in
+        <code>public-edition</code> U11 and are not written yet.
+      </p>
+    </footer>
+  </body>
+</html>

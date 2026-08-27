@@ -1,0 +1,15 @@
+/* Build config for the console application. Extends the workspace root, which is
+   where the @acme/shared path mapping lives — the mapping is what pulls the
+   library's sources in, so they are not listed here. Specs are excluded
+   explicitly: without it the library's *.spec.ts files reach the application
+   build and fail on missing Jasmine globals. */
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../out-tsc/console",
+    "types": []
+  },
+  "files": ["src/main.ts"],
+  "include": ["src/**/*.d.ts"],
+  "exclude": ["**/*.spec.ts"]
+}

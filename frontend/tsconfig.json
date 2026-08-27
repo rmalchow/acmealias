@@ -4,6 +4,25 @@
   "compileOnSave": false,
   "compilerOptions": {
     "outDir": "./dist/out-tsc",
+    /*
+     * The shared library is referenced by SOURCE rather than by a built package.
+     * A library built with ng-packagr would have to be rebuilt before either
+     * application could see a change to it, which in a stack where both apps run
+     * under `ng serve` means a third watcher and a build order to remember. The
+     * cost of this choice is that the library is not independently publishable,
+     * which nothing here wants.
+     */
+    /*
+     * baseUrl is not decorative. Both applications extend this file from
+     * projects/<app>/, and a `paths` entry inherited through `extends` is
+     * resolved against the INHERITING file unless a baseUrl pins it — without
+     * this line the bundler looks for the library under projects/console/projects/
+     * and reports only "Could not resolve @acme/shared".
+     */
+    "baseUrl": ".",
+    "paths": {
+      "@acme/shared": ["projects/shared/src/public-api.ts"]
+    },
     "strict": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,

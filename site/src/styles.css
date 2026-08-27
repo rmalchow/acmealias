@@ -1,0 +1,168 @@
+/*
+ * The marketing site's whole stylesheet. No framework and no build tooling: a
+ * placeholder that needs a toolchain is a placeholder nobody replaces.
+ *
+ * It shares a visual language with the console — the same near-black ground and
+ * the same accent — because U7 says the coupling between the two is a link and a
+ * shared look, and nothing else.
+ */
+
+:root {
+  --ground: #0b0d0e;
+  --raised: #14181a;
+  --line: rgb(255 255 255 / 12%);
+  --ink: rgb(255 255 255 / 88%);
+  --ink-dim: rgb(255 255 255 / 55%);
+  --accent: #1890ff;
+  --page: 62rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: Roboto, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.05em 0.35em;
+}
+
+a {
+  color: var(--accent);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.dot {
+  inline-size: 0.6rem;
+  block-size: 0.6rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+main {
+  max-inline-size: var(--page);
+  margin-inline: auto;
+  padding: 0 1.5rem;
+}
+
+.hero {
+  padding-block: clamp(3rem, 9vw, 6rem) 2rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: clamp(2rem, 5.5vw, 3.1rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  max-inline-size: 22ch;
+}
+
+.lede {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--ink-dim);
+  max-inline-size: 60ch;
+}
+
+.steps ol {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+/* Numbered because these genuinely happen in order — the CNAME has to exist
+   before anything can follow it. */
+.steps li {
+  counter-increment: step;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1.25rem;
+}
+
+.steps li::before {
+  content: counter(step, decimal-leading-zero);
+  display: block;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  margin-block-end: 0.5rem;
+}
+
+.steps h2,
+.why h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.steps p,
+.why p {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.why {
+  padding-block: 3rem;
+  max-inline-size: 60ch;
+}
+
+.why h2 {
+  font-size: 1.35rem;
+}
+
+footer {
+  border-block-start: 1px solid var(--line);
+  margin-block-start: 2rem;
+  padding: 1.5rem;
+}
+
+footer p {
+  max-inline-size: var(--page);
+  margin-inline: auto;
+  color: var(--ink-dim);
+  font-size: 0.9rem;
+}

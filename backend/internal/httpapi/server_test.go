@@ -46,7 +46,7 @@ func newServers(t *testing.T) (*Servers, *gorm.DB) {
 			DB: db, Guard: &authz.Guard{Auth: &testAuth{db: db}, Mapping: authz.MappingFromConfig(cfg), Log: discard()},
 			Auth: testConsoleAuth{}, Config: cfg, Log: discard(),
 		},
-		Console:   webui.Handler(),
+		Console:   webui.Handler(cfg.StaffHost),
 		Liveness:  obs.Liveness(),
 		Readiness: obs.Readiness(m, func() bool { return true }, func(context.Context) error { return nil }),
 		Metrics:   m,

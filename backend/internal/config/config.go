@@ -140,6 +140,19 @@ type Config struct {
 	OIDCGroupClaim   string // ACME_OIDC_GROUPS_CLAIM, default "groups"
 	OIDCGroupPrefix  string // ACME_OIDC_GROUP_PREFIX, stripped from each group value
 
+	// The staff surface (public-edition U7). One deployment, two hostnames, two
+	// applications at the identity provider — a token for one is not a token for
+	// the other, which is the property the separation rests on.
+	//
+	// StaffHost is what makes the split observable to this process: it decides
+	// which console the embedded web UI serves and which OIDC client a sign-in
+	// uses. Empty means this deployment has no staff surface at all, which is the
+	// internal edition's case, and everything answers as the customer plane.
+	StaffHost             string // ACME_STAFF_HOST, e.g. admin.acmealias.com
+	StaffOIDCClientID     string // ACME_STAFF_OIDC_CLIENT_ID
+	StaffOIDCClientSecret string // ACME_STAFF_OIDC_CLIENT_SECRET
+	StaffOIDCRedirectURL  string // ACME_STAFF_OIDC_REDIRECT_URL
+
 	// Role-group mapping: which Keycloak group grants each role. An unset
 	// variable means nobody holds that role (design D10).
 	AdminGroup       string // ACME_ADMIN_GROUP
@@ -283,6 +296,11 @@ func Load() (Config, error) {
 		OIDCRedirectURL:  str("ACME_OIDC_REDIRECT_URL", ""),
 		OIDCGroupClaim:   str("ACME_OIDC_GROUPS_CLAIM", "groups"),
 		OIDCGroupPrefix:  str("ACME_OIDC_GROUP_PREFIX", ""),
+
+		StaffHost:             str("ACME_STAFF_HOST", ""),
+		StaffOIDCClientID:     str("ACME_STAFF_OIDC_CLIENT_ID", ""),
+		StaffOIDCClientSecret: str("ACME_STAFF_OIDC_CLIENT_SECRET", ""),
+		StaffOIDCRedirectURL:  str("ACME_STAFF_OIDC_REDIRECT_URL", ""),
 
 		AdminGroup:       str("ACME_ADMIN_GROUP", ""),
 		ConfigAdminGroup: str("ACME_CONFIG_ADMIN_GROUP", ""),

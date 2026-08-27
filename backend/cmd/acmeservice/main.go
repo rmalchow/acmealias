@@ -169,7 +169,7 @@ func runService(cfg config.Config, log *slog.Logger) error {
 			Config:  cfg,
 			Log:     log,
 		},
-		Console:  webui.Handler(),
+		Console:  webui.Handler(cfg.StaffHost),
 		Liveness: obs.Liveness(),
 		// Readiness runs the same probe that sets the database_up gauge, so
 		// the endpoint and the metric cannot disagree during an incident.
