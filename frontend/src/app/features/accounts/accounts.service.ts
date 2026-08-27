@@ -64,6 +64,22 @@ export class AccountsService {
     await this.load();
   }
 
+  /**
+   * Leaves the account this session is acting in, without signing out.
+   *
+   * Selection is nullable for exactly this reason (design P19): "no account selected" is a state
+   * the service understands and answers distinctly, not an error to be avoided. A person in
+   * several accounts who has finished with one should not have to sign out to get back to the
+   * picker — and a person in one is unlikely to want this, which is why it lives in the switcher
+   * rather than beside every screen.
+   */
+  async leave(): Promise<void> {
+    await firstValueFrom(this.api.rootPost<void>('/accounts/none/select'));
+    this.api.setAccount(null);
+    await this.session.load();
+    await this.load();
+  }
+
   async create(slug: string, name: string): Promise<Account> {
     const created = await firstValueFrom(this.api.rootPost<Account>('/accounts', { slug, name }));
     this.api.setAccount(created.id);

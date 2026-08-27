@@ -33,6 +33,13 @@ import { apiErrorMessage } from '../../core/api.service';
               <small class="ac-muted">{{ a.slug }}</small>
             </li>
           }
+          <li nz-menu-divider></li>
+          <!--
+            Leaving is not signing out. "No account selected" is a state the service understands
+            and answers distinctly, so a person who has finished with one account can get back to
+            the picker without ending their session.
+          -->
+          <li nz-menu-item (click)="leave()">Leave this account</li>
         </ul>
       </nz-dropdown-menu>
     }
@@ -60,6 +67,19 @@ export class AccountSwitcherComponent implements OnInit {
 
   ngOnInit(): void {
     void this.accounts.load();
+  }
+
+  protected async leave(): Promise<void> {
+    if (this.switching()) return;
+    this.switching.set(true);
+    try {
+      await this.accounts.leave();
+      location.assign('/accounts');
+    } catch (err) {
+      this.message.error(apiErrorMessage(err));
+    } finally {
+      this.switching.set(false);
+    }
   }
 
   protected async choose(id: string): Promise<void> {

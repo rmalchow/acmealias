@@ -12,7 +12,8 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, apiErrorMessage } from '../../core/api.service';
 import { SessionService } from '../../core/session.service';
-import { GrantComposerComponent } from './grant-composer.component';
+import { NzModalService } from 'ng-zorro-antd/modal';
+import { openRoleEditor } from './role-editor.modal';
 import { Grant, Member, Role } from './roles.models';
 
 /**
@@ -43,7 +44,6 @@ import { Grant, Member, Role } from './roles.models';
     NzSelectModule,
     NzTableModule,
     NzTagModule,
-    GrantComposerComponent,
   ],
   template: `
     <h1>Roles and members</h1>
@@ -101,27 +101,11 @@ import { Grant, Member, Role } from './roles.models';
         </tbody>
       </nz-table>
 
-      <h3>{{ editing() ? 'Edit role' : 'New role' }}</h3>
-      <form nz-form nzLayout="inline" class="ac-role-form">
-        <nz-form-item>
-          <nz-form-control>
-            <input nz-input name="name" [(ngModel)]="draftName" placeholder="Name" />
-          </nz-form-control>
-        </nz-form-item>
-        <nz-form-item>
-          <nz-form-control>
-            <input nz-input name="description" [(ngModel)]="draftDescription" placeholder="Description" />
-          </nz-form-control>
-        </nz-form-item>
-      </form>
-      <app-grant-composer [(grants)]="draftGrants" [held]="heldActions()" />
       <div class="ac-actions">
-        <button nz-button nzType="primary" [disabled]="!draftName()" (click)="save()">
-          {{ editing() ? 'Save role' : 'Create role' }}
+        <button nz-button nzType="primary" (click)="newRole()">
+          <span nz-icon nzType="plus"></span>
+          New role
         </button>
-        @if (editing()) {
-          <button nz-button (click)="cancel()">Cancel</button>
-        }
       </div>
     </section>
 
@@ -198,6 +182,13 @@ import { Grant, Member, Role } from './roles.models';
         display: flex;
         gap: 0.5rem;
       }
+      /* Two buttons touching read as one control, and one of them deletes. */
+      .row-actions {
+        white-space: nowrap;
+        display: flex;
+        gap: 0.5rem;
+        justify-content: flex-end;
+      }
       .ac-add {
         margin-block-start: 0.75rem;
       }
@@ -208,15 +199,12 @@ export class RolesComponent implements OnInit {
   private readonly api = inject(ApiService);
   private readonly message = inject(NzMessageService);
   private readonly session = inject(SessionService);
+  private readonly modal = inject(NzModalService);
 
   protected readonly roles = signal<Role[]>([]);
   protected readonly members = signal<Member[]>([]);
   protected readonly error = signal<string | null>(null);
 
-  protected readonly editing = signal<Role | null>(null);
-  protected readonly draftName = signal('');
-  protected readonly draftDescription = signal('');
-  protected readonly draftGrants = signal<Grant[]>([]);
 
   protected readonly memberSubject = signal('');
   protected readonly memberRole = signal('');
@@ -257,38 +245,22 @@ export class RolesComponent implements OnInit {
     }
   }
 
+
+  /** Opens the editor for a new role. */
+  protected newRole(): void {
+    this.open(null);
+  }
+
+  /** Opens the editor for an existing one. */
   protected edit(r: Role): void {
-    this.editing.set(r);
-    this.draftName.set(r.name);
-    this.draftDescription.set(r.description);
-    this.draftGrants.set([...r.grants]);
+    this.open(r);
   }
 
-  protected cancel(): void {
-    this.editing.set(null);
-    this.draftName.set('');
-    this.draftDescription.set('');
-    this.draftGrants.set([]);
-  }
-
-  protected async save(): Promise<void> {
-    const body = {
-      name: this.draftName(),
-      description: this.draftDescription(),
-      grants: this.draftGrants(),
-    };
-    try {
-      const current = this.editing();
-      if (current) {
-        await firstValueFrom(this.api.put<Role>(`/roles/${current.id}`, body));
-      } else {
-        await firstValueFrom(this.api.post<Role>('/roles', body));
-      }
-      this.cancel();
-      await this.load();
-    } catch (err) {
-      this.message.error(apiErrorMessage(err));
-    }
+  private open(role: Role | null): void {
+    openRoleEditor(this.modal, { role, held: this.heldActions() })
+      .afterClose.subscribe((written?: boolean) => {
+        if (written) void this.load();
+      });
   }
 
   protected async remove(r: Role): Promise<void> {

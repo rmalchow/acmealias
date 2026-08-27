@@ -134,6 +134,16 @@ func (a *admin) selectAccount(c echo.Context) error {
 	if sess == nil {
 		return echo.ErrUnauthorized
 	}
+	// "none" clears the selection: leaving an account without signing out of the
+	// service. Selection is nullable precisely so this is a state rather than an
+	// error (design P19), and a person who has finished with one account should
+	// not have to end their session to reach the picker.
+	if c.Param("accountId") == "none" {
+		if err := store.SelectAccount(c.Request().Context(), a.db(), sess.ID, nil); err != nil {
+			return err
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
 	accountID, err := model.ParseID(c.Param("accountId"))
 	if err != nil {
 		return fmt.Errorf("%w: accountId must be an identifier", inventory.ErrInvalid)
