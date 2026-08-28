@@ -76,7 +76,18 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
       <tbody>
         @for (k of keys(); track k.id) {
           <tr [class.inactive]="!k.active">
-            <td class="ac-mono">{{ k.displayPrefix }}&hellip;</td>
+            <!--
+              THE IDENTIFIER, WHICH IS WHAT THIS COLUMN HAS ALWAYS BEEN CALLED. It used to render
+              displayPrefix — the first six characters of the SECRET — so the one PUBLIC value a
+              client needs appeared nowhere in the console: not here, and not in the reveal dialog
+              either. It could only be got out of the API or the CLI. Anything authenticating with
+              HTTP Basic needs it as the username: lego's httpreq, acme-dns, curl.
+
+              The secret fragment is gone rather than demoted. It identified a key by six
+              characters of the one value that must not be on a screen at all, and the note in the
+              next column is what a person actually recognises a key by.
+            -->
+            <td class="ac-mono">{{ k.identifier }}</td>
             <td>{{ k.note || '—' }}</td>
             <!--
               There is no Authority column, and its absence is the point: every key here reaches
@@ -235,7 +246,7 @@ export class ApiKeysPanelComponent implements OnChanges {
 
   async revoke(k: ApiKey): Promise<void> {
     const ok = await confirmAction(this.modal, {
-      title: `Revoke key ${k.displayPrefix}…?`,
+      title: `Revoke key ${k.identifier}?`,
       message: 'Anything still using it will start failing immediately. This cannot be undone.',
       okText: 'Revoke',
       danger: true,
