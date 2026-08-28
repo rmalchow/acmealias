@@ -57,7 +57,7 @@ func TestIntegrationLastUnrestrictedMemberIsKept(t *testing.T) {
 	// The account's owner is its first unrestricted member, so the account
 	// already has exactly one and it is them.
 	alone := accountOwner(t, db, sc)
-	if err := RemoveMember(ctx, db, sc, alone, admin.ID); !errors.Is(err, ErrLastUnrestrictedMember) {
+	if err := RemoveMember(ctx, db, sc, alone, &admin.ID); !errors.Is(err, ErrLastUnrestrictedMember) {
 		t.Fatalf("remove = %v, want ErrLastUnrestrictedMember", err)
 	}
 }
@@ -91,7 +91,7 @@ func TestIntegrationConcurrentRemovalOfTheLastTwoMembers(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[i] = RemoveMember(ctx, db, sc, u, admin.ID)
+			errs[i] = RemoveMember(ctx, db, sc, u, &admin.ID)
 		}()
 	}
 	close(start)
@@ -138,7 +138,7 @@ func TestIntegrationRoleWithMembersIsNotDeleted(t *testing.T) {
 	if err := DeleteRole(ctx, db, sc, r.ID); err == nil {
 		t.Fatal("a role with members was deleted")
 	}
-	if err := RemoveMember(ctx, db, sc, u, r.ID); err != nil {
+	if err := RemoveMember(ctx, db, sc, u, &r.ID); err != nil {
 		t.Fatalf("remove member: %v", err)
 	}
 	if err := DeleteRole(ctx, db, sc, r.ID); err != nil {

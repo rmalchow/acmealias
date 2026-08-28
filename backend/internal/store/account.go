@@ -258,7 +258,7 @@ func createPersonalAccount(tx *gorm.DB, user *model.User) (*model.Account, error
 	if err := tx.Create(&role).Error; err != nil {
 		return nil, fmt.Errorf("create the owner role: %w", err)
 	}
-	member := model.AccountMember{AccountID: acc.ID, UserID: user.ID, RoleID: role.ID}
+	member := model.AccountMember{AccountID: acc.ID, UserID: user.ID, RoleID: &role.ID}
 	if err := tx.Create(&member).Error; err != nil {
 		return nil, fmt.Errorf("create the owner membership: %w", err)
 	}

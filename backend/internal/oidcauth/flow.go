@@ -46,6 +46,17 @@ type Identity struct {
 	Subject     string
 	DisplayName string
 	Groups      []string
+	// Email is the address the provider says this person controls, and it is
+	// EMPTY unless the provider also said it had verified it.
+	//
+	// That condition is the whole of it. An invitation is bound to an address
+	// (account-invitations V2), and the only thing that makes the binding real
+	// is that "this user's address is alice@corp.com" was PROVEN rather than
+	// typed. An unverified `email` claim is a string somebody chose about
+	// themselves; accepting it here would let anybody who can register claim
+	// any address and walk into any account they had been shown an invitation
+	// to.
+	Email string
 }
 
 // Login starts a sign-in: it stores state, nonce and a PKCE verifier in a
@@ -154,7 +165,28 @@ func (s *Service) verifyCallback(r *http.Request) (*Identity, error) {
 		Subject:     idTok.Subject,
 		DisplayName: displayName(claims, idTok.Subject),
 		Groups:      Groups(claims, s.cfg.OIDCGroupClaim, s.cfg.OIDCGroupPrefix),
+		Email:       verifiedEmail(claims),
 	}, nil
+}
+
+// verifiedEmail reads the `email` claim, and ONLY when `email_verified` is
+// true.
+//
+// The two claims are separate in OIDC for exactly this reason and the second is
+// routinely ignored, which is how "bound to an address" quietly becomes "bound
+// to a string the user typed". A provider that omits email_verified is treated
+// as not having verified anything: absent is not true.
+//
+// The value is lower-cased and trimmed here so that it matches invitations,
+// which are stored normalized. A comparison that normalizes one side only is a
+// comparison that fails on `Alice@corp.com`.
+func verifiedEmail(claims map[string]any) string {
+	verified, _ := claims["email_verified"].(bool)
+	if !verified {
+		return ""
+	}
+	addr, _ := claims["email"].(string)
+	return strings.ToLower(strings.TrimSpace(addr))
 }
 
 // createSession writes the session row. No provider token is stored: we never
@@ -194,7 +226,13 @@ func (s *Service) createSession(ctx context.Context, id *Identity) (*model.Sessi
 	// caller. It is NOT fatal-free: a sign-in that could not give somebody
 	// anywhere to work is a sign-in into an empty console, and failing loudly
 	// here is better than a session that appears to work and shows nothing.
-	user, err := store.FindOrCreateUser(ctx, s.db, sess.Subject, sess.DisplayName, "")
+	//
+	// The verified address travels with it. It is what an invitation is bound to
+	// (account-invitations V2), and sign-in is the only moment the service hears
+	// the provider say it — so a user row whose email is empty is a person the
+	// provider has told us nothing verified about, and no invitation will match
+	// them.
+	user, err := store.FindOrCreateUser(ctx, s.db, sess.Subject, sess.DisplayName, id.Email)
 	if err != nil {
 		return nil, err
 	}

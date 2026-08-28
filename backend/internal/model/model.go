@@ -122,7 +122,7 @@ func (a StringArray) Value() (driver.Value, error) {
 // test walks it, so a new model must be added here.
 func Models() []any {
 	return []any{
-		&Account{}, &User{}, &Role{}, &AccountMember{}, &RoleGrant{},
+		&Account{}, &User{}, &Role{}, &AccountMember{}, &RoleGrant{}, &Invitation{},
 		&Project{}, &LBNode{}, &Alias{}, &Domain{},
 		&APIKey{}, &APIKeyGrant{}, &APIKeyNetwork{}, &Challenge{}, &Session{},
 		&AuditEntry{}, &ChallengeInteraction{}, &ProjectDailyStat{},
@@ -217,11 +217,36 @@ func (Role) TableName() string { return "roles" }
 
 // AccountMember binds a user to a role in an account. A person holds roles
 // through membership; roles held in one account confer nothing in another.
+//
+// A person may hold SEVERAL memberships of one account, one per role — the
+// unique key is (account_id, user_id, role_id), not (account_id, user_id).
 type AccountMember struct {
 	ID        ID `gorm:"primaryKey"`
 	AccountID ID `gorm:"column:account_id"`
 	UserID    ID `gorm:"column:user_id"`
-	RoleID    ID `gorm:"column:role_id"`
+	// RoleID is NULLABLE, and a null one is not a broken row.
+	//
+	// It is what somebody who accepted an invitation holds until an
+	// administrator gives them a role (account-invitations V6). An invitation
+	// offers membership and names no role, so "in the account" and "allowed to
+	// do things in the account" became two steps, and this is the state between
+	// them.
+	//
+	// SUCH A MEMBER AUTHORISES NOTHING, and the way that is true matters: they
+	// have an EMPTY GRANT SET, not a skipped check. Every path deriving
+	// authority from a membership must reach "no grants" rather than "no
+	// membership" — the two produce identical results in any test that only
+	// counts rows, and opposite results the day somebody writes `if role ==
+	// nil { continue }` one layer too high.
+	//
+	// The database keeps the rest honest. The foreign key is composite —
+	// (role_id, account_id) references roles (id, account_id), which is what
+	// stops a membership naming another account's role — and MATCH SIMPLE skips
+	// it when role_id is null, so the pair is either both present and checked or
+	// absent. And because nulls are distinct in a unique key, the three-column
+	// unique constraint stops constraining anything here; a partial unique index
+	// over (account_id, user_id) where role_id is null does that job instead.
+	RoleID    *ID `gorm:"column:role_id"`
 	CreatedAt time.Time
 
 	User *User `gorm:"foreignKey:UserID"`
@@ -229,6 +254,63 @@ type AccountMember struct {
 }
 
 func (AccountMember) TableName() string { return "account_members" }
+
+// Invitation is an offer of membership in one account, addressed to an EMAIL
+// ADDRESS rather than to a user — because when somebody types `alice@corp.com`
+// the service knows nothing about Alice: not whether she has a user, not whether
+// she will sign in with that address, not whether she is even the person who
+// reads the mail. Everything difficult about invitations comes from that gap
+// (account-invitations V1).
+//
+// It names NO ROLE. Accepting makes the invitee a member holding nothing, and
+// somebody assigns a role afterwards — see AccountMember.RoleID. An earlier
+// design put a role here and needed a whole mechanism for what happens when that
+// role is deleted during the fourteen days an invitation is alive; there is no
+// such mechanism now because there is no such column.
+type Invitation struct {
+	ID        ID `gorm:"primaryKey"`
+	AccountID ID `gorm:"column:account_id"`
+	// Email is stored NORMALIZED — lower-cased and trimmed — and compared in
+	// that form. RFC 5321 permits a case-sensitive local part and essentially no
+	// mail system implements one, so treating `Alice@corp.com` and
+	// `alice@corp.com` as two people would produce two invitations and one
+	// confused customer.
+	Email string
+	// TokenHash is the only stored form of the token. Never the token itself:
+	// a datastore read must not yield a usable credential, which is the same
+	// rule APIKey.SecretHash follows and for the same reason.
+	TokenHash []byte `gorm:"column:token_hash"`
+	InvitedBy ID     `gorm:"column:invited_by"`
+	CreatedAt time.Time
+	ExpiresAt time.Time `gorm:"column:expires_at"`
+	// LastSentAt is when a message was last put on the wire for this
+	// invitation. It equals CreatedAt until somebody re-sends.
+	//
+	// Stored rather than derived from ExpiresAt — which also moves on a re-send
+	// — because it is what the re-send rate limit reads, and a limit computed
+	// as "ExpiresAt minus the lifetime constant" would quietly change meaning
+	// the day the lifetime changes.
+	LastSentAt time.Time `gorm:"column:last_sent_at"`
+
+	// Three nullable timestamps rather than a status column, because each
+	// records WHEN as well as WHICH and the audit trail wants both.
+	//
+	// There is no `expired_at`, deliberately: expiry is ExpiresAt being in the
+	// past, evaluated whenever the row is read, so an invitation is dead the
+	// moment it is dead rather than when a sweep last ran.
+	//
+	// DeclinedAt is a distinct state from an expiry and not a nicety. To the
+	// account watching a pending invitation, fourteen days of silence and a
+	// refusal look identical and mean opposite things: never saw it (re-send, or
+	// telephone) versus saw it and said no (re-sending is a nuisance aimed at
+	// somebody who already answered).
+	RevokedAt  *time.Time `gorm:"column:revoked_at"`
+	DeclinedAt *time.Time `gorm:"column:declined_at"`
+	AcceptedAt *time.Time `gorm:"column:accepted_at"`
+	AcceptedBy *ID        `gorm:"column:accepted_by"`
+}
+
+func (Invitation) TableName() string { return "invitations" }
 
 // RoleGrant is one grant held by a role. A null ObjectID is the wildcard
 // identifier; the database enforces the same rule, so a row that disagrees

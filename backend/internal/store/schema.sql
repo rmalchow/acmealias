@@ -5,7 +5,7 @@ table account_members
   column account_id uuid not null
   column created_at timestamp with time zone not null default now()
   column id uuid not null default uuidv7()
-  column role_id uuid not null
+  column role_id uuid null
   column user_id uuid not null
   constraint account_members_account_id_fkey foreign key (account_id)
   constraint account_members_account_id_user_id_role_id_key unique (account_id,user_id,role_id)
@@ -13,6 +13,7 @@ table account_members
   constraint account_members_role_id_account_id_fkey foreign key (role_id,account_id)
   constraint account_members_user_id_fkey foreign key (user_id)
   index account_members_account_id_user_id_role_id_key CREATE UNIQUE INDEX account_members_account_id_user_id_role_id_key ON account_members USING btree (account_id, user_id, role_id)
+  index account_members_one_roleless_per_user CREATE UNIQUE INDEX account_members_one_roleless_per_user ON account_members USING btree (account_id, user_id) WHERE (role_id IS NULL)
   index account_members_pkey CREATE UNIQUE INDEX account_members_pkey ON account_members USING btree (id)
   index account_members_user_idx CREATE INDEX account_members_user_idx ON account_members USING btree (user_id)
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
@@ -206,6 +207,31 @@ table domains
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
   rls enabled=true forced=true
 
+table invitations
+  check invitations_accepted_by_whom CHECK (((accepted_at IS NULL) = (accepted_by IS NULL)))
+  column accepted_at timestamp with time zone null
+  column accepted_by uuid null
+  column account_id uuid not null
+  column created_at timestamp with time zone not null default now()
+  column declined_at timestamp with time zone null
+  column email text not null
+  column expires_at timestamp with time zone not null
+  column id uuid not null default uuidv7()
+  column invited_by uuid not null
+  column last_sent_at timestamp with time zone not null default now()
+  column revoked_at timestamp with time zone null
+  column token_hash bytea not null
+  constraint invitations_accepted_by_fkey foreign key (accepted_by)
+  constraint invitations_accepted_by_whom check ()
+  constraint invitations_account_id_fkey foreign key (account_id)
+  constraint invitations_invited_by_fkey foreign key (invited_by)
+  constraint invitations_pkey primary key (id)
+  index invitations_by_email_idx CREATE INDEX invitations_by_email_idx ON invitations USING btree (email) WHERE ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (declined_at IS NULL))
+  index invitations_pending_idx CREATE UNIQUE INDEX invitations_pending_idx ON invitations USING btree (account_id, email) WHERE ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (declined_at IS NULL))
+  index invitations_pkey CREATE UNIQUE INDEX invitations_pkey ON invitations USING btree (id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
+
 table lb_nodes
   column account_id uuid not null
   column id uuid not null default uuidv7()
@@ -314,6 +340,7 @@ table users
   column subject text not null
   constraint users_pkey primary key (id)
   constraint users_subject_key unique (subject)
+  index users_one_user_per_verified_email CREATE UNIQUE INDEX users_one_user_per_verified_email ON users USING btree (lower(email)) WHERE (email IS NOT NULL)
   index users_pkey CREATE UNIQUE INDEX users_pkey ON users USING btree (id)
   index users_subject_key CREATE UNIQUE INDEX users_subject_key ON users USING btree (subject)
   rls enabled=false forced=false

@@ -110,6 +110,19 @@ type Config struct {
 	// "whether" are the same question asked once.
 	ProjectsPerPersonalAccount int
 
+	// The three invitation limits (account-invitations V9). Inviting is the
+	// first thing an ordinary tenant can do that makes this service send mail
+	// to an address of their choosing, and the reputational cost of that being
+	// abused lands on the domain every customer's renewals depend on.
+	//
+	// InvitationsPerAddressPerDay is the one that cannot be dropped: it counts
+	// ACROSS accounts, because any authenticated user may create accounts
+	// freely and a per-account limit is therefore defeated by creating
+	// accounts.
+	InvitationsPerAccountPerHour int           // ACME_INVITATIONS_PER_ACCOUNT_PER_HOUR
+	InvitationsPerAddressPerDay  int           // ACME_INVITATIONS_PER_ADDRESS_PER_DAY
+	InvitationResendInterval     time.Duration // ACME_INVITATION_RESEND_INTERVAL
+
 	// MigrateOnStart runs migrations at startup unless set to false
 	// (ACME_MIGRATE_ON_START), see design D8.
 	MigrateOnStart bool

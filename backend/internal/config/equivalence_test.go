@@ -195,20 +195,26 @@ func envFromMap(env map[string]string) ([]string, LookupFunc) {
 // five, so the legacy loader — which knows nothing about it — reads zero.
 var settingsTheLegacyLoaderNeverHad = map[string]string{
 	"ProjectsPerPersonalAccount": "added by personal-and-team-accounts task 3.5a; the frozen loader predates the field",
-	"ActivationFreshInterval":    "added by domain-activation task 2.4; the frozen loader predates the field",
+
+	// account-invitations task group 4. The frozen loader predates inviting
+	// anybody, so it has no opinion about how often one may.
+	"InvitationsPerAccountPerHour": "added by account-invitations; the frozen loader predates the field",
+	"InvitationsPerAddressPerDay":  "added by account-invitations; the frozen loader predates the field",
+	"InvitationResendInterval":     "added by account-invitations; the frozen loader predates the field",
+	"ActivationFreshInterval":      "added by domain-activation task 2.4; the frozen loader predates the field",
 
 	// transactional-email task 3.2. The identity three of these carry has a
 	// built-in default, so the frozen loader reporting "" for them is not a
 	// disagreement about behaviour — it is a loader that predates the block.
-	"MailFrom":     "added by transactional-email; the frozen loader predates the field",
-	"MailSender":   "added by transactional-email; the frozen loader predates the field",
-	"MailReplyTo":  "added by transactional-email; the frozen loader predates the field",
-	"MailFooter":   "added by transactional-email; the frozen loader predates the field",
-	"MailSMTPAddr": "added by transactional-email; the frozen loader predates the field",
-	"MailSMTPUser": "added by transactional-email; the frozen loader predates the field",
-	"MailSMTPPass": "added by transactional-email; the frozen loader predates the field",
-	"ActivationSettledInterval":  "added by domain-activation task 2.4; the frozen loader predates the field",
-	"PostLogoutRedirectURL":      "added by the provider-logout change; the frozen loader predates the field",
+	"MailFrom":                  "added by transactional-email; the frozen loader predates the field",
+	"MailSender":                "added by transactional-email; the frozen loader predates the field",
+	"MailReplyTo":               "added by transactional-email; the frozen loader predates the field",
+	"MailFooter":                "added by transactional-email; the frozen loader predates the field",
+	"MailSMTPAddr":              "added by transactional-email; the frozen loader predates the field",
+	"MailSMTPUser":              "added by transactional-email; the frozen loader predates the field",
+	"MailSMTPPass":              "added by transactional-email; the frozen loader predates the field",
+	"ActivationSettledInterval": "added by domain-activation task 2.4; the frozen loader predates the field",
+	"PostLogoutRedirectURL":     "added by the provider-logout change; the frozen loader predates the field",
 }
 
 func diffConfig(want, got Config) []string {

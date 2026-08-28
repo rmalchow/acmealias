@@ -157,9 +157,63 @@ func DeleteRole(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) error {
 // AddMember binds a user to a role in the scope's account.
 func AddMember(ctx context.Context, db *gorm.DB, sc Scope, userID, roleID model.ID) error {
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
-		m := &model.AccountMember{AccountID: sc.AccountID(), UserID: userID, RoleID: roleID}
+		m := &model.AccountMember{AccountID: sc.AccountID(), UserID: userID, RoleID: &roleID}
 		if err := tx.Create(m).Error; err != nil {
 			return fmt.Errorf("store: add member: %w", err)
+		}
+		return nil
+	})
+}
+
+// AddMemberWithoutRole is what accepting an invitation writes: the person is in
+// the account and holds nothing until somebody gives them a role
+// (account-invitations V6).
+//
+// It is a separate function rather than AddMember with a nil argument because
+// the two are different intentions and only one of them is ever what a caller
+// meant. A nil slipping into AddMember from a decoded request body would produce
+// this silently; a caller has to ask for it by name.
+func AddMemberWithoutRole(ctx context.Context, db *gorm.DB, sc Scope, userID model.ID) error {
+	return sc.Run(ctx, db, func(tx *gorm.DB) error {
+		m := &model.AccountMember{AccountID: sc.AccountID(), UserID: userID}
+		if err := tx.Create(m).Error; err != nil {
+			return fmt.Errorf("store: add member without a role: %w", err)
+		}
+		return nil
+	})
+}
+
+// AssignRole gives a role to a membership that holds none, IN PLACE.
+//
+// In place, and not by inserting a second row, because memberships are per-role:
+// the unique key is (account_id, user_id, role_id), so a person may legitimately
+// hold several. Inserting would therefore leave the new member listed twice —
+// once with the role they were just given, and once as somebody still waiting
+// for one — and the roster would be reporting a state that no longer exists.
+//
+// The WHERE clause requires role_id to still be null, so two administrators
+// assigning different roles at once produce one winner and one ErrRecordNotFound
+// rather than a lost update. If an account genuinely wants somebody in two
+// roles, that is AddMember, afterwards.
+func AssignRole(ctx context.Context, db *gorm.DB, sc Scope, memberID, roleID model.ID) error {
+	return sc.Run(ctx, db, func(tx *gorm.DB) error {
+		// Resolved under the scope first, so a role identifier from another
+		// account cannot be written onto this account's membership. The
+		// composite foreign key would refuse it anyway; this is what turns that
+		// refusal into a legible error instead of a constraint violation.
+		var role model.Role
+		if err := sc.Where(tx).First(&role, "id = ?", roleID).Error; err != nil {
+			return fmt.Errorf("store: assign role %s: %w", roleID, err)
+		}
+		res := sc.Where(tx).
+			Model(&model.AccountMember{}).
+			Where("id = ? AND role_id IS NULL", memberID).
+			Update("role_id", roleID)
+		if res.Error != nil {
+			return fmt.Errorf("store: assign role: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("store: assign role: %w", gorm.ErrRecordNotFound)
 		}
 		return nil
 	})
@@ -173,10 +227,25 @@ func AddMember(ctx context.Context, db *gorm.DB, sc Scope, userID, roleID model.
 // two concurrent removals each see two members, each concludes one will remain,
 // and together they remove both — leaving an account nobody can administer and
 // no single request that did anything wrong.
-func RemoveMember(ctx context.Context, db *gorm.DB, sc Scope, userID, roleID model.ID) error {
+// A nil roleID removes a ROLELESS membership. It needs no last-member guard:
+// a membership holding no role cannot be the last member of the unrestricted
+// one, and `role_id = NULL` matches nothing in SQL — so a caller passing the
+// null through as a value would delete zero rows, report not-found, and leave
+// somebody in an account nobody can remove them from.
+func RemoveMember(ctx context.Context, db *gorm.DB, sc Scope, userID model.ID, roleID *model.ID) error {
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
+		if roleID == nil {
+			res := sc.Where(tx).Where("user_id = ? AND role_id IS NULL", userID).Delete(&model.AccountMember{})
+			if res.Error != nil {
+				return fmt.Errorf("store: remove roleless member: %w", res.Error)
+			}
+			if res.RowsAffected == 0 {
+				return fmt.Errorf("store: remove roleless member: %w", gorm.ErrRecordNotFound)
+			}
+			return nil
+		}
 		var role model.Role
-		if err := sc.Where(tx).First(&role, "id = ?", roleID).Error; err != nil {
+		if err := sc.Where(tx).First(&role, "id = ?", *roleID).Error; err != nil {
 			return fmt.Errorf("store: remove member: %w", err)
 		}
 		if role.Unrestricted {
@@ -188,7 +257,7 @@ func RemoveMember(ctx context.Context, db *gorm.DB, sc Scope, userID, roleID mod
 				return fmt.Errorf("%w: %q would be left with none", ErrLastUnrestrictedMember, role.Name)
 			}
 		}
-		res := sc.Where(tx).Where("user_id = ? AND role_id = ?", userID, roleID).Delete(&model.AccountMember{})
+		res := sc.Where(tx).Where("user_id = ? AND role_id = ?", userID, *roleID).Delete(&model.AccountMember{})
 		if res.Error != nil {
 			return fmt.Errorf("store: remove member: %w", res.Error)
 		}

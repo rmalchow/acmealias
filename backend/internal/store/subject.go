@@ -42,9 +42,18 @@ func MembershipsFor(ctx context.Context, db *gorm.DB, accountID, userID model.ID
 	if len(rows) == 0 {
 		return nil, nil
 	}
+	// A membership whose role is null contributes NO role and is still a
+	// membership, which is the whole of the roleless state (account-invitations
+	// V6): the person is in the account — the length check above already
+	// returned them — and holds nothing in it. The list of role identifiers may
+	// therefore legitimately be empty, and everything downstream has to reach
+	// "no grants" rather than "not a member".
 	m := Membership{accountID: accountID, userID: userID}
 	for _, r := range rows {
-		m.roleIDs = append(m.roleIDs, r.RoleID)
+		if r.RoleID == nil {
+			continue
+		}
+		m.roleIDs = append(m.roleIDs, *r.RoleID)
 	}
 	return []Membership{m}, nil
 }
@@ -80,6 +89,25 @@ func FindOrCreateUser(ctx context.Context, db *gorm.DB, subject, displayName, em
 	err := db.WithContext(ctx).Where("subject = ?", subject).First(&u).Error
 	switch {
 	case err == nil:
+		// An address given now REPLACES what is stored, and an empty one leaves
+		// it alone. Both halves matter and they pull in opposite directions:
+		//
+		//   - Replacing is what makes a changed address follow the person. The
+		//     address is what an invitation binds to, so a stale one means an
+		//     invitation to somebody's new work address never matches the user
+		//     who holds it.
+		//   - Not blanking is what stops the ten callers that pass "" from
+		//     erasing it. Most callers here have no address to offer — the CLI
+		//     naming a subject, a scope resolution mid-request — and only the
+		//     sign-in path ever hears one from the provider. An unconditional
+		//     write would clear the binding on the next request after every
+		//     sign-in.
+		if email != "" && (u.Email == nil || *u.Email != email) {
+			if err := db.WithContext(ctx).Model(&u).Update("email", email).Error; err != nil {
+				return nil, fmt.Errorf("store: record the verified address for %q: %w", subject, err)
+			}
+			u.Email = &email
+		}
 		return &u, nil
 	case !errors.Is(err, gorm.ErrRecordNotFound):
 		return nil, fmt.Errorf("store: find user %q: %w", subject, err)
@@ -253,7 +281,7 @@ func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string,
 			// nobody could act on.
 			return fmt.Errorf("the default role set has no unrestricted role")
 		}
-		member := model.AccountMember{AccountID: acc.ID, UserID: userID, RoleID: unrestricted}
+		member := model.AccountMember{AccountID: acc.ID, UserID: userID, RoleID: &unrestricted}
 		if err := tx.Create(&member).Error; err != nil {
 			return fmt.Errorf("create first membership: %w", err)
 		}

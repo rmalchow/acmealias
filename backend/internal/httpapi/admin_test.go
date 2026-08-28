@@ -100,6 +100,26 @@ type adminEnv struct {
 	roleID model.ID
 	sc     store.Scope
 	opts   AdminOptions
+	// mail is set only by newAdminEnvWithMail. The invitation tests read the
+	// token out of the MESSAGE rather than out of the table, which is the only
+	// way to assert that what goes on the wire actually works — an invitation
+	// that is perfectly correct in the database and unusable in the inbox is a
+	// failure nothing else here would catch.
+	mail *captureMail
+}
+
+// newAdminEnvWithMail is newAdminEnv with a sender that keeps what it was given.
+func newAdminEnvWithMail(t *testing.T) *adminEnv {
+	t.Helper()
+	v := newAdminEnv(t)
+	v.mail = &captureMail{}
+	v.opts.Mail = v.mail
+	// The console origin the invitation link is built from. Derived from the
+	// OIDC redirect URL in production, because that is where the provider sends
+	// a browser after sign-in and its origin therefore IS the console.
+	v.opts.Config.OIDCRedirectURL = "https://console.example/api/v1/auth/callback"
+	v.reregister(t)
+	return v
 }
 
 func newAdminEnv(t *testing.T) *adminEnv {
@@ -271,6 +291,42 @@ func seedMember(t *testing.T, v *adminEnv, suffix string) string {
 	return ""
 }
 
+// seedMemberRolePath seeds a member and returns the path that would assign them
+// a role.
+func seedMemberRolePath(t *testing.T, v *adminEnv, suffix string) string {
+	t.Helper()
+	return seedMember(t, v, suffix) + "/role"
+}
+
+// seedInvitation returns a seeder for an invitation route, since the rows differ
+// only by what follows the identifier.
+//
+// Each call issues a fresh invitation to a fresh address, because at most one
+// may be outstanding per address per account — a seeder that reused one would
+// make the second role's attempt fail on the pending index rather than on
+// permission, and pass for the wrong reason.
+func seedInvitation(tail string) func(*testing.T, *adminEnv, string) string {
+	return func(t *testing.T, v *adminEnv, suffix string) string {
+		t.Helper()
+		email := fmt.Sprintf("seed-invite%d@corp.example", seedCounter.Add(1))
+		inv, _, err := store.IssueInvitation(t.Context(), v.db, v.sc, email,
+			accountOwnerID(t, v), time.Now().UTC())
+		if err != nil {
+			t.Fatalf("seed invitation: %v", err)
+		}
+		return "/api/v1/accounts/" + v.sc.AccountID().String() + "/invitations/" + inv.ID.String() + tail
+	}
+}
+
+func accountOwnerID(t *testing.T, v *adminEnv) model.ID {
+	t.Helper()
+	acc, err := store.GetAccount(t.Context(), v.db, v.sc)
+	if err != nil {
+		t.Fatalf("read account: %v", err)
+	}
+	return acc.OwnerUserID
+}
+
 // openAccountCreation re-registers the API with the switch on, for the tests
 // that exercise the open half of U9.
 func (v *adminEnv) openAccountCreation(t *testing.T) {
@@ -342,8 +398,8 @@ func (v *adminEnv) session(subject string, roleNames ...string) *client {
 		}
 		held := map[model.ID]bool{}
 		for _, m := range existing {
-			if m.UserID == user.ID {
-				held[m.RoleID] = true
+			if m.UserID == user.ID && m.RoleID != nil {
+				held[*m.RoleID] = true
 			}
 		}
 		for _, r := range roles {
@@ -616,6 +672,42 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"GET", acct + "/members", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"POST", acct + "/members", `{"subject":"someone","roleId":"` + v.roleID.String() + `"}`, []string{"ADMIN"}, nil},
 		{"DELETE", "", "", []string{"ADMIN"}, seedMember},
+		// Giving a role to somebody who accepted an invitation and holds none.
+		// ADMIN only, like every other membership change.
+		//
+		// ADMIN's attempt answers 409, not 204, because the seeded member
+		// already holds a role — assigning is only ever the completion of an
+		// invitation, never a way to re-point an existing membership. That is
+		// the right refusal and is not what this row pins: what it pins is that
+		// the other three never reach that question, being refused with 403
+		// first.
+		{"PUT", "", `{"roleId":"` + v.roleID.String() + `"}`, []string{"ADMIN"}, seedMemberRolePath},
+
+		// Invitations, the account's half. Reading is any member's, for the
+		// same reason reading the roster is: a pending invitation nobody can see
+		// is how an account acquires a member nobody remembers inviting.
+		// Issuing, revoking and re-sending are the unrestricted role's — the
+		// owner and the administrators, who are the same people (design V5).
+		{"GET", acct + "/invitations", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", acct + "/invitations", `{"email":"matrix@corp.example"}`, []string{"ADMIN"}, nil},
+		{"DELETE", "", "", []string{"ADMIN"}, seedInvitation("")},
+		{"POST", "", "", []string{"ADMIN"}, seedInvitation("/resend")},
+
+		// Invitations, the invitee's half. EVERY session reaches these, and so
+		// would one belonging to nothing at all — which is the property that
+		// makes the flow terminate rather than a permissiveness (design V5).
+		//
+		// Reaching them is not accepting anything. Each row sends a token
+		// nothing resolves to and is answered 404, which is what these rows
+		// assert: not 403. A 403 here would mean the ROLE was the obstacle,
+		// and there is no role in this account or any other that decides whether
+		// somebody may answer an invitation addressed to their own mailbox. What
+		// decides that is the token and the address, and both are checked
+		// inside — see TestInvitationIsBoundToItsAddress.
+		{"GET", "/api/v1/invitations", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", "/api/v1/invitations/resolve", `{"token":"nothing-resolves-to-this"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", "/api/v1/invitations/accept", `{"token":"nothing-resolves-to-this"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", "/api/v1/invitations/decline", `{"token":"nothing-resolves-to-this"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 
 		// Sessions belong to the person holding them, so every role reaches
 		// them and reaches only their own (design C10; see

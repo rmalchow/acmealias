@@ -22,6 +22,11 @@ const (
 	ObjectMember  = "member"
 	ObjectAccount = "account"
 
+	// An invitation is a credential-class object, not a configuration one: it
+	// is an offer of access to a billing entity, so it belongs with sessions
+	// and keys rather than with domains and nodes.
+	ObjectInvitation = "invitation"
+
 	// There was an ObjectLoadBalancer, and the project actions below now cover
 	// what its three covered: a project IS the load balancer, so creating one
 	// is project.create and there is nothing left for load_balancer.create to
@@ -71,6 +76,32 @@ const (
 	ActionRoleDelete   = "role.delete"
 	ActionMemberAdd    = "member.add"
 	ActionMemberRemove = "member.remove"
+	// A member who holds no role is given one. It is a distinct action from
+	// member.add because it is a distinct event: somebody joined earlier, by
+	// accepting an invitation, and this is the separate decision about what
+	// they may do (account-invitations V6). Recording it as member.add would
+	// claim they joined at this moment, which the roster and the invitation's
+	// own accept entry both contradict.
+	ActionMemberAssignRole = "member.assign_role"
+
+	// The invitation lifecycle.
+	//
+	// invitation.accept and invitation.decline both name the invited ADDRESS
+	// and the acting USER, and that pair is the point of them. The pair on an
+	// acceptance is the evidence that the person who joined is the person who
+	// was invited — the whole of the binding, written down. The pair on a
+	// decline is what lets an administrator tell a refusal from a message that
+	// never arrived, which are the two things fourteen days of silence cannot
+	// distinguish and which call for opposite responses.
+	//
+	// invitation.expire is written by the system actor, matching apikey.expire:
+	// nobody did it, time did.
+	ActionInvitationCreate  = "invitation.create"
+	ActionInvitationRevoke  = "invitation.revoke"
+	ActionInvitationResend  = "invitation.resend"
+	ActionInvitationAccept  = "invitation.accept"
+	ActionInvitationDecline = "invitation.decline"
+	ActionInvitationExpire  = "invitation.expire"
 
 	ActionAccountCreate = "account.create"
 	ActionAccountSelect = "account.select"
@@ -123,9 +154,12 @@ var actionClasses = map[string][]string{
 		// adding a member hands someone one. An operator asking "who touched
 		// the credentials" means these too.
 		ActionRoleCreate, ActionRoleUpdate, ActionRoleDelete,
-		ActionMemberAdd, ActionMemberRemove,
+		ActionMemberAdd, ActionMemberRemove, ActionMemberAssignRole,
 		ActionAccountCreate, ActionAccountSelect,
 		ActionAccountCheckout, ActionAccountTransfer,
+		// An invitation confers access to an account, so it is a credential.
+		ActionInvitationCreate, ActionInvitationRevoke, ActionInvitationResend,
+		ActionInvitationAccept, ActionInvitationDecline, ActionInvitationExpire,
 	},
 }
 

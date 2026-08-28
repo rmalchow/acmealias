@@ -221,10 +221,46 @@ type limitsBlock struct {
 	ProjectsPerPersonalAccount int `koanf:"projects_per_personal_account"`
 
 	AllowAccountCreation bool `koanf:"allow_account_creation"`
+
+	// The three invitation limits (account-invitations V9).
+	//
+	// Inviting is the first surface where an ORDINARY TENANT can make this
+	// service send mail to an address of their choosing. That is a spam vector
+	// pointed at third parties, and the reputational damage lands on the
+	// sending domain — ours — which is also the domain every customer's
+	// certificate renewal depends on receiving mail about.
+	//
+	// Each bounds a different abuse and none of them substitutes for another:
+	//
+	//   - per account per hour bounds bulk sending from one account.
+	//   - per address per day bounds using MANY accounts to harass ONE person.
+	//     THIS IS THE ONE THAT CANNOT BE OMITTED: any authenticated user may
+	//     create accounts freely, so a per-account limit is defeated by
+	//     creating accounts, and only a limit keyed on the victim's address
+	//     survives that.
+	//   - re-sends of one invitation per hour bounds using the re-send button
+	//     as a send button.
+	//
+	// They are configuration rather than constants because the right numbers
+	// are a fact about how customers actually behave, which nobody knows yet,
+	// and the first onboarding of a twenty-person team should not need a
+	// deployment.
+	InvitationsPerAccountPerHour int           `koanf:"invitations_per_account_per_hour"`
+	InvitationsPerAddressPerDay  int           `koanf:"invitations_per_address_per_day"`
+	InvitationResendInterval     time.Duration `koanf:"invitation_resend_interval"`
 }
 
+// The invitation defaults are deliberately generous per account and tight per
+// address. Onboarding a new team is a legitimate burst of twenty; nobody has a
+// legitimate reason to send one person invitations from three different
+// accounts in a day.
 func (limitsBlock) Defaults() map[string]any {
-	return map[string]any{"projects_per_personal_account": 5}
+	return map[string]any{
+		"projects_per_personal_account":    5,
+		"invitations_per_account_per_hour": 20,
+		"invitations_per_address_per_day":  3,
+		"invitation_resend_interval":       time.Hour,
+	}
 }
 
 // mailBlock is who the deployment is when it sends mail, and where it sends it
@@ -325,6 +361,10 @@ func (f fileConfig) toConfig() Config {
 
 		AllowAccountCreation:       f.Limits.AllowAccountCreation,
 		ProjectsPerPersonalAccount: f.Limits.ProjectsPerPersonalAccount,
+
+		InvitationsPerAccountPerHour: f.Limits.InvitationsPerAccountPerHour,
+		InvitationsPerAddressPerDay:  f.Limits.InvitationsPerAddressPerDay,
+		InvitationResendInterval:     f.Limits.InvitationResendInterval,
 
 		AliasUseDomain:          f.Challenge.AliasUseDomain,
 		ChallengeTTL:            f.Challenge.TTL,
@@ -450,6 +490,9 @@ var envBindings = []envBinding{
 
 	{"ACME_ALLOW_ACCOUNT_CREATION", "limits.allow_account_creation", kindBool},
 	{"ACME_PROJECT_QUOTA", "limits.projects_per_personal_account", kindInt},
+	{"ACME_INVITATIONS_PER_ACCOUNT_PER_HOUR", "limits.invitations_per_account_per_hour", kindInt},
+	{"ACME_INVITATIONS_PER_ADDRESS_PER_DAY", "limits.invitations_per_address_per_day", kindInt},
+	{"ACME_INVITATION_RESEND_INTERVAL", "limits.invitation_resend_interval", kindDuration},
 
 	{"ACME_MAIL_FROM", "mail.from", kindString},
 	{"ACME_MAIL_SENDER", "mail.sender", kindString},

@@ -728,8 +728,13 @@ type memberView struct {
 	UserID      model.ID `json:"userId"`
 	Subject     string   `json:"subject"`
 	DisplayName string   `json:"displayName"`
-	RoleID      model.ID `json:"roleId"`
-	RoleName    string   `json:"roleName"`
+	// RoleID and RoleName are absent for a member who holds no role — somebody
+	// who accepted an invitation and is waiting for one (account-invitations
+	// V6). `omitempty` rather than a zero identifier, so the console can tell
+	// "no role" from "a role whose name failed to load"; it renders the former
+	// as a state to act on rather than as a blank cell.
+	RoleID   *model.ID `json:"roleId,omitempty"`
+	RoleName string    `json:"roleName,omitempty"`
 }
 
 // listMembers is readable by any member of the account without a grant (task

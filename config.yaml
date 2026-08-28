@@ -221,6 +221,36 @@ limits:
   # Zero or less turns it off.
   projects_per_personal_account: '${ACME_PROJECT_QUOTA:5}'
 
+  # How often an account may invite people, and how often one person may be
+  # invited.
+  #
+  # Inviting is the first thing an ordinary customer can do that makes this
+  # service send mail to an address of THEIR choosing. That is a spam vector
+  # pointed at third parties, and what it damages is the reputation of the
+  # domain we send from — which is also the domain every customer's renewal
+  # notices arrive from. A domain that starts in spam folders stays there.
+  #
+  # Each of the three bounds a different abuse:
+  #
+  #   per account per hour   bulk sending from one account
+  #   per address per day    using MANY accounts to harass ONE person
+  #   resend interval        using the re-send button as a send button
+  #
+  # THE PER-ADDRESS ONE CANNOT BE TURNED OFF SAFELY. It counts across every
+  # account, because any authenticated person may create accounts freely, so a
+  # per-account limit is defeated by creating accounts. The other two are
+  # conveniences by comparison.
+  #
+  # Generous per account and tight per address, on purpose: onboarding a new
+  # team is a legitimate burst of twenty, and nobody has a legitimate reason to
+  # send one person invitations from three different accounts in a day.
+  #
+  # Zero or less turns one off. Do that to the per-address limit only with a
+  # reason you would write down.
+  invitations_per_account_per_hour: '${ACME_INVITATIONS_PER_ACCOUNT_PER_HOUR:20}'
+  invitations_per_address_per_day: '${ACME_INVITATIONS_PER_ADDRESS_PER_DAY:3}'
+  invitation_resend_interval: '${ACME_INVITATION_RESEND_INTERVAL:1h}'
+
   # False, and that is the important half: creating an account creates a
   # tenant, and a deployment authenticating a whole organisation does not want
   # every member of it able to do that.

@@ -55,6 +55,20 @@ var crossAccountReaders = map[string]string{
 	"RecordDelegationSeen":        recordDelegationWhy,
 	"RecordDelegationMissing":     recordDelegationWhy,
 	"AccountOwnedBy":              "checkout's producer: it asks 'the account with this id that this person owns' before any scope exists, and answers not-found for every other case so the route is not an existence oracle",
+
+	// The four invitation functions, and they are all here for one reason: an
+	// invitee is NOT A MEMBER of the account they are joining. That is the
+	// entire point of an invitation, so there is no scope to pass and a scoped
+	// read would return nothing — silently, which is what row-level security
+	// does with no scope.
+	//
+	// What confines each of them is stated per function rather than in one
+	// sentence, because they are confined by different things and only one of
+	// them is confined by anything the caller supplies.
+	"ResolveInvitation":     "the invitee is not a member yet; confined by a 256-bit token whose hash is the only stored form",
+	"InvitationsForAddress": "spans every account by construction — 'what is outstanding for this address' cannot be asked from inside one; confined by the caller's own VERIFIED address, never by a parameter",
+	"AcceptInvitation":      "builds its scope from the account the resolved invitation names, which is the account the caller is about to become a member of and is not one of yet",
+	"DeclineInvitation":     "the same, and it must work for the same person in the same state — declining is only meaningful before joining",
 }
 
 // recordDelegationWhy covers BOTH callers of the two stamping functions, because
