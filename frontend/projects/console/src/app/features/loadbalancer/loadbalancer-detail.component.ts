@@ -1,3 +1,4 @@
+import { DatePipe } from '@angular/common';
 import { Component, computed, inject, input, OnChanges, signal } from '@angular/core';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
@@ -14,7 +15,7 @@ import { InteractionsPanelComponent } from './interactions-panel.component';
 import { openNodeCreateModal } from './node-create.modal';
 import { openNodeEditModal } from './node-edit.modal';
 import { openDomainHelpModal } from './domain-help.modal';
-import { StatusChip, caaChip, delegationChip, domainCheckFor } from './domain-status';
+import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } from './domain-status';
 
 /**
  * 19.2 — a load balancer: its nodes, its domain table, the DNS plan panel (records, live
@@ -23,6 +24,7 @@ import { StatusChip, caaChip, delegationChip, domainCheckFor } from './domain-st
 @Component({
   selector: 'app-loadbalancer-detail',
   imports: [
+    DatePipe,
     PageHeaderComponent,
     ApiKeysPanelComponent,
     InteractionsPanelComponent,
@@ -150,6 +152,7 @@ import { StatusChip, caaChip, delegationChip, domainCheckFor } from './domain-st
             <th>Name</th>
             <th>Challenge name</th>
             <th nzWidth="12rem">Alias</th>
+            <th nzWidth="16rem">Challenges</th>
             <th nzWidth="18rem">Validation</th>
             <th nzWidth="5rem"></th>
           </tr>
@@ -160,6 +163,40 @@ import { StatusChip, caaChip, delegationChip, domainCheckFor } from './domain-st
               <td>{{ d.name }}</td>
               <td class="ac-mono">{{ d.challengeName }}</td>
               <td>{{ d.aliasLabel }}</td>
+              <!-- What the SERVICE will do for this domain, from what it has stored — as opposed
+                   to the live lookup in the next cell, which says what DNS says this second. The
+                   two disagree for a few minutes after somebody publishes the record, and that
+                   gap is exactly what the check-now button below is for (task 4.3). -->
+              <td>
+                @if (activation(d); as act) {
+                  <nz-tag [nzColor]="act.colour" nz-tooltip [nzTooltipTitle]="act.tooltip">{{ act.label }}</nz-tag>
+                }
+                <p class="ac-hint stamp">
+                  @if (d.lastSuccessAt && stoppedResolving(d)) {
+                    <!-- "Since when", never "how many failures": the question anybody actually
+                         asks is how long this has been true, and the timestamp answers it exactly
+                         (design A1). No deadline is stated because there is none — nothing is
+                         ever switched off for this (A3). -->
+                    Last seen {{ d.lastSuccessAt | date: 'medium' }}
+                  } @else if (d.lastCheckedAt) {
+                    Last looked {{ d.lastCheckedAt | date: 'medium' }}
+                  } @else {
+                    Not looked at yet
+                  }
+                </p>
+                <!-- Offered in BOTH states a check can change: a domain that has never been seen,
+                     and one whose delegation has stopped resolving. The second is the state
+                     somebody has just fixed — they republished the CNAME and want the row to say
+                     so — and gating on "never seen" alone left exactly that person with no
+                     way to ask, waiting out the settled cadence for a chip to go green. Nothing
+                     is at risk in pressing it: a check that fails records only that we looked
+                     (A3). -->
+                @if (canCheckNow(d)) {
+                  <button nz-button nzType="link" nzSize="small" class="explain" [nzLoading]="verifying()" (click)="checkNow()">
+                    Check now
+                  </button>
+                }
+              </td>
               <td>
                 @if (checks(d); as ch) {
                   <div class="check">
@@ -218,7 +255,7 @@ import { StatusChip, caaChip, delegationChip, domainCheckFor } from './domain-st
             <span nz-icon nzType="download"></span>
             Zone snippet
           </a>
-          <button nz-button nzType="primary" nzSize="small" [nzLoading]="verifying()" (click)="verify()">
+          <button nz-button nzType="primary" nzSize="small" [nzLoading]="verifying()" (click)="checkNow()">
             Run verification
           </button>
         </div>
@@ -315,6 +352,11 @@ import { StatusChip, caaChip, delegationChip, domainCheckFor } from './domain-st
         padding: 0;
         height: auto;
       }
+      /* When we last looked, under the chip that says what we found. Small and quiet: it is
+       * context for the chip, not a second verdict. */
+      .stamp {
+        margin: 0.25rem 0 0;
+      }
       /* Row actions are icons only — the label is in the tooltip and the aria-label, so a table
        * of twenty rows is not twenty repetitions of the word "Delete". */
       .row-actions {
@@ -391,7 +433,7 @@ export class LoadBalancerDetailComponent implements OnChanges {
     // rows it explained, so a customer who mistyped a CNAME read "never validated" — which
     // sounds like "nothing has happened yet" and means "this will never work". The check stores
     // nothing, so running it on load changes when it happens, not what it does.
-    this.verify(false);
+    this.verify();
   }
 
   load(): void {
@@ -416,14 +458,41 @@ export class LoadBalancerDetailComponent implements OnChanges {
   }
 
   /**
+   * The check that runs when the screen opens: an observation, and nothing else (design
+   * domain-setup-feedback D1). It stores nothing, which is what makes it safe to run on every
+   * open and what keeps it a GET.
+   */
+  verify(): void {
+    this.runCheck(false);
+  }
+
+  /**
+   * The check somebody asked for — which is also what brings a domain online (design
+   * domain-activation task 4.3).
+   *
+   * Same lookup, against a POST that records what it saw. Pressing it is the difference between
+   * a customer who has just published their CNAME waiting out the poller's interval and being
+   * answerable now. There is no way to hurt yourself with it: a check that fails to see a
+   * delegation records only that we looked, and never takes an active domain offline (A3).
+   */
+  checkNow(): void {
+    this.runCheck(true);
+  }
+
+  /**
    * One route, two readers: the per-domain chips and the whole-plan table below.
    *
-   * `manual` is whether somebody pressed the button. It decides only whether a failure is worth a
-   * banner — an answer that was asked for and did not come deserves one, an answer nobody asked
-   * for does not (design D1). A deployment with no resolver is not an error either way: the route
-   * answers "not checked" for every row rather than refusing (design D4).
+   * `record` is whether somebody pressed a button, and it decides two things. It picks the POST,
+   * which stores the delegation answer, over the GET, which does not — a page must never activate
+   * domains on a customer's behalf as a side effect of being opened. And it decides whether a
+   * failure is worth a banner: an answer that was asked for and did not come deserves one, an
+   * answer nobody asked for does not (design D1).
+   *
+   * A deployment with no resolver is not an error either way — the route answers "not checked"
+   * for every row rather than refusing (design D4) — and, since nothing was asked, records
+   * nothing.
    */
-  verify(manual = true): void {
+  private runCheck(record: boolean): void {
     // The screen is reused across ids and this request now takes as long as DNS does, so an
     // answer can arrive after somebody has navigated to another load balancer. Dropping it is the
     // whole fix: the plan table joins its rows by NAME, so a late answer for the previous load
@@ -432,20 +501,28 @@ export class LoadBalancerDetailComponent implements OnChanges {
     // Only a press spins the button. The automatic pass used to set it too, so every screen open
     // showed a spinner on a control nobody had touched — which reads as if something were
     // running on the customer's behalf, and is exactly the manual control task 2.9 keeps honest.
-    if (manual) this.verifying.set(true);
+    if (record) this.verifying.set(true);
     this.verifyError.set(null);
-    this.api.get<VerificationResult>(`/loadbalancers/${asked}/verification`).subscribe({
+    const path = `/loadbalancers/${asked}/verification`;
+    const answer = record
+      ? this.api.post<VerificationResult>(path)
+      : this.api.get<VerificationResult>(path);
+    answer.subscribe({
       next: (v) => {
-        if (manual) this.verifying.set(false);
+        if (record) this.verifying.set(false);
         if (this.id() !== asked) return;
         this.checkFailed.set(false);
         this.verification.set(v);
+        // The recorded check has just changed the stored activation stamps, and the rows on
+        // screen still carry the old ones. Reloading is what turns "waiting for delegation" into
+        // "active" in front of the person who published the record ten seconds ago.
+        if (record) this.load();
       },
       error: (err) => {
-        if (manual) this.verifying.set(false);
+        if (record) this.verifying.set(false);
         if (this.id() !== asked) return;
         this.checkFailed.set(true);
-        if (manual) this.verifyError.set(apiErrorMessage(err));
+        if (record) this.verifyError.set(apiErrorMessage(err));
       },
     });
   }
@@ -485,6 +562,44 @@ export class LoadBalancerDetailComponent implements OnChanges {
     const s = this.statusFor(name, type);
     if (!s || s.status === 'undetermined') return '—';
     return s.found || '—';
+  }
+
+  /**
+   * What the service will actually do for this domain, from the state it has stored (design
+   * domain-activation A1). Deliberately not derived from the live check beside it: `/present`
+   * consults the stored stamps and nothing else, so this is the only honest answer to "will a
+   * renewal work right now".
+   */
+  activation(d: Domain): StatusChip {
+    return activationChip(d);
+  }
+
+  /**
+   * The last look did not find the delegation — we checked after we last saw it.
+   *
+   * This is what makes "since when" sayable from two timestamps and no counter: `lastSuccessAt`
+   * is the moment it was last there, and its distance from now is the answer to the only question
+   * anybody asks (design A1). It is never a countdown; nothing is switched off for it (A3).
+   */
+  stoppedResolving(d: Domain): boolean {
+    if (!d.lastSuccessAt || !d.lastCheckedAt) return false;
+    return Date.parse(d.lastCheckedAt) > Date.parse(d.lastSuccessAt);
+  }
+
+  /**
+   * Whether this row offers **Check now** — true in both states a check can change.
+   *
+   * "Waiting" is the obvious one: the customer has just published the record and does not want to
+   * wait out the poller. "Not resolving" is the one that was missing, and it is the same person a
+   * day later: they broke the delegation, saw the orange chip, fixed it, and had no way to say
+   * so. Without this they wait out the settled cadence — a day — for a chip to go green.
+   *
+   * An "active" row offers nothing, because there is nothing a check could tell it that it does
+   * not already say. Pressing it anywhere is safe regardless: a check that fails to see a
+   * delegation records only that we looked, and never takes a domain offline (design A3).
+   */
+  canCheckNow(d: Domain): boolean {
+    return !d.lastSuccessAt || this.stoppedResolving(d);
   }
 
   /**
@@ -582,7 +697,7 @@ export class LoadBalancerDetailComponent implements OnChanges {
       this.loadPlan();
       // The answers are per domain now, so a set of domains that changed leaves them describing
       // a table that no longer exists — and the new row is the one somebody is waiting on.
-      this.verify(false);
+      this.verify();
     });
   }
 
@@ -615,7 +730,7 @@ export class LoadBalancerDetailComponent implements OnChanges {
       next: () => {
         this.load();
         this.loadPlan();
-        this.verify(false);
+        this.verify();
       },
       error: (err) => this.error.set(apiErrorMessage(err)),
     });

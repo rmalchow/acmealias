@@ -1,147 +1,126 @@
 ## ADDED Requirements
 
-### Requirement: Authentication is delegated, and the session is the boundary
+### Requirement: A person may become a user by enrolling with an address they control
 
-The service SHALL authenticate every person through an external identity provider in every edition,
-and SHALL hold no credential of its own: no password, no password hash, and no credential reset
-token.
+The service SHALL allow a person to become a user through the identity provider's enrolment flow, and
+SHALL grant no capability beyond signing in until the provider has verified control of the address.
 
-Authentication SHALL produce a server-side session, and session storage, idle and absolute expiry,
-revocation and cross-site request forgery protection SHALL be properties of the session layer rather
-than of the provider. No component downstream of the session SHALL depend on the provider's tokens,
-claims or flows.
+A verification token SHALL expire, SHALL be usable once, and SHALL NOT be guessable.
 
-Editions and planes SHALL differ in which application of the provider they authenticate against, and
-the service SHALL verify which application issued a token rather than accepting any validly signed
-token. A person admitted to one application SHALL NOT thereby be admitted to another.
+A person who enrols SHALL become a member of no account other than the personal account every user
+holds, and SHALL join a team account only by invitation or by creating one.
 
-#### Scenario: No credential is stored
+#### Scenario: An unverified address cannot use the service
 
-- **WHEN** the datastore is inspected for a user
-- **THEN** it contains no password, password hash or reset token
+- **WHEN** a person enrols and signs in without verifying their address
+- **THEN** they can verify or request another verification, and nothing else
 
-#### Scenario: No interface accepts a password
+#### Scenario: Verification is single-use
 
-- **WHEN** the management interface and API are enumerated
-- **THEN** no route or screen accepts a password
-
-#### Scenario: Cross-site request forgery protection does not depend on the provider
-
-- **WHEN** a state-changing management request is made with a valid session and no matching token header
+- **WHEN** a verification token is used a second time
 - **THEN** it is refused
 
-#### Scenario: A customer identity does not reach the staff surface
+#### Scenario: Enrolment does not reveal existing users
 
-- **WHEN** a person admitted to the customer application reaches the staff surface
-- **THEN** they are not authenticated there, and a token issued for the customer application is refused
-
-#### Scenario: A session's idle life is bounded
-
-- **WHEN** a session is not used for the configured idle period
-- **THEN** it is no longer usable, whatever the provider's own session state
-
-### Requirement: A person becomes a user by enrolling with an address they control
-
-The service SHALL allow a person to become a user through the identity provider's enrolment, and SHALL
-grant no capability beyond signing in until the provider has verified control of the address.
-
-The token SHALL expire, SHALL be usable once, and SHALL NOT be guessable.
-
-Registration SHALL create a user that belongs to no account.
-
-#### Scenario: An unconfirmed address cannot use the service
-
-- **WHEN** a person registers and signs in without confirming their address
-- **THEN** they can confirm or request another confirmation, and nothing else
-
-#### Scenario: Confirmation is single-use
-
-- **WHEN** a confirmation token is used a second time
-- **THEN** it is refused
-
-#### Scenario: Registration does not reveal existing users
-
-- **WHEN** a person registers with an address that already has a user
+- **WHEN** a person enrols with an address that already has a user
 - **THEN** the response does not differ from one for an address that does not
 
-#### Scenario: A registered user belongs to nothing yet
+#### Scenario: A self-enrolled user reaches no team account
 
-- **WHEN** a person completes registration and confirmation
-- **THEN** they hold no membership, and may create an account or accept an invitation
+- **WHEN** a person completes enrolment and signs in
+- **THEN** they hold their personal account and no membership of any other account
 
-### Requirement: Credential handling is verified in the provider, and a reset ends the service's sessions
+### Requirement: Enrolment and account creation are separately governed, and each is refused where it is performed
+
+Self-service enrolment SHALL be governed at the identity provider, and self-service creation of a
+team account SHALL be governed by the service's own configuration and refused by the endpoint itself
+with a stated reason.
+
+The refusal of team account creation SHALL NOT depend on the interface omitting a link, and SHALL NOT
+depend on enrolment being closed. Accepting an invitation SHALL remain possible while team account
+creation is closed.
+
+Closing self-service enrolment SHALL NOT be assumed to close team account creation, and closing team
+account creation SHALL NOT be assumed to close enrolment.
+
+#### Scenario: A closed deployment refuses the endpoint directly
+
+- **WHEN** the team account creation endpoint is called directly while self-service creation is disabled
+- **THEN** it refuses with a reason and no account is created
+
+#### Scenario: An enrolled person still has somewhere to work
+
+- **WHEN** a person who has enrolled signs in while team account creation is disabled
+- **THEN** they hold a session and their personal account, and can create no team account
+
+#### Scenario: Invitation acceptance is unaffected
+
+- **WHEN** an invited person enrols through an invitation while self-service team account creation is disabled
+- **THEN** enrolment succeeds and they join the inviting account
+
+#### Scenario: Enabling account creation requires no code change
+
+- **WHEN** the configuration enabling self-service team account creation is set
+- **THEN** the same endpoint accepts account creation
+
+### Requirement: Credential handling is verified in the provider, and a reset bounds the service's sessions
 
 The deployment SHALL verify that the identity provider's enrolment verifies address control, that its
-recovery flow verifies address control, that neither enrolment nor recovery discloses whether an
-address already has a user, and that repeated failed attempts against one user or from one source are
-limited.
+recovery flow verifies address control, that neither enrolment nor recovery nor sign-in discloses
+whether an address already has a user, and that repeated failed attempts against one user or from one
+source are limited.
 
 When a person's credential is reset or their access is revoked at the provider, sessions the service
-established for them SHALL cease to be usable.
+established for them SHALL cease to be usable within a bounded period, and that period SHALL be
+stated rather than implied.
 
 #### Scenario: Recovery does not disclose whether an address is known
 
 - **WHEN** recovery is requested for an address with no user
 - **THEN** the response is indistinguishable from one for an address that has one
 
+#### Scenario: Sign-in does not disclose whether an address is known
+
+- **WHEN** sign-in is attempted with an identifier that has no user
+- **THEN** the response is indistinguishable from one for an identifier that has one with a wrong credential
+
 #### Scenario: Repeated attempts are slowed
 
 - **WHEN** authentication is attempted repeatedly against one user or from one source
 - **THEN** further attempts are refused until the limit clears
 
-#### Scenario: A reset does not leave a session alive
+#### Scenario: A reset does not leave a session alive indefinitely
 
 - **WHEN** a person's credential is reset at the provider
-- **THEN** sessions the service established before the reset are no longer usable
+- **THEN** sessions the service established before the reset cease to be usable within the configured idle period
 
 #### Scenario: Unverified enrolment grants nothing
 
 - **WHEN** a person enrols without completing address verification
 - **THEN** no session usable against the management interface is established
 
-### Requirement: Self-registration is governed by configuration and refused by the server when closed
-
-The service SHALL expose its account-creation endpoint in every deployment, and SHALL refuse it with
-a stated reason whenever self-service account creation is not enabled by configuration.
-
-The refusal SHALL be applied by the endpoint itself, and SHALL NOT depend on the interface omitting a
-link, and SHALL NOT depend on the identity provider's enrolment being closed. Accepting an invitation
-SHALL remain possible while account creation is closed.
-
-#### Scenario: A closed deployment refuses the endpoint directly
-
-- **WHEN** the account-creation endpoint is called directly while self-service account creation is disabled
-- **THEN** it refuses with a reason and no account is created
-
-#### Scenario: An enrolled person without an account can do nothing
-
-- **WHEN** a person who has enrolled at the provider signs in while account creation is disabled
-- **THEN** they hold a session, belong to no account, and no inventory or spend is reachable
-
-#### Scenario: Invitation acceptance is unaffected
-
-- **WHEN** an invited person enrols through an invitation while self-service account creation is disabled
-- **THEN** enrolment succeeds and they join the inviting account
-
-#### Scenario: Enabling account creation requires no code change
-
-- **WHEN** the configuration enabling self-service account creation is set
-- **THEN** the same endpoint accepts account creation
-
 ### Requirement: The staff and customer surfaces are separated within the identity provider
 
 Staff and customers MAY share one identity provider instance. Where they do, customers SHALL be
-registered as external users with no access to the provider's administration interface, staff and
-customers SHALL be admitted through separate applications each bound to its own group, and the staff
-application SHALL have no enrolment flow.
+registered as users with no access to the provider's administration interface or application
+dashboard, staff and customers SHALL be admitted through separate applications each bound to its own
+group, and the staff application SHALL have no enrolment flow.
 
-Membership of a customer's account SHALL NOT be derived from any group or attribute held by the
-identity provider.
+The service SHALL verify which application issued a token rather than accepting any validly signed
+token, and a person admitted to one application SHALL NOT thereby be admitted to another.
+
+Membership of any account SHALL NOT be derived from a group or attribute held by the identity
+provider.
 
 #### Scenario: A customer cannot enrol into the staff surface
 
 - **WHEN** enrolment is attempted against the staff application
-- **THEN** no enrolment flow is reachable and no account is created
+- **THEN** no enrolment flow is reachable and no user is created
+
+#### Scenario: A customer token is refused on the staff surface
+
+- **WHEN** a token issued for the customer application is presented to the staff surface
+- **THEN** it is refused
 
 #### Scenario: A customer identity reaches no administrative interface
 
@@ -151,4 +130,4 @@ identity provider.
 #### Scenario: A provider group does not place anyone in an account
 
 - **WHEN** a person is added to any group in the identity provider
-- **THEN** they gain no membership of any customer account
+- **THEN** they gain no membership of any account

@@ -1,4 +1,4 @@
-import { CAAStatus, DelegationStatus, DomainCheck, VerificationResult } from '@acme/shared';
+import { CAAStatus, DelegationStatus, Domain, DomainCheck, VerificationResult } from '@acme/shared';
 
 /**
  * What a domain's row says about its records.
@@ -129,4 +129,56 @@ export function caaChip(status: CAAStatus): StatusChip {
         tooltip: 'We have not looked yet. This is not a statement about your DNS.',
       };
   }
+}
+
+/**
+ * Whether we will publish challenges for this domain at all, from the two timestamps the service
+ * stores (design domain-activation A1).
+ *
+ * This is a different question from the delegation chip above, and the two sit side by side
+ * because they are answered by different things at different moments. The delegation chip is a
+ * LIVE lookup made when the screen opened: it says what DNS says right now. This one is the
+ * service's own record of what it has seen out of band, and it is the thing `/present` actually
+ * consults — a domain can read "configured correctly" and still be waiting, for the few minutes
+ * between publishing the record and the poller noticing it. Showing only the live answer would
+ * make that gap look like a bug in us.
+ *
+ * WAITING IS NOT BROKEN (task 4.1). A domain added five minutes ago has never been seen, and the
+ * customer is at that moment in the middle of publishing the record. It is blue and phrased as an
+ * expectation, never red and never the word "failed".
+ *
+ * Nothing here ever implies the domain will be switched off. It cannot be: activation is one-way
+ * (A3), and a delegation that has stopped resolving costs renewals, not the domain.
+ */
+export function activationChip(d: Domain): StatusChip {
+  if (!d.lastSuccessAt) {
+    return {
+      label: 'waiting for delegation',
+      colour: 'blue',
+      tooltip:
+        'We have not seen this domain’s CNAME yet, so certificates for it cannot be issued. ' +
+        'Publish the record and we will pick it up on our own — we keep looking and never give up.',
+    };
+  }
+  // Parsed rather than compared as strings: the service sends RFC 3339, which admits a numeric
+  // offset as well as `Z` and a variable number of fractional digits, so `>` on the text would
+  // put a domain into the wrong state whenever the two stamps were written in different
+  // representations. Two Date parses per row is not a cost worth being clever about.
+  if (d.lastCheckedAt && Date.parse(d.lastCheckedAt) > Date.parse(d.lastSuccessAt)) {
+    return {
+      label: 'not resolving',
+      // Orange, not red: this domain still works in every sense we control. Something in DNS
+      // changed and its next renewal will fail, which is worth saying loudly and is not a failure
+      // of the domain's setup here.
+      colour: 'orange',
+      tooltip:
+        'This domain is active and stays active — we never switch one off. But the last time we ' +
+        'looked, its CNAME did not resolve, so renewals will fail until it does again.',
+    };
+  }
+  return {
+    label: 'active',
+    colour: 'green',
+    tooltip: 'We have seen this domain’s delegation, so challenges for it are published.',
+  };
 }

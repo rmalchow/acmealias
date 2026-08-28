@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
-### Requirement: Protective limits apply in every edition, independently of payment
+### Requirement: Protective limits apply to every account, independently of payment
 
 The service SHALL bound the load one account can place on resources shared with other accounts, and
-SHALL apply those bounds in every edition to every account, whatever its credit balance and whether or
-not it is charged at all.
+SHALL apply those bounds to every account whatever its kind, whatever its credit balance, and whether
+or not it is charged for anything at all.
 
 A protective limit SHALL NOT be purchasable, and SHALL NOT be raised by holding a larger balance.
 
@@ -13,10 +13,10 @@ A protective limit SHALL NOT be purchasable, and SHALL NOT be raised by holding 
 - **WHEN** an account with a large credit balance reaches a protective limit
 - **THEN** the operation is refused
 
-#### Scenario: An unbilled edition is still protected
+#### Scenario: An account that is charged nothing is still bounded
 
-- **WHEN** an edition that charges nobody is running
-- **THEN** protective limits still apply
+- **WHEN** an account that holds no balance and is charged for nothing reaches a protective limit
+- **THEN** the operation is refused
 
 ### Requirement: One account cannot exhaust a shared resource
 
@@ -45,8 +45,8 @@ An account reaching a limit SHALL NOT affect the operations of any other account
 The service SHALL, when refusing an operation because of a protective limit, report which limit was
 reached and when the operation may be retried.
 
-A refusal for a protective limit SHALL be distinguishable from a refusal for an exhausted credit
-balance and from a failure.
+A refusal for a protective limit SHALL be distinguishable from a refusal for an account that is not
+funded and from a failure, and SHALL NOT direct the caller to a balance.
 
 #### Scenario: The client is told what to do
 
@@ -55,5 +55,20 @@ balance and from a failure.
 
 #### Scenario: A limit is not mistaken for insolvency
 
-- **WHEN** an operation is refused by a protective limit
-- **THEN** the response is distinguishable from one refused for an exhausted balance
+- **WHEN** a publication is refused by a protective limit
+- **THEN** the response differs from the one given when the account is not funded, and does not report payment as the remedy
+
+### Requirement: Protective limits are configuration
+
+The values of protective limits SHALL be settings rather than constants, and SHALL NOT be settable
+from within an account.
+
+#### Scenario: A limit is changed without a release
+
+- **WHEN** an operator changes a protective limit
+- **THEN** the new value takes effect without rebuilding the service
+
+#### Scenario: No tenant surface raises a limit
+
+- **WHEN** the management interface, the console and the command line are searched for an operation that raises a protective limit for an account
+- **THEN** no such operation is offered within the account

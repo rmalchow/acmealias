@@ -48,6 +48,27 @@ export interface Domain {
   aliasId: string;
   aliasLabel: string;
   createdAt: string;
+  /**
+   * Activation, as two timestamps and nothing else (design domain-activation A1).
+   *
+   * There is no `active` flag beside them on purpose. Active IS `lastSuccessAt !== null`, and a
+   * boolean sent alongside would be a second source of truth for one fact — the first bug being
+   * the row where the two disagree.
+   *
+   * Three states are readable here, and the console has to tell them apart:
+   *
+   *   - `lastSuccessAt` null — we have never seen this domain's delegation. Challenges for it are
+   *     refused. This is the normal state of a domain added five minutes ago, not a fault.
+   *   - `lastCheckedAt` at or before `lastSuccessAt` — the last look found it. Everything is fine.
+   *   - `lastCheckedAt` after `lastSuccessAt` — we looked and did not find it. The domain stays
+   *     active regardless: activation is never reversed by a lookup (A3), so this is information
+   *     about renewals that will fail, never a countdown to being switched off.
+   *
+   * `lastCheckedAt` null means we have not looked yet — including every domain that predates the
+   * feature, which the migration activated without pretending to have checked.
+   */
+  lastCheckedAt: string | null;
+  lastSuccessAt: string | null;
 }
 
 /** Body of `POST /loadbalancers/:id/domains`. */

@@ -5,6 +5,9 @@
 The service SHALL allow an account to buy a quantity of credits through an external payment provider,
 and SHALL increase the account's balance only when that provider reports the payment as completed.
 
+The quantity SHALL come from a fixed set offered by the service and SHALL NOT be supplied by the
+caller.
+
 The increase and the record of the purchase SHALL be applied indivisibly, so that no balance rises
 without a purchase recording why.
 
@@ -23,15 +26,35 @@ without a purchase recording why.
 - **WHEN** an account's balance has risen
 - **THEN** a purchase record exists naming the provider's reference for the payment
 
+#### Scenario: An amount that is not offered is refused
+
+- **WHEN** a purchase is begun for a quantity the service does not offer
+- **THEN** it is refused and no payment is initiated
+
+### Requirement: Card details are never held by the service
+
+Payment details SHALL be collected by the payment provider, and the service SHALL store no card
+number, no equivalent instrument, and no credential of the payer.
+
+#### Scenario: The payer leaves the service to pay
+
+- **WHEN** a purchase is begun
+- **THEN** payment details are entered at the provider and not at the service
+
+#### Scenario: No instrument is stored
+
+- **WHEN** the datastore is inspected after a completed purchase
+- **THEN** it holds the provider's reference and the amount, and no payment instrument
+
 ### Requirement: Purchase state is derived from the provider and never entered by hand
 
-The service SHALL determine purchase state from what the payment provider reports, and SHALL NOT offer
-any interface that sets an account's balance or purchase state directly.
+The service SHALL determine purchase state from what the payment provider reports, and SHALL NOT
+offer any interface that sets an account's balance or purchase state directly.
 
 #### Scenario: No interface sets a balance
 
 - **WHEN** the management interface, the console and the command line are searched for an operation that sets a balance
-- **THEN** no such operation exists
+- **THEN** no such operation exists within an account
 
 #### Scenario: Purchase state follows the provider
 
@@ -60,33 +83,29 @@ A notification that fails verification SHALL be recorded as an attempt.
 - **WHEN** the provider delivers the same completed payment notification more than once
 - **THEN** the balance rises once
 
-### Requirement: The internal edition exposes no payment interface
+### Requirement: Payment is governed by configuration, and the checkout keeps its meaning either way
 
-In an edition that authenticates through an identity provider the service SHALL NOT expose any screen,
-route or notification concerning payment, and SHALL NOT require a balance for any operation.
+The service SHALL refuse to initiate a payment while payment is not enabled by configuration, and the
+checkout SHALL then behave as it does without a provider: a charge from the offered amounts, recorded
+and audited.
 
-#### Scenario: No billing surface internally
+Enabling payment SHALL change where the money comes from and SHALL NOT change what the checkout
+records.
 
-- **WHEN** that edition is running
-- **THEN** no screen, route or notification concerns payment
+While payment is disabled, the only other source of a balance SHALL be an audited operator credit
+grant, and no interface within an account SHALL set a balance.
 
-#### Scenario: Operations do not depend on a balance
+#### Scenario: A purchase does not reach the provider while payment is disabled
 
-- **WHEN** an operator performs any operation in that edition
-- **THEN** it succeeds without reference to a balance
+- **WHEN** a checkout is performed while payment is disabled
+- **THEN** no payment is initiated, and the account is credited and audited as it is without a provider
 
-### Requirement: Credit purchase is governed by configuration, and staff grants remain the only alternative source
+#### Scenario: The recorded charge is the same either way
 
-The service SHALL refuse the credit purchase endpoints with a stated reason whenever payment is not
-enabled by configuration. While payment is disabled, a balance SHALL be established only by an
-audited staff credit grant, and no interface within an account SHALL set a balance.
+- **WHEN** a checkout completes with payment enabled and with payment disabled
+- **THEN** the balance change and the audit entry are of the same shape in both cases
 
-#### Scenario: Purchase is refused while payment is disabled
+#### Scenario: An operator grant still funds an account
 
-- **WHEN** a purchase is initiated while payment is disabled
-- **THEN** it is refused with a reason and no balance changes
-
-#### Scenario: A staff grant still funds an account
-
-- **WHEN** staff grant credits to an account while payment is disabled
+- **WHEN** an operator grants credits to an account while payment is disabled
 - **THEN** the balance rises, the grant is audited, and the account can see it

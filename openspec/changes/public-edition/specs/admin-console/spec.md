@@ -1,67 +1,46 @@
 ## ADDED Requirements
 
-### Requirement: The console carries account creation, not credentials
+### Requirement: A person arriving for the first time is led to a working domain
 
-The console SHALL hand off enrolment, sign-in and credential recovery to the identity provider, and
-SHALL present no screen that accepts a password.
+The console SHALL lead a person who has just signed in for the first time, and whose account contains
+nothing, to a first domain whose delegation has been seen, without them contacting anyone and without
+requiring them to understand the inventory hierarchy before they begin.
 
-The console SHALL present account creation to a signed-in person who belongs to no account, subject to
-the configuration governing self-service account creation.
+The path SHALL have a stated end, and reaching it SHALL be reported.
 
-#### Scenario: Sign-in is handed off
+#### Scenario: An empty account offers a way to begin
 
-- **WHEN** a person with no session opens the console
-- **THEN** they are sent to the identity provider, and no credential is entered in the console
+- **WHEN** a person signs in and their account contains no project, load balancer or domain
+- **THEN** the console offers a way to add a first domain rather than an empty list
 
-#### Scenario: A person with no account is offered account creation
+#### Scenario: First run ends at a working domain
 
-- **WHEN** a signed-in person who belongs to no account opens the console
-- **THEN** they are offered account creation, or an invitation to accept, and nothing else
+- **WHEN** the first domain's delegation has been seen
+- **THEN** the console reports that first run is complete and what the service will now do
 
-#### Scenario: The provider's screens do not disclose whether an address is known
+#### Scenario: No certificate is promised
 
-- **WHEN** enrolment or recovery is requested for an address that already has a user
-- **THEN** the outcome presented is the same as for an address that does not
+- **WHEN** first run completes
+- **THEN** nothing in it states or implies that a certificate has been issued or installed
 
-### Requirement: A new customer reaches a verified domain without help
+### Requirement: An account can see what it has bought
 
-The console SHALL lead a person who has just confirmed their address to a first verified domain: it
-SHALL show the exact record to publish, SHALL let them check it, and SHALL report the result plainly
-enough to act on.
-
-#### Scenario: The record to publish is shown exactly
-
-- **WHEN** a person adds their first domain
-- **THEN** the record to publish is shown in the form it must be published in
-
-#### Scenario: The check reports what to do next
-
-- **WHEN** the delegation has not been published or is wrong
-- **THEN** the console says what was found and what was expected
-
-#### Scenario: Verification is reported when it succeeds
-
-- **WHEN** the delegation resolves as expected
-- **THEN** the console reports the domain as verified
-
-### Requirement: Credit balance and payment state are visible to the account, and only to it
-
-The console SHALL show an account its credit balance, its purchase history and its payment state, and
-SHALL show them only to members of that account.
+The console SHALL show an account its purchase history — what was bought, when, for how much, and the
+provider's reference for the payment — and SHALL show it only to members of that account.
 
 The console SHALL NOT offer any control that sets a balance directly.
 
-#### Scenario: The balance is visible to a member
+#### Scenario: Purchases are visible to a member
 
 - **WHEN** a member of an account opens the billing screen
-- **THEN** the balance, purchase history and payment state of that account are shown
+- **THEN** that account's purchases are listed with their amounts, dates and provider references
 
 #### Scenario: Billing state is confined to the account
 
-- **WHEN** a member of one account views balance or payment state
-- **THEN** nothing of another account's balance or payment is shown
+- **WHEN** a member of one account views its purchases
+- **THEN** nothing of another account's purchases is shown
 
 #### Scenario: No control sets a balance
 
 - **WHEN** the billing screen is inspected for a control that sets a balance
-- **THEN** no such control is offered, and buying credits is the only way to raise it
+- **THEN** no such control is offered, and buying credits is the only way within the account to raise it

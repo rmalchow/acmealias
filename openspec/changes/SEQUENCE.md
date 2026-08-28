@@ -50,7 +50,13 @@ the bottom.
 9. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-10. **`public-edition`** — self-registration, payment, abuse limits, the marketing site.
+10. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
+    never spoken to: a self-service enrolment flow at the identity provider, a real payment provider
+    behind the checkout that currently takes no money, protective limits that hold whether or not
+    anybody has paid, the production identity provider and the rest of the staff/customer separation,
+    and a marketing site carrying the commitments other changes describe as "published". It no longer
+    has anything to do with editions — `personal-and-team-accounts` removed the second one — and its
+    tenancy, balance, ledger and delegation-checking halves have all gone to the changes above it.
 
 `staff-plane` sits outside the numbering. Its suspension button and blocklists are needed **before
 the first customer we do not know personally**, wherever that falls; its support-access machinery
@@ -75,8 +81,13 @@ answering challenges for the first customers, who are people we know and enrol b
   customers, not a date. Note that the BALANCE arrives earlier, with
   `personal-and-team-accounts`: that change adds the number, the checkout that raises it and what
   happens at zero. What waits is the ledger that draws it down.
-- **`public-edition`'s registration switch** and payment integration wait until strangers arrive.
-  Both are built and inert by then, so opening them is configuration.
+- **`public-edition`'s enrolment flow** and payment integration wait until strangers arrive. Both are
+  built and inert by then, so opening them is configuration. One correction to what this used to say:
+  the switch that gates strangers is **not** `ACME_ALLOW_ACCOUNT_CREATION`. That is built, and after
+  `personal-and-team-accounts` it gates buying a TEAM account — every person who can enrol at the
+  identity provider gets a free personal account regardless. The front door is the provider's
+  enrolment flow, which does not exist yet, so the service is closed by accident rather than by
+  decision. `public-edition` U9 works that out.
 - **`staff-plane`'s suspension path** must exist before the first stranger. Discovering it is
   missing during a live phishing incident is the wrong time to write it.
 

@@ -1,296 +1,253 @@
+# Opening the service to strangers: enrolment, payment, limits, and the site that says what we do
+
+## What this changes, in one paragraph
+
+Everything in this repository up to here builds a service for customers we already know. They are
+enrolled by hand at the identity provider, given credits by hand, and told what the service does in
+person. This change is the set of decisions that stop being avoidable when the next customer is
+somebody we have never spoken to: an enrolment flow they can walk on their own, a payment provider
+behind the checkout that currently takes no money, limits that hold whether or not anybody has paid,
+and a public site that states what the service does, what it does not do, who operates it, and where
+to send an abuse report.
+
+## Terms, before they are used
+
+- A **personal account** is the free account every user has by being a user. Nobody creates one — it
+  is materialized at first sign-in. Five projects, no colleagues, no roles, no balance, always
+  usable. `personal-and-team-accounts` C1.
+- A **team account** is created by paying, holds other people and the roles they are given, and works
+  only while its credit balance is above zero.
+- **Enrolment** is becoming a *user* at the identity provider — authentik's word for what a person
+  does when they sign themselves up. It is a different act from creating an account, and after
+  `personal-and-team-accounts` the difference matters less than it used to, which is one of the
+  findings below.
+- **Checkout** is `POST /api/v1/accounts/{accountId}/checkout`. It exists today, it offers a fixed
+  set of amounts, it credits the account and writes an audit entry, and there is no payment processor
+  behind it.
+- A **protective limit** bounds what one account can do to a resource shared with every other
+  account. It is not a price and not an entitlement, and it is the distinction this change spends the
+  most words on.
+
 ## Why
 
-### One change was doing two jobs
+### This change used to be about editions, and there is only one edition now
 
-`add-accounts-and-public-edition` argued for two things at once, and said so in its own opening:
-*"introduce the small number of seams that let one codebase serve both, and — the part with a
-deadline on it — get the data model ready before there is public data in it."*
+The version of this proposal being replaced had a service with two products in one binary. The
+**internal** edition served our own operators: one account created at migration time, membership and
+roles derived from identity-provider group claims, four fixed role names configured by environment
+variable. The **public** edition served strangers: self-registration, payment, isolation. Its central
+decision was that one artifact served both, with a setting called `ACME_EDITION` read at startup
+selecting which implementations were wired in.
 
-Those two halves have come apart, decisively and in the right direction. The half with the
-deadline — an owner above `projects`, authorization that takes an object, query confinement that
-cannot be forgotten — has been superseded in far more detail by seven changes that did not exist
-when it was written. `tenancy-and-permissions` alone replaced its four fixed roles with a
-permission model, its plans with a different economic model, and its account-scoped queries with a
-mechanism that gates reads inside the query rather than after it.
+`personal-and-team-accounts` removed the internal edition. Not as tidying — as a precondition, and it
+says so: *"every user has their own personal account" and "everybody shares the one account created
+at migration time" cannot both be true, so there is no order in which this is optional.* With it went
+`ScopeForBootstrap`, automatic account selection at sign-in, the group-to-role mapping and its
+`ACME_*_GROUP` settings, derived membership, and the constraint that the internal edition's behaviour
+must not change. `ACME_EDITION` was never built, and there is nothing left for it to select between.
 
-What remains is the other half: **the public edition as a product.** Signing strangers up,
-authenticating them without an identity provider we run, taking their money, protecting the shared
-service from them, and telling them what it does — none of which any other change has touched, and
-none of which the data-model work depends on.
+That takes the spine out of this change. Several other changes have taken the organs, and rather than
+leave a document that is mostly archaeology, this is a rewrite that says in one table where each
+piece went and then argues only about what is left.
 
-This change is that residue, made coherent on its own terms. It is deliberately a *smaller and
-more commercial* proposal than the one it replaces, and that is the point: a decision not to sell
-this can now be taken without unpicking anything, because nothing structural is left inside it.
+### What went where
 
-### What a "public edition" is
+| What this change used to own | Where it is now |
+| --- | --- |
+| One artifact, edition selected by `ACME_EDITION`, reported at startup and on the readiness endpoint | **Withdrawn.** There is one edition (`personal-and-team-accounts` C10). Validating settings at startup is `layered-configuration`'s |
+| Accounts, ownership, query confinement, the acting account | `tenancy-and-permissions` |
+| Two kinds of account, the credit **balance**, the checkout that raises it, suspension at zero, the owner's way back in | `personal-and-team-accounts` C1, C3, C4, C8 |
+| The credit **ledger** that draws the balance down — prices, events, the tick, warnings, the operator credit grant | `metering-and-credits` |
+| Authentication delegated to an identity provider; the service holding no password, hash or reset token | `authentik-and-self-signup` K1, which built it. Keycloak is gone, both consoles have their own OIDC client, and the acceptance suite signs in through authentik's flow executor |
+| Checking a domain's delegation and explaining what is wrong with it | `domain-setup-feedback` |
+| Whether the service works for a domain before its delegation has been seen | `domain-activation` |
+| Invitations, and enrolment reached through one | `account-invitations` |
+| Editions never share a datastore or a zone | **Reversed** — see below, because this is the one that deserved a real argument rather than a deletion |
 
-The service answers ACME DNS-01 challenges — and, once `dns-records` lands, serves authoritative
-DNS — for domains whose zones we do not administer. A customer publishes one `CNAME` record once,
-and their load balancer can thereafter prove control of that domain to a certificate authority by
-asking us, rather than by holding write credentials for their own DNS.
+### What is actually left, and why each piece is worth a decision
 
-Two audiences can be sold that, and they share nothing else:
+**Payment.** The checkout is built and takes no money. `personal-and-team-accounts` C8 built it that
+way deliberately — *"the whole funding mechanism minus the processor"*, so that the balance, the
+funded predicate, the suspension it drives, the console flow and the audit entry all get exercised
+against real state while nobody can lose money to a mistake — and named this change as the owner of
+the integration that replaces the middle step. That is a narrow, well-specified job: a hosted payment
+page, a notification endpoint verified by signature, a balance that rises once per completed payment
+however many times the provider retries, and refunds handled as recorded adjustments.
 
-- **The internal edition** — our own operators, signing in through our own identity provider,
-  administering our own fleet. Everyone who can sign in is trusted. This is what exists today.
-- **The public edition** — the same machinery offered to strangers. Someone finds a marketing
-  page, clicks "try now", registers with an email address, confirms it, adds a domain, publishes
-  the `CNAME` we show them, buys credits, and is running within a few minutes. They must never
-  see, or be able to reach, another customer's anything.
+**Protective limits.** These have become considerably more important than when they were written, for
+a reason worth stating plainly: after `personal-and-team-accounts`, **most accounts in a running
+deployment are free ones.** A personal account is charged nothing, so nothing about a balance bounds
+it. The first abusive account will not be a paying one, and a limit that applies only to paying
+accounts protects nothing at the moment it is needed.
 
-The isolation half of that last sentence is `tenancy-and-permissions`' problem and is solved
-there. This change is everything else a stranger needs before and around it.
+**Self-registration, which is a bigger decision than it was.** `authentik-and-self-signup` deferred
+its enrolment flow here on the grounds that self-registration is a separate concern from signing in
+and is not needed until strangers arrive. That is right. What has also happened is that the
+*reasoning* behind this change's registration switch has been falsified, and the rewrite has to deal
+with it rather than inherit it — see the next section, because it is the single most consequential
+thing this document has to say.
 
-### Why the remainder is worth a change of its own
+**The published obligations.** `staff-plane` commits to a twelve-hour abuse response and says
+elsewhere that it is published. `metering-and-credits` and `personal-and-team-accounts` both describe
+a customer who needs to understand what they are buying. Nothing owns the publishing. This change
+does, and it treats the contents as requirements rather than as copy suggestions, because a site that
+ships as a signup button and three sentences leaves four other changes referring to commitments that
+do not exist anywhere a customer can read them.
 
-Because every item in it is a genuine commitment we do not currently carry, and each one is
-individually decidable:
+**Onboarding, now much smaller.** `domain-setup-feedback` and `domain-activation` between them own
+almost all of what used to be the onboarding story. What is left is the first five minutes of an
+account with nothing in it, which nobody else can own and which is mostly a screen decision.
 
-- **Identity for strangers.** Somebody has to hold customer credentials, verify addresses and
-  survive credential-stuffing. This proposal originally answered "we do, in a new package"; it now
-  answers "the identity provider does, in a second tenant" — see below, because the reversal is the
-  largest single change to this proposal.
-- **Email becomes load-bearing.** A verification message that bounces is a customer who cannot get
-  in. Deliverability is an operational commitment, not a library dependency, and it is now split
-  across two senders: the identity provider sends verification and recovery, we send invitations and
-  balance warnings.
-- **Taking money** means a payment provider in the request path of something, webhook
-  verification, and an auditable trail from a card charge to a credit balance.
-- **Strangers on shared infrastructure** need limits that exist regardless of what they have paid,
-  because the first abusive account will not be a paying one.
+**The staff/customer separation, partly built.** Two applications with separate OIDC clients, two
+hostnames, a group-restricted staff application and a brand exist in the development stack. External
+user types, an enrolment flow that the staff application must not have, administrator multi-factor,
+and the two ingress rules the hostname split actually depends on do not exist anywhere.
 
-Bundled into a data-model change, none of those got a decision of its own. Separated, each does.
+### The finding that changes this proposal: the registration switch no longer gates what it was built to gate
+
+This is worth its own section, because it is the sort of thing that stays wrong quietly.
+
+The switch exists and works. `ACME_ALLOW_ACCOUNT_CREATION` defaults to false and is enforced in the
+handler — `backend/internal/httpapi/admin_accounts.go` refuses `POST /api/v1/accounts` with
+`account_creation_closed` — exactly as this change asked, with the enforcement in the server rather
+than in the console's navigation, because a route hidden from a menu is still on the internet. The
+comment beside the setting cites this change's U9 by number.
+
+What has changed is what that route means. When U9 was written, creating an account meant *becoming a
+tenant*, and the argument rested on a sentence: a person who has somehow enrolled but cannot create
+an account has a session and nothing to do with it — no inventory, no zones, no spend.
+
+**That sentence is now false.** `personal-and-team-accounts` made the personal account implicit, and
+`internal/oidcauth/flow.go` materializes it at sign-in unconditionally. Anyone who can enrol at the
+identity provider gets a free account with five projects and can publish challenge values in it.
+`POST /api/v1/accounts` now creates a **team** account by paying, so the switch guards the commercial
+flow, not the front door.
+
+The front door is the identity provider's enrolment flow — which does not exist, so the service is
+closed by accident rather than by decision. Three consequences follow, and the design works each of
+them out:
+
+- **The free personal account is the free tier.** Nobody decided to offer one; it fell out of the
+  account model. It is a good answer and should be adopted deliberately, which also closes an open
+  question this change used to carry — *free tier, or trial only?* — from the other end.
+- **Protective limits become the floor rather than a precaution**, because they are the only thing
+  bounding an account that pays nothing.
+- **There is no one switch.** There are three things — the enrolment flow, personal-account
+  materialization, and the account-creation setting — and believing any single one of them closes the
+  door is the failure mode. The design's U9 sets them out in a table and argues against adding a
+  fourth.
+
+### The one decision that deserved an argument rather than a deletion
+
+The removed decision list above has a line in it saying "reversed", and it is the rule that two
+editions never share a datastore or a DNS zone.
+
+The edition axis is gone, so the rule as written has nothing to separate. But it was saying two
+things, and only one of them was about editions. The other was: *do not keep our own inventory in the
+same database as customers'.* A single-edition service can still want that, so it is argued rather
+than dropped.
+
+It is rejected, and the reasoning is that the argument has inverted. Confinement — reads gated inside
+the query by row-level security — is the entire safety property of this product, and the strongest
+continuous test of it is having data in there we would notice leaking. `tenancy-and-permissions` task
+11.4 is the cautionary tale: four cross-account reads had been silently emptied, one of them stopping
+certificate issuance altogether, and it took a full run from a destroyed database to find. Keeping
+our own domains somewhere else means nobody who would notice ever spends a day inside the property we
+are selling.
+
+The blast-radius arithmetic has changed too. The original argument imagined one database holding our
+fleet's inventory next to *strangers' payment records*. With a hosted payment page there are no
+payment records here — a provider reference and an amount — and with delegated authentication there
+are no password hashes. What one database holds is domain names, alias labels, challenge values and
+email addresses, ours and customers' alike. That is not a compliance surface worth a second
+deployment, a second migration chain, a second backup to test and a second thing to patch, for one
+operator and a handful of our own domains.
+
+So our own domains live in an ordinary account beside everybody else's. What survives of the rule is
+smaller and still real: **environments** never share a datastore or a zone — the development stack
+seeds users whose password is `devpass` — and the service's own hostnames are served by something
+that is not this service, so the page a customer visits to find out what is happening survives the
+thing being down.
 
 ## What Changes
 
-### Editions are selected by configuration, not by build
-
-One artifact. `ACME_EDITION=internal|public` is read at startup and selects which implementations
-are wired into the composition root, and the value in force is reported in the startup log and on
-the readiness endpoint, so an operator looking at a running process can see which policy it holds.
-This is decision E1 of `add-accounts-and-public-edition`, adopted unchanged.
-
-Two editions never share a datastore or a DNS zone. Two deployments, two databases, two zones —
-never one deployment serving both audiences.
-
-### Customers authenticate through the same identity provider we already run
-
-This proposal originally specified a second authentication implementation — `internal/localauth`,
-with email and password, argon2id hashing, confirmation tokens, reset tokens and attempt limiting —
-and explicitly rejected running an identity provider for public customers as "the worst of both".
-**That is reversed**, and it is worth saying why plainly, because it deletes the largest piece of
-new security-sensitive code in the change.
-
-The rejection assumed the identity provider would be *additional*. It is not: one is being run
-anyway, at `auth.acmealias.com`, for staff and for the internal edition. Adding customers to it is a
-second tenant, not a second system. The second half of the rejection — that registration through
-someone else's screens cedes the part of onboarding worth owning — was also wrong, because the
-screens can be themed, and the part of onboarding that actually matters happens *after* sign-in:
-publishing a `CNAME`, adding a domain, watching it verify.
-
-What this buys is not convenience, it is liability. The service ends up holding **no password, no
-password hash and no reset token for anybody.** A database compromise discloses email addresses and
-zone contents, not credentials. For a product whose entire pitch is "you do not hand us credentials",
-holding a table of strangers' password hashes was always slightly against the grain.
-
-What it costs is worth being exact about, because "delegate it" is not the same as "it is handled":
-
-- **Every sign-in now depends on the provider being up**, staff sign-in during an incident included.
-  The answer is `internal/adminctl`, which authenticates with a database connection string and no
-  provider at all — which is precisely why `staff-plane` keeps it.
-- **The obligations become configuration rather than code**, and configuration nobody verified is
-  more dangerous than code nobody wrote, because it looks finished. Address verification, recovery
-  verification, non-disclosure on enrolment and recovery, and failed-attempt limiting are each a flow
-  or policy that can be silently absent. They are on the acceptance list rather than assumed.
-- **One thing genuinely gets harder.** When a customer resets a compromised credential, the provider
-  ends *its* sessions — but the service's own session store knows nothing about it, so an attacker's
-  session in our console can outlive the reset that was meant to kill it. That needs a back-channel
-  logout, a revocation check, or a deliberately short idle expiry. It is the one place delegation
-  adds a problem instead of removing one, and it is called out because the failure is silent.
-- **We now operate an internet-facing authentication service**: backups, a tested restore, and a
-  patching commitment.
-
-The seam itself survives with one implementation behind it, for a reason worth stating: it is the
-boundary at which the provider's vocabulary stops. Nothing downstream of a session sees a token, a
-claim or a flow, which is what keeps the provider replaceable.
-
-A vocabulary note that matters more than it looks: **enrolling creates a *user*, not an account.**
-
-A vocabulary note that matters more than it looks: In the model these changes now share, a user is a person and exists outside every
-account; an account is the billing entity that holds credits and owns projects. A newly registered
-user belongs to no account at all, and `tenancy-and-permissions` specifies that state as a normal
-one. The original spec text called registration "creating an account", which is now ambiguous
-between two different entities, and this change renames it.
-
-### Payment funds credits, not subscriptions
-
-The original proposed flat monthly plans with quotas, and a Stripe adapter turning
-checkout and webhooks into subscription state. `metering-and-credits` replaced that model
-wholesale: credits are **prepaid**, actions are deducted, active zones accrue over time, and an
-overdraft carries an account briefly before its zones are withdrawn.
-
-So what this change keeps is only the part that model does not have: **the payment provider
-integration that turns money into credits.** A customer buys a quantity of credits; the provider
-confirms the payment; the balance rises. Purchase state is derived from what the provider reports
-and can never be typed in by hand, because a balance a human can edit is not an auditable one.
-
-Everything downstream of the balance — the ledger, accrual, the overdraft, warning by projected
-time remaining, suspension, restoration — belongs to `metering-and-credits` and is not restated
-here.
-
-### Abuse limits are not the same thing as credits, and survive separately
-
-The original's quotas did two unrelated jobs under one name. The product half (how many domains
-your plan permits) is gone, replaced by credits. The **protective** half survives and is separated
-out, because it answers a different question: not *have you paid for this*, but *can one account
-degrade the service for everyone else*.
-
-Concurrency and rate limits therefore apply in every edition, to every account, independently of
-its balance. A prepaid account with a large balance is not entitled to publish a million challenge
-values at once, and an internal deployment that bills nobody still wants the protection.
-
-### A stranger reaches a verified domain without help
-
-The onboarding story survives as written, and it is the clearest thing the original had: a person
-who has just confirmed their address is led to a first verified domain. The console shows the
-exact record to publish, in the form it must be published in; lets them check it; and reports what
-was found against what was expected, plainly enough to act on.
-
-`GET /loadbalancers/:id/verification` already answers exactly that question, so "try now" has a
-satisfying shape built almost entirely from endpoints that exist. No certificate is issued, because
-issuing certificates is not what this service does.
-
-### The marketing site is not in the binary
-
-The console is compiled into the Go binary, which is right for an administration UI delivered and
-versioned with the service. Every reason for that is inverted for a marketing site: it changes on a
-commercial cadence for commercial reasons, it must serve people who have no account and no session,
-and a copy change must never require redeploying a DNS service. Static site, its own pipeline, its
-own domain; the only coupling is a link into the public edition's registration route.
-
-### The first customers arrive by invitation, and the signup route is switched off at the server
-
-Everything above describes a stranger finding a marketing page and being productive within minutes.
-That is what the public edition is for, and it is not what the first months look like. The first
-customers are people we know, invited by name, given credits by hand while payment integration does
-not yet exist.
-
-That does not make self-service registration something to build later. It makes it something to
-build now and **switch off**, and the interesting part is where the switch lives.
-
-The tempting version is to hide the "sign up" button. That is not a switch, it is a decoration: the
-route is still on the internet, still reachable by anyone who reads the JavaScript bundle, and still
-creates accounts when called. So the check goes in the **handler** — one configuration value, one
-refusal, close enough to the work that no other entry point can get past it, and covered by a test
-that calls the endpoint directly rather than clicking through the console.
-
-Keeping the code present and inert has a second benefit beyond honesty about the boundary: the path
-is exercised by tests in both positions, so opening registration one day is a configuration change
-rather than the first time that code has ever run against a real request.
-
-The same applies to buying credits. The purchase endpoints exist and refuse while payment is
-disabled, and the only way a balance rises in the meantime is the audited staff credit grant that
-`staff-plane` already specifies for wrongful suspensions and payments in flight. The rule this
-proposal cares most about survives intact: nothing inside a customer's own account can set a balance.
-
-Meanwhile accounts arrive through `account-invitations`, which is a different route with a different
-flow and is not governed by either switch — an invited person registers by accepting an invitation,
-which is exactly what an invite-only period needs.
-
-### One sentence the marketing site has to contain
-
-Not about DNSSEC — that concern left with the DNS product, because nobody delegates a zone here. The
-sentence that matters now is the boundary:
-
-**The service answers ACME DNS-01 challenges and observes the certificates that result. It does not
-host your DNS, does not issue certificates, and does not hold private keys.**
-
-Every one of those is a thing a visitor may reasonably assume from the words "DNS" and "certificate"
-on a page, and every one is cheaper to say there than to explain in a support reply after somebody
-has signed up expecting it. The pitch — *you publish one CNAME, once, and never hand anyone your DNS
-credentials* — only works if what is being declined is stated as plainly as what is offered.
-
-### Not in scope
-
-- **Anything about tenancy, permissions, roles or query confinement.** All of it belongs to
-  `tenancy-and-permissions`.
-- **The credit ledger itself** — accrual, overdraft, suspension, restoration, warnings. Those are
-  `metering-and-credits`.
-- **Invitations.** `account-invitations` owns the whole flow, including registration reached
-  *through* an invitation link.
-- **Certificate issuance, storage or distribution.** Unchanged: we answer challenges.
-- **Social sign-in, SSO for public customers, SCIM.** The identity seam makes them additive.
-- **Choosing when to open self-registration.** The switch is specified here; the decision to turn it
-  on is commercial.
-
-## What this change no longer contains
-
-Everything below was in `add-accounts-and-public-edition` and has been taken over, in most cases in
-considerably more depth. A reader of the old change needs to be told where its content went:
-
-| Removed from this change | Now specified by |
-| --- | --- |
-| The whole `accounts-and-tenancy` capability — the account entity, ownership by inheritance, account-scoped queries, the single-account internal edition | `tenancy-and-permissions` |
-| Roles held per account, the four fixed role names, and *"within an account there SHALL be no finer scoping"* | `tenancy-and-permissions`, which **contradicts** all three: roles become per-account records holding permission grants, and the set is no longer closed |
-| The non-goal *"per-project or per-domain roles inside an account"* | Reversed by `tenancy-and-permissions`; per-project API keys and per-name DNS record grants are the reason it exists |
-| *"A person may hold memberships in several accounts"* and the acting-account rule | `tenancy-and-permissions`, whose P19 makes the acting account a session selection that is additionally named on every request |
-| `service-inventory` MODIFIED *"The inventory is projects, load balancers and domains"* | `tenancy-and-permissions` modifies the same requirement; keeping it here would be a direct delta collision |
-| `service-inventory` MODIFIED *"An alias is one label in the served zone per challenge name"* | `tenancy-and-permissions`, likewise |
-| *"A domain earns nothing until it is verified"* | Its ownership half is `tenancy-and-permissions`' *"A domain name is unique within an account and not across the service"*, which states the same rule and the same CNAME-as-proof argument. Its billing half has no home; see *Impact* |
-| Plans, product quotas, subscription state | `metering-and-credits`, which replaces flat plans with prepaid credits |
-| *"Suspension does not break certificate renewal without warning"* | `metering-and-credits`, which specifies a soft-suspension lifecycle in detail: existing service continues, new publishes are refused, zone-time accrues into an overdraft, and only exhausting the overdraft withdraws zones |
-| `admin-console` *"The console makes the acting account unambiguous"* | `tenancy-and-permissions`' session selection, which gates functionality on a selected account rather than merely displaying one |
-| Decision E6, alias labels as an edition behaviour | Already superseded before this collapse, by the archived change `generate-alias-labels`: label style is one setting, not an edition difference |
+- **A payment provider behind the existing checkout.** Hosted payment page, a notification endpoint
+  verified by signature, one credit per completed payment however often it is delivered, refunds and
+  reversals as recorded adjustments, and no interface anywhere that sets a balance by hand. Gated by
+  configuration, so it lands disabled and is switched on separately.
+- **Protective limits** on simultaneously published challenge values and on publication rate, per
+  account, independent of balance and of account kind, with a refusal that names the limit and when
+  it clears and is distinguishable from the `402` an unfunded team account gets.
+- **A self-service enrolment flow** at the identity provider, with address verification,
+  non-disclosure, and attempt limiting — and mail configured, because every one of those flows sends
+  a message and until then they all fail silently at the last step.
+- **The rest of the staff/customer separation**: external user types for customers, no enrolment flow
+  on the staff application, administrator multi-factor, and the two ingress rules without which the
+  hostname split restricts nothing.
+- **A marketing site**, static, its own pipeline, its own domain, linking into the console's sign-in
+  route — carrying the published obligations, and not released without them.
+- **A first-run path** for an account with nothing in it, over endpoints that already answer.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `credit-purchase`: buying credits through a payment provider — checkout, verified provider
-  notifications, the derivation of balance increases from confirmed payments, and the absence of
-  any interface for setting a balance by hand.
-- `abuse-limits`: concurrency and rate limits that protect the shared service from any single
-  account in any edition, independently of payment.
+- `credit-purchase` — buying credits through a payment provider: checkout, verified provider
+  notifications, balance increases derived from confirmed payments, and the absence of any interface
+  that sets a balance by hand.
+- `abuse-limits` — bounds on what one account can do to a shared resource, applying whether or not
+  the account is charged for anything.
 
 ### Modified Capabilities
 
-- `identity-and-roles`: authentication is delegated to an external identity provider in both
-  editions, which hold no credential of their own; editions differ only in the tenant they
-  authenticate against; the obligations that come with delegation — verified enrolment, verified
-  recovery, non-disclosure, attempt limiting, and a reset that ends the service's own sessions — are
-  stated as requirements on the deployment.
-- `service-operations`: one artifact serves both editions with the edition selected at startup and
-  reported at runtime; editions never share a datastore or a zone; public-facing content is
-  released separately from the service; the acceptance environment exercises both editions.
-- `admin-console`: the console gains the account-creation screen for a signed-in person who belongs
-  to no account, the onboarding path to a first verified domain, and the account's credit balance and
-  payment state. It gains no credential screens.
+- `identity-and-roles` — a person may become a user by enrolling themselves; the obligations that come
+  with delegating that (verified enrolment, verified recovery, non-disclosure, attempt limiting, a
+  bounded post-reset session window) are stated as requirements on the deployment; and the staff and
+  customer surfaces are separated within the one identity provider.
+- `service-operations` — the public site is delivered separately from the service and states what the
+  service does, does not do, commits to and holds; deployments of different environments share
+  neither datastore nor zone.
+- `admin-console` — first run for an empty account, and an account's own view of what it has bought.
+- `acceptance-harness` — the commercial path is exercised before release: enrolment, a purchase
+  through the provider, and a protective limit refusing an operation.
 
 ## Impact
 
-- **`internal/oidcauth`.** Moves behind an interface with no behavioural change. The interface is
-  the whole of the work; the existing flow is not rewritten.
-- **`internal/localauth`.** Not built. The reversal above deletes it; what remains in its place is
-  identity-provider configuration and the acceptance tests that prove the configuration is real.
-- **The identity provider.** Becomes a hard dependency of every sign-in and an operational
-  responsibility: a customer tenant separate from the staff one, backups, a tested restore, and a
-  patching commitment.
-- **Email delivery.** New operational dependency, and the first one whose failure locks a customer
-  out rather than degrading a feature. `account-invitations` depends on the same delivery path.
-- **Payment provider.** New external dependency and a webhook endpoint whose verification is
-  security-critical. The endpoint is unauthenticated by nature and must be verified by signature.
-- **`internal/config`.** `ACME_EDITION` and the settings each edition requires, validated at
-  startup so a public deployment cannot start without the things a public deployment needs.
-- **The console.** Account creation and purchase screens, and the onboarding path. No credential
-  screens: enrolment, sign-in and recovery are handed off.
-- **The acceptance harness.** Must run both editions, or the edition that is not used daily will be
-  broken exactly when it matters.
-- **Marketing site.** A separate deployment with its own pipeline and release cadence.
-- **One requirement is left unhoused deliberately.** The billing half of *"A domain earns nothing
-  until it is verified"* — that an unverified domain is not charged for — is not stated anywhere.
-  It plausibly belongs beside `metering-and-credits`' *"Active zones are charged over time"*, but
-  that change is already written and this one does not edit it. Note that under a credit model the
-  billed unit is the zone rather than the domain, so the gap may be empty in practice; it is
-  flagged rather than closed.
-- **Nothing on the DNS or challenge answering path.** `internal/dnsserver` and `internal/zoneview`
-  are untouched.
+- **The identity provider.** An enrolment flow, a recovery flow, mail, a reputation policy, and
+  customer users typed `external`. Then a production instance at `auth.acmealias.com` that does not
+  exist: backups, a tested restore, and a patching commitment for an internet-facing authentication
+  service. `internal/adminctl` remains the way in when it is down.
+- **Mail delivery.** A new operational dependency, and the first one whose failure locks a customer
+  out rather than degrading a feature. Shared with `account-invitations` and with
+  `metering-and-credits`' balance warnings, so one delivery failure has three customer-visible
+  consequences.
+- **Payment provider.** A new external dependency and a public notification endpoint whose signature
+  verification is security-critical, because it is an unauthenticated endpoint that raises balances.
+- **`internal/config`.** The payment settings and the protective limits, as configuration rather than
+  constants for the same reason the project quota is. `ACME_ALLOW_ACCOUNT_CREATION` already exists;
+  its doc comment needs correcting, because it explains itself in terms of "creating a tenant" and
+  what it now gates is buying a team account.
+- **The challenge API.** The protective limit check, and its refusal kept distinguishable from
+  `personal-and-team-accounts` C7's `402`.
+- **The console.** First run, and a billing view showing what has been bought. No credential screens:
+  enrolment, sign-in and recovery are handed off.
+- **The ingress.** Two Traefik rules and a test that the staff tree answers 404 through the customer
+  hostname.
+- **Marketing site.** A separate deployment with its own pipeline and release cadence, gated on U11's
+  contents.
+- **Nothing on the DNS or challenge answering path** beyond the limit check.
+  `internal/dnsserver` and `internal/zoneview` are otherwise untouched.
+
+## What this does not solve, and should be read as a decision
+
+- **The numbers are not chosen.** How many simultaneous challenge values, at what rate. This change
+  decides that limits exist, are per account, and are not purchasable; it does not decide the values,
+  because nobody has traffic to decide them from. They are configuration.
+- **Neither is the payment provider.** The shape is specified — hosted page, signed notification,
+  idempotent credit — and the vendor is not. The one non-negotiable property is that the payment page
+  is hosted by them, because that is what keeps card data out of this deployment.
+- **When enrolment opens is a commercial decision.** The flow is built here so that opening it is
+  configuration rather than the first run of untested code. Choosing the day is not made here.
+- **Back-channel logout is deferred.** A credential reset at the provider ends the provider's
+  sessions and not ours. The bound is a short idle expiry, which is a bound rather than a fix, and it
+  is stated rather than implied.
