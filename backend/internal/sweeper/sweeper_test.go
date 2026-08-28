@@ -132,11 +132,7 @@ func TestIntegrationExpiredValueIsUnansweredThenSwept(t *testing.T) {
 	if err := store.CreateProject(ctx, db, sc, &p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := model.LoadBalancer{ProjectID: p.ID, Slug: "lb", Name: "LoadBalancer"}
-	if err := store.CreateLoadBalancer(ctx, db, sc, &lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
-	alias := model.Alias{LoadBalancerID: lb.ID, Label: "a0", ChallengeFQDN: "a0.acme.example.net"}
+	alias := model.Alias{ProjectID: p.ID, Label: "a0", ChallengeFQDN: "a0.acme.example.net"}
 	if err := store.CreateAlias(ctx, db, sc, &alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}

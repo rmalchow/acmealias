@@ -16,16 +16,12 @@ func TestIntegrationDomainRoundTrip(t *testing.T) {
 	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu-prod", Name: "EU Prod"}
-	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
-	alias := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.shop.example.com", Label: "shop-example-com"}
+	alias := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge.shop.example.com", Label: "shop-example-com"}
 	if err := CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
 
-	d := &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "shop.example.com"}
+	d := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "shop.example.com"}
 	if err := CreateDomain(ctx, db, sc, d); err != nil {
 		t.Fatalf("create domain: %v", err)
 	}
@@ -46,12 +42,12 @@ func TestIntegrationDomainRoundTrip(t *testing.T) {
 		t.Fatalf("id = %d, want %s", byName.ID, d.ID)
 	}
 
-	forLoadBalancer, err := ListDomainsForLoadBalancer(ctx, db, sc, lb.ID)
+	forProject, err := ListDomainsForProject(ctx, db, sc, p.ID)
 	if err != nil {
 		t.Fatalf("list for lb: %v", err)
 	}
-	if len(forLoadBalancer) != 1 {
-		t.Fatalf("len(forLoadBalancer) = %d, want 1", len(forLoadBalancer))
+	if len(forProject) != 1 {
+		t.Fatalf("len(forProject) = %d, want 1", len(forProject))
 	}
 
 	forAlias, err := ListDomainsForAlias(ctx, db, sc, alias.ID)
@@ -78,20 +74,16 @@ func TestIntegrationDomainNameIsUnique(t *testing.T) {
 	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu-prod", Name: "EU Prod"}
-	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
-	alias := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
+	alias := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
 	if err := CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
 
-	first := &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "example.com"}
+	first := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "example.com"}
 	if err := CreateDomain(ctx, db, sc, first); err != nil {
 		t.Fatalf("create first: %v", err)
 	}
-	dup := &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "example.com"}
+	dup := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "example.com"}
 	if err := CreateDomain(ctx, db, sc, dup); err == nil {
 		t.Fatal("create duplicate domain name: want an error, got nil")
 	}
@@ -110,18 +102,14 @@ func TestIntegrationActivationQueueAndStamps(t *testing.T) {
 	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu", Name: "EU"}
-	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
 	// One alias, two domains: the apex and its wildcard validate at the same
 	// name and share the one CNAME the customer publishes.
-	alias := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
+	alias := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
 	if err := CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
 	for _, name := range []string{"example.com", "*.example.com"} {
-		if err := CreateDomain(ctx, db, sc, &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: name}); err != nil {
+		if err := CreateDomain(ctx, db, sc, &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: name}); err != nil {
 			t.Fatalf("create domain %q: %v", name, err)
 		}
 	}
@@ -206,15 +194,11 @@ func TestIntegrationDomainJoiningAnActivatedAliasIsActivated(t *testing.T) {
 	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu", Name: "EU"}
-	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
-	alias := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
+	alias := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
 	if err := CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
-	if err := CreateDomain(ctx, db, sc, &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "example.com"}); err != nil {
+	if err := CreateDomain(ctx, db, sc, &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "example.com"}); err != nil {
 		t.Fatalf("create apex: %v", err)
 	}
 
@@ -233,7 +217,7 @@ func TestIntegrationDomainJoiningAnActivatedAliasIsActivated(t *testing.T) {
 	}
 
 	// Now the wildcard joins the alias whose CNAME is already published.
-	wild := &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "*.example.com"}
+	wild := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "*.example.com"}
 	if err := CreateDomain(ctx, db, sc, wild); err != nil {
 		t.Fatalf("create wildcard: %v", err)
 	}

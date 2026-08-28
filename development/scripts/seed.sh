@@ -37,7 +37,7 @@ resolve_cname() {
 publish_delegation() {
   say "publishing the challenge delegation into the fake internet's example.com"
   local plan lines deadline name target line
-  plan="$(acmectl adminctl loadbalancer dns demo/prod)" || die "could not render the DNS plan"
+  plan="$(acmectl adminctl project dns demo)" || die "could not render the DNS plan"
 
   # ONE CNAME PER ALIAS BY CONSTRUCTION: the plan emits exactly one
   # _acme-challenge row per distinct alias — demo.example.com and
@@ -120,14 +120,16 @@ acmectl adminctl account create \
 
 # --- inventory ---------------------------------------------------------------
 say "seeding inventory"
+# One object where there were two: the seed used to create the project `demo`
+# and then the load balancer `prod` inside it, and everything below hung off
+# `prod`. A project IS that object now.
 acmectl adminctl project create --slug demo --name "Demo Project"
-acmectl adminctl loadbalancer create --project demo --slug prod --name "Production"
-acmectl adminctl node add --loadbalancer demo/prod --label a --ipv4 203.0.113.10
-acmectl adminctl node add --loadbalancer demo/prod --label b --ipv4 203.0.113.11
-acmectl adminctl domain create --loadbalancer demo/prod --name "demo.example.com"
-acmectl adminctl domain create --loadbalancer demo/prod --name "*.demo.example.com"
+acmectl adminctl node add --project demo --label a --ipv4 203.0.113.10
+acmectl adminctl node add --project demo --label b --ipv4 203.0.113.11
+acmectl adminctl domain create --project demo --name "demo.example.com"
+acmectl adminctl domain create --project demo --name "*.demo.example.com"
 # demo.example.com and *.demo.example.com deliberately share one alias and one
-# CNAME — the wildcard case the whole design turns on. `adminctl loadbalancer dns`
+# CNAME — the wildcard case the whole design turns on. `adminctl project dns`
 # below should therefore show TWO domains but only ONE _acme-challenge record.
 
 publish_delegation
@@ -137,7 +139,7 @@ publish_delegation
 # to hand it to the `acme` profile's load balancer is right here. Basic auth:
 # the key identifier is the username, the secret is the password.
 say "minting an API key"
-key_out="$(acmectl adminctl key create --loadbalancer demo/prod --name "demo-prod")"
+key_out="$(acmectl adminctl key create --project demo --name "demo")"
 printf '%s\n' "$key_out"
 
 key_id="$(printf '%s\n' "$key_out" | sed -n '1s/.*created api key "\([^"]*\)".*/\1/p')"
@@ -190,8 +192,8 @@ done
 printf ' ok\n'
 
 echo
-say "generated DNS plan for demo/prod:"
-acmectl adminctl loadbalancer dns demo/prod || warn "could not render the DNS plan"
+say "generated DNS plan for demo:"
+acmectl adminctl project dns demo || warn "could not render the DNS plan"
 
 echo
 say "seeded — sign in at http://console.localhost as admin@example.com / devpass"

@@ -69,23 +69,17 @@ func TestThePersonalAccountArc(t *testing.T) {
 		t.Fatalf("creating a project in %s's personal account: %v", readOnlyUser, err)
 	}
 	t.Cleanup(func() {
-		// Deleting the project takes the load balancer, the domain and the alias
-		// with it, which also keeps the five-project quota clear for a stack
-		// that is kept between runs (design C13).
+		// Deleting the project takes the domain and the alias with it, which
+		// also keeps the five-project quota clear for a stack that is kept
+		// between runs (design C13).
 		_, _, _ = s.do(http.MethodDelete, s.acct("/projects/"+project.ID), nil)
 	})
 
-	var lb lbRef
-	if err := s.json(http.MethodPost, s.acct("/projects/"+project.ID+"/loadbalancers"),
-		map[string]string{"slug": "prod", "name": "Acceptance (personal)"},
-		http.StatusCreated, &lb); err != nil {
-		t.Fatalf("creating a load balancer: %v", err)
-	}
 	// Under example.com because that is the zone the fake internet is
 	// authoritative for, and a domain that resolves nowhere can never activate
 	// (domain-activation A1). The name stays unique per run.
 	var domain domainRef
-	if err := s.json(http.MethodPost, s.acct("/loadbalancers/"+lb.ID+"/domains"),
+	if err := s.json(http.MethodPost, s.acct("/projects/"+project.ID+"/domains"),
 		map[string]string{"name": slug + ".example.com"}, http.StatusCreated, &domain); err != nil {
 		t.Fatalf("creating a domain: %v", err)
 	}
@@ -110,7 +104,7 @@ func TestThePersonalAccountArc(t *testing.T) {
 
 	// 5. Publishing a challenge for it — the thing the whole service is for,
 	// done in an account that came into existence by somebody signing in.
-	key := mintKey(t, s, lb.ID, "acceptance: personal account", nil)
+	key := mintKey(t, s, project.ID, "acceptance: personal account", nil)
 	const value = "acceptance-personal-account-value"
 	alias := aliasNameFor(domain.AliasLabel)
 
@@ -120,7 +114,7 @@ func TestThePersonalAccountArc(t *testing.T) {
 	// This is the one place the gate can be proven distinguishable rather than
 	// merely present: the account is personal, so it is funded by definition and
 	// a 402 is impossible; nothing has suspended it, so a 403 is impossible; the
-	// key was minted on this very load balancer, so a 403 for authority is
+	// key was minted on this very project, so a 403 for authority is
 	// impossible; and the domain exists, so a 404 is impossible. The only thing
 	// wrong with this request is the state of the domain, and 409 is the only
 	// answer that says so. The very next lines fix exactly that one thing and
@@ -138,7 +132,7 @@ func TestThePersonalAccountArc(t *testing.T) {
 	}
 
 	// 5b. The customer publishes the delegation, and we look. Now it works.
-	onboardDomain(t, s, lb.ID, domain)
+	onboardDomain(t, s, project.ID, domain)
 
 	if got := present(t, "/present", key.Key.Identifier, key.Secret, domain.ChallengeName, value, nil); got != http.StatusOK {
 		t.Fatalf("publishing a challenge for %s: got %d, want 200", domain.Name, got)

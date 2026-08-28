@@ -250,13 +250,13 @@ func TestIntegrationNodeRoutesReadAScopedRow(t *testing.T) {
 	cl := v.session("admin", roleAdmin)
 	acct := "/api/v1/accounts/" + v.sc.AccountID().String()
 
-	rec := cl.do(http.MethodGet, acct+"/loadbalancers/"+v.lb.ID.String(), "")
+	rec := cl.do(http.MethodGet, acct+"/projects/"+v.projID.String(), "")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("read the load balancer: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("read the project: %d %s", rec.Code, rec.Body.String())
 	}
 	var nodes []model.LBNode
 	err := store.CrossAccount(t.Context(), v.db, func(tx *gorm.DB) error {
-		return tx.Where("load_balancer_id = ?", v.lb.ID).Find(&nodes).Error
+		return tx.Where("project_id = ?", v.projID).Find(&nodes).Error
 	})
 	if err != nil || len(nodes) == 0 {
 		t.Fatalf("read the fixture's nodes: %v (%d found)", err, len(nodes))

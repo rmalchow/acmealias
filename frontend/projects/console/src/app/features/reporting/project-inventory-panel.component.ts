@@ -39,10 +39,6 @@ import { InventoryHistoryResponse } from './reporting.models';
           <dt>Domains</dt>
           <dd>{{ h.current.domainCount }}</dd>
         </div>
-        <div>
-          <dt>Load balancers</dt>
-          <dd>{{ h.current.loadBalancerCount }}</dd>
-        </div>
       </dl>
       <p class="ac-hint">Current counts, read live.</p>
 
@@ -67,8 +63,7 @@ import { InventoryHistoryResponse } from './reporting.models';
             <tr>
               <th nzWidth="10rem">Day</th>
               <th nzWidth="7rem">Aliases</th>
-              <th nzWidth="7rem">Domains</th>
-              <th>Load balancers</th>
+              <th>Domains</th>
             </tr>
           </thead>
           <tbody>
@@ -77,7 +72,6 @@ import { InventoryHistoryResponse } from './reporting.models';
                 <td class="ac-nowrap">{{ d.day | date: 'mediumDate' }}</td>
                 <td>{{ d.aliasCount }}</td>
                 <td>{{ d.domainCount }}</td>
-                <td>{{ d.loadBalancerCount }}</td>
               </tr>
             }
           </tbody>

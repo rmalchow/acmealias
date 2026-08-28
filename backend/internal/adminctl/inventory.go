@@ -31,31 +31,23 @@ func findProjectBySlug(ctx context.Context, db *gorm.DB, sc store.Scope, slug st
 	return nil, fmt.Errorf("no project with slug %q", slug)
 }
 
-// resolveLoadBalancerRef resolves the --loadbalancer value the CLI accepts everywhere: a
-// bare numeric id, or "project-slug/loadbalancer-slug" the way the operator sees it
-// in `loadbalancer list` output.
-func resolveLoadBalancerRef(ctx context.Context, db *gorm.DB, sc store.Scope, ref string) (*model.LoadBalancer, error) {
+// resolveProjectRef resolves the --project value the CLI accepts everywhere: a
+// bare identifier, or the slug the operator sees in `project list` output.
+//
+// It used to take "project-slug/loadbalancer-slug", and the slash went with the
+// level. An operator who types one gets told so rather than being told the whole
+// string is not a slug, because a two-part reference is what every note, script
+// and runbook written before this change still says.
+func resolveProjectRef(ctx context.Context, db *gorm.DB, sc store.Scope, ref string) (*model.Project, error) {
 	if id, err := model.ParseID(ref); err == nil {
-		return store.GetLoadBalancer(ctx, db, sc, id)
+		return store.GetProject(ctx, db, sc, id)
 	}
-	projectSlug, lbSlug, ok := strings.Cut(ref, "/")
-	if !ok {
-		return nil, fmt.Errorf("--loadbalancer %q: expected a numeric id or \"project-slug/loadbalancer-slug\"", ref)
+	if projectSlug, lbSlug, ok := strings.Cut(ref, "/"); ok {
+		return nil, fmt.Errorf("--project %q: there are no load balancers any more, a project IS one; "+
+			"name the project alone (%q was the project, %q the load balancer inside it)",
+			ref, projectSlug, lbSlug)
 	}
-	project, err := findProjectBySlug(ctx, db, sc, projectSlug)
-	if err != nil {
-		return nil, err
-	}
-	lbs, err := store.ListLoadBalancersForProject(ctx, db, sc, project.ID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range lbs {
-		if lbs[i].Slug == lbSlug {
-			return &lbs[i], nil
-		}
-	}
-	return nil, fmt.Errorf("no load balancer %q in project %q", lbSlug, projectSlug)
+	return findProjectBySlug(ctx, db, sc, ref)
 }
 
 // ProjectCreate creates a project and prints the result.
@@ -84,8 +76,7 @@ func ProjectCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 	return nil
 }
 
-// ProjectList prints every project, its load balancers, and each load balancer's nodes and
-// domains.
+// ProjectList prints every project with its nodes and domains.
 func ProjectList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer) error {
 	ps, err := inventory.ListProjects(ctx, db, sc, authz.CLISubject(sc.AccountID()))
 	if err != nil {
@@ -96,18 +87,34 @@ func ProjectList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer
 		return nil
 	}
 	for _, p := range ps {
-		fmt.Fprintf(out, "project %s (id %s) %q\n", p.Slug, p.ID, p.Name)
-		for _, lb := range p.LoadBalancers {
-			fmt.Fprintf(out, "  loadbalancer %s/%s (id %s) %q\n", p.Slug, lb.Slug, lb.ID, lb.Name)
-			for _, n := range lb.Nodes {
-				fmt.Fprintf(out, "    node %s (id %s) %s\n", n.Label, n.ID, formatAddrs(n))
-			}
-			for _, d := range lb.Domains {
-				fmt.Fprintf(out, "    domain %s (id %s)\n", d.Name, d.ID)
-			}
+		fmt.Fprintf(out, "project %s (id %s) %q — %s\n", p.Slug, p.ID, p.Name, summarize(p.NodeCount, p.DomainCount))
+		nodes, err := store.ListLBNodesForProject(ctx, db, sc, p.ID)
+		if err != nil {
+			return err
+		}
+		for _, n := range nodes {
+			fmt.Fprintf(out, "  node %s (id %s) %s\n", n.Label, n.ID, formatAddrs(n))
+		}
+		domains, err := store.ListDomainsForProject(ctx, db, sc, p.ID)
+		if err != nil {
+			return err
+		}
+		for _, d := range domains {
+			fmt.Fprintf(out, "  domain %s (id %s)\n", d.Name, d.ID)
 		}
 	}
 	return nil
+}
+
+// summarize says what is in a project, and says EMPTY rather than two zeroes
+// (design L5). A freshly created project is the commonest state in the product
+// and it is the one with an obvious next action; "0 nodes, 0 domains" reads as a
+// measurement where "empty" reads as an instruction.
+func summarize(nodes, domains int) string {
+	if nodes == 0 && domains == 0 {
+		return "empty: no nodes, no domains"
+	}
+	return fmt.Sprintf("%d node(s), %d domain(s)", nodes, domains)
 }
 
 func formatAddrs(n model.LBNode) string {
@@ -143,75 +150,28 @@ func ProjectDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 	return nil
 }
 
-// LoadBalancerCreate creates a load balancer under a project.
-func LoadBalancerCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, projectSlug, slug, name string) error {
-	project, err := findProjectBySlug(ctx, db, sc, projectSlug)
-	if err != nil {
-		return err
-	}
-	var p *model.LoadBalancer
-	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
-		var err error
-		p, err = inventory.CreateLoadBalancer(ctx, tx, sc, authz.CLISubject(sc.AccountID()), project.ID, slug, name)
-		if err != nil {
-			return nil, err
-		}
-		return []authz.Event{{
-			Action: authz.ActionLoadBalancerCreate, ObjectType: authz.ObjectLoadBalancer,
-			ObjectID: &p.ID, ObjectLabel: projectSlug + "/" + p.Slug, ProjectID: &project.ID, After: p,
-		}}, nil
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "created load balancer %q (id %s) in project %q: %s\n", p.Slug, p.ID, projectSlug, p.Name)
-	return nil
-}
-
-// LoadBalancerDelete deletes a load balancer.
-func LoadBalancerDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
-	if err != nil {
-		return err
-	}
-	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := inventory.DeleteLoadBalancer(ctx, tx, sc, authz.CLISubject(sc.AccountID()), lb.ID); err != nil {
-			return nil, err
-		}
-		return []authz.Event{{
-			Action: authz.ActionLoadBalancerDelete, ObjectType: authz.ObjectLoadBalancer,
-			ObjectID: &lb.ID, ObjectLabel: lb.Slug, ProjectID: &lb.ProjectID, Before: lb,
-		}}, nil
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "deleted load balancer %q (id %s)\n", lb.Slug, lb.ID)
-	return nil
-}
-
-// NodeAdd adds a node to a load balancer.
+// NodeAdd adds a node to a project.
 func NodeAdd(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref, label, ipv4, ipv6 string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
+	p, err := resolveProjectRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
 	var n *model.LBNode
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		n, err = inventory.AddNode(ctx, tx, sc, authz.CLISubject(sc.AccountID()), lb.ID, label, ipv4, ipv6)
+		n, err = inventory.AddNode(ctx, tx, sc, authz.CLISubject(sc.AccountID()), p.ID, label, ipv4, ipv6)
 		if err != nil {
 			return nil, err
 		}
 		return []authz.Event{{
 			Action: authz.ActionNodeCreate, ObjectType: authz.ObjectNode,
-			ObjectID: &n.ID, ObjectLabel: lb.Slug + "/" + n.Label, ProjectID: &lb.ProjectID, After: n,
+			ObjectID: &n.ID, ObjectLabel: p.Slug + "/" + n.Label, ProjectID: &p.ID, After: n,
 		}}, nil
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "added node %q (id %s) to load balancer %q: %s\n", n.Label, n.ID, lb.Slug, formatAddrs(*n))
+	fmt.Fprintf(out, "added node %q (id %s) to project %q: %s\n", n.Label, n.ID, p.Slug, formatAddrs(*n))
 	return nil
 }
 
@@ -240,20 +200,20 @@ func NodeDelete(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer,
 	return nil
 }
 
-// DomainCreate adds a domain to a load balancer — with its counterpart, when
+// DomainCreate adds a domain to a project — with its counterpart, when
 // includeWildcard is set — and prints the CNAME record the customer must
 // publish. This is the output an operator copies verbatim into an email, so it
 // is formatted exactly as it should be pasted. A pair prints two domain lines
 // and still one CNAME, because the two names share one alias.
 func DomainCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, zone string, useDomainLabel bool, ref, name string, includeWildcard bool) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
+	p, err := resolveProjectRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
 	var result *inventory.DomainCreation
 	err = mutate(ctx, db, sc, func(tx *gorm.DB) ([]authz.Event, error) {
 		var err error
-		result, err = inventory.CreateDomain(ctx, tx, sc, authz.CLISubject(sc.AccountID()), lb.ID, name, useDomainLabel, includeWildcard)
+		result, err = inventory.CreateDomain(ctx, tx, sc, authz.CLISubject(sc.AccountID()), p.ID, name, useDomainLabel, includeWildcard)
 		if err != nil {
 			return nil, err
 		}
@@ -263,14 +223,14 @@ func DomainCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Write
 			events = append(events, authz.Event{
 				Action: authz.ActionDomainCreate, ObjectType: authz.ObjectDomain,
 				ObjectID: &result.Domains[i].ID, ObjectLabel: d.Name,
-				ProjectID: &lb.ProjectID, After: d,
+				ProjectID: &p.ID, After: d,
 			})
 		}
 		if result.AliasCreated {
 			events = append(events, authz.Event{
 				Action: authz.ActionAliasCreate, ObjectType: authz.ObjectAlias,
 				ObjectID: &result.Alias.ID, ObjectLabel: result.Alias.Label,
-				ProjectID: &lb.ProjectID, After: result.Alias,
+				ProjectID: &p.ID, After: result.Alias,
 			})
 		}
 		return events, nil
@@ -280,7 +240,7 @@ func DomainCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Write
 	}
 
 	for _, d := range result.Domains {
-		fmt.Fprintf(out, "created domain %q on load balancer %q\n", d.Name, lb.Slug)
+		fmt.Fprintf(out, "created domain %q in project %q\n", d.Name, p.Slug)
 	}
 	for _, w := range result.Warnings {
 		fmt.Fprintf(out, "warning: %s\n", w)
@@ -300,13 +260,13 @@ func cnameLine(challengeFQDN, label, zone string) string {
 	return fmt.Sprintf("%s.  %d  IN  CNAME  %s.", challengeFQDN, inventory.DefaultTTL, target)
 }
 
-// DomainList prints every domain on a load balancer.
+// DomainList prints every domain in a project.
 func DomainList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
+	p, err := resolveProjectRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
-	domains, err := store.ListDomainsForLoadBalancer(ctx, db, sc, lb.ID)
+	domains, err := store.ListDomainsForProject(ctx, db, sc, p.ID)
 	if err != nil {
 		return err
 	}

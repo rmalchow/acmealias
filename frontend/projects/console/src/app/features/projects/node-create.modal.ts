@@ -6,7 +6,7 @@ import { NzInputModule } from 'ng-zorro-antd/input';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
 import { ApiService, LBNode, apiErrorMessage } from '@acme/shared';
 export interface NodeCreateData {
-  loadBalancerId: string;
+  projectId: string;
 }
 
 /**
@@ -86,7 +86,7 @@ export class NodeCreateModalComponent {
     this.saving.set(true);
     this.error.set(null);
     this.api
-      .post<LBNode>(`/loadbalancers/${this.data.loadBalancerId}/nodes`, {
+      .post<LBNode>(`/projects/${this.data.projectId}/nodes`, {
         label: this.label.trim(),
         ipv4: this.ipv4.trim(),
         ipv6: this.ipv6.trim(),
@@ -101,11 +101,11 @@ export class NodeCreateModalComponent {
   }
 }
 
-export function openNodeCreateModal(modal: NzModalService, loadBalancerId: string) {
+export function openNodeCreateModal(modal: NzModalService, projectId: string) {
   return modal.create<NodeCreateModalComponent, NodeCreateData>({
     nzTitle: 'Add node',
     nzContent: NodeCreateModalComponent,
-    nzData: { loadBalancerId },
+    nzData: { projectId },
     nzFooter: null,
     nzWidth: 420,
   }) as NzModalRef<NodeCreateModalComponent, LBNode | undefined>;

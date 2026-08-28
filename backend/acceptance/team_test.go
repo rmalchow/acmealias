@@ -94,22 +94,16 @@ func TestTheTeamAccountArc(t *testing.T) {
 		http.StatusCreated, &project); err != nil {
 		t.Fatalf("creating a project in the new account: %v", err)
 	}
-	var lb lbRef
-	if err := owner.json(http.MethodPost, owner.acct("/projects/"+project.ID+"/loadbalancers"),
-		map[string]string{"slug": "prod", "name": "Acceptance (team)"},
-		http.StatusCreated, &lb); err != nil {
-		t.Fatalf("creating a load balancer: %v", err)
-	}
 	// Under example.com, the zone the fake internet serves, because the domain
 	// has to be able to ACTIVATE: a domain whose delegation has never been seen
 	// is offline and /present refuses it (domain-activation A1). The name stays
 	// unique per run.
 	var domain domainRef
-	if err := owner.json(http.MethodPost, owner.acct("/loadbalancers/"+lb.ID+"/domains"),
+	if err := owner.json(http.MethodPost, owner.acct("/projects/"+project.ID+"/domains"),
 		map[string]string{"name": slug + ".example.com"}, http.StatusCreated, &domain); err != nil {
 		t.Fatalf("creating a domain: %v", err)
 	}
-	key := mintKey(t, owner, lb.ID, "acceptance: team account", nil)
+	key := mintKey(t, owner, project.ID, "acceptance: team account", nil)
 	const value = "acceptance-team-account-value"
 	alias := aliasNameFor(domain.AliasLabel)
 
@@ -126,7 +120,7 @@ func TestTheTeamAccountArc(t *testing.T) {
 			"want 409 (domain-activation A4)", got)
 	}
 	// The customer's half of the setup, and the check that records it.
-	onboardDomain(t, owner, lb.ID, domain)
+	onboardDomain(t, owner, project.ID, domain)
 
 	if got := publish("present"); got != http.StatusOK {
 		t.Fatalf("publishing for a funded account: got %d, want 200", got)
@@ -156,6 +150,25 @@ func TestTheTeamAccountArc(t *testing.T) {
 		map[string]any{"subject": member.subject, "roleId": admin.ID},
 		http.StatusNoContent, nil); err != nil {
 		t.Fatalf("adding %s to the account: %v", configAdminUser, err)
+	}
+
+	// The grammar has one word for the one object, and the word it lost is
+	// REFUSED rather than accepted and ignored. Asserted here, through the API
+	// an operator actually writes grants with, because that is where a stale
+	// runbook or a copied example would put it: a role that silently held an
+	// unevaluable grant would read as authority somebody was given, and the
+	// first person to find out is the one who cannot do what it says.
+	if status, body, err := owner.do(http.MethodPost, owner.acct("/roles"), map[string]any{
+		"name":        unique("acceptance-stale-grammar"),
+		"description": "a role written against the grammar before the collapse",
+		"grants": []map[string]any{
+			{"type": "load_balancer", "objectId": project.ID, "action": "inventory.write", "inheritable": true},
+		},
+	}); err != nil {
+		t.Fatalf("writing a grant naming the removed object type: %v", err)
+	} else if status != http.StatusBadRequest {
+		t.Errorf("a grant naming load_balancer was answered %d, want 400 — there is no such "+
+			"object type, and storing one would be authority nothing can evaluate: %s", status, body)
 	}
 
 	// The member's picker now offers it — an account they did not create and do

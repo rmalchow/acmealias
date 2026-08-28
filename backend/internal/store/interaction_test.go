@@ -19,11 +19,11 @@ import (
 // interactionEnv is a project, a load balancer and an alias, plus the ids the
 // tests below hang interactions off.
 type interactionEnv struct {
-	t     *testing.T
-	db    *gorm.DB
-	sc    Scope
-	lbID  model.ID
-	alias *model.Alias
+	t         *testing.T
+	db        *gorm.DB
+	sc        Scope
+	projectID model.ID
+	alias     *model.Alias
 }
 
 func newInteractionEnv(t *testing.T) *interactionEnv {
@@ -35,15 +35,11 @@ func newInteractionEnv(t *testing.T) *interactionEnv {
 	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu-prod", Name: "EU Prod"}
-	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
-	alias := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "demo-example-com"}
+	alias := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "demo-example-com"}
 	if err := CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
-	return &interactionEnv{t: t, db: db, sc: sc, lbID: lb.ID, alias: alias}
+	return &interactionEnv{t: t, db: db, sc: sc, projectID: p.ID, alias: alias}
 }
 
 // interaction builds a row for this env's alias, with the fields the filters
@@ -52,16 +48,16 @@ func (v *interactionEnv) interaction(value string, publishedAt time.Time) *model
 	keyID := "k_7f3a91c4"
 	ip := "203.0.113.7"
 	return &model.ChallengeInteraction{
-		LoadBalancerID: &v.lbID,
-		AliasID:        &v.alias.ID,
-		AliasLabel:     v.alias.Label,
-		ChallengeFQDN:  v.alias.ChallengeFQDN,
-		DomainNames:    model.StringArray{"example.com", "*.example.com"},
-		KeyID:          &keyID,
-		ClientIP:       &ip,
-		FQDNForm:       "alias",
-		ValueDigest:    ValueDigest(value),
-		PublishedAt:    publishedAt,
+		ProjectID:     &v.projectID,
+		AliasID:       &v.alias.ID,
+		AliasLabel:    v.alias.Label,
+		ChallengeFQDN: v.alias.ChallengeFQDN,
+		DomainNames:   model.StringArray{"example.com", "*.example.com"},
+		KeyID:         &keyID,
+		ClientIP:      &ip,
+		FQDNForm:      "alias",
+		ValueDigest:   ValueDigest(value),
+		PublishedAt:   publishedAt,
 	}
 }
 
@@ -383,7 +379,7 @@ func TestIntegrationListInteractionsFiltersAndPages(t *testing.T) {
 	v := newInteractionEnv(t)
 	ctx := context.Background()
 
-	other := &model.Alias{LoadBalancerID: v.lbID, ChallengeFQDN: "_acme-challenge.shop.example.org", Label: "shop-example-org"}
+	other := &model.Alias{ProjectID: v.projectID, ChallengeFQDN: "_acme-challenge.shop.example.org", Label: "shop-example-org"}
 	if err := CreateAlias(ctx, v.db, v.sc, other); err != nil {
 		t.Fatalf("create second alias: %v", err)
 	}
@@ -406,15 +402,15 @@ func TestIntegrationListInteractionsFiltersAndPages(t *testing.T) {
 	shop.QueryCount = 3
 	v.insert(shop)
 
-	// A row belonging to another load balancer must never appear.
+	// A row belonging to another project must never appear.
 	stranger := v.interaction("stranger", base)
-	strangerLB := model.NewID()
-	stranger.LoadBalancerID = &strangerLB
+	strangerProject := model.NewID()
+	stranger.ProjectID = &strangerProject
 	v.insert(stranger)
 
 	list := func(q string, unqueried bool, limit, offset int) ([]model.ChallengeInteraction, int64) {
 		t.Helper()
-		got, total, err := ListInteractionsForLoadBalancer(ctx, v.db, v.sc, v.lbID, q, unqueried, limit, offset)
+		got, total, err := ListInteractionsForProject(ctx, v.db, v.sc, v.projectID, q, unqueried, limit, offset)
 		if err != nil {
 			t.Fatalf("list(%q, %v, %d, %d): %v", q, unqueried, limit, offset, err)
 		}
@@ -422,7 +418,7 @@ func TestIntegrationListInteractionsFiltersAndPages(t *testing.T) {
 	}
 
 	if got, total := list("", false, 100, 0); len(got) != 6 || total != 6 {
-		t.Fatalf("unfiltered: %d rows, total %d, want 6 and 6 (and nothing from another load balancer)", len(got), total)
+		t.Fatalf("unfiltered: %d rows, total %d, want 6 and 6 (and nothing from another project)", len(got), total)
 	}
 
 	for name, q := range map[string]string{

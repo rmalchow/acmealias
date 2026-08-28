@@ -68,12 +68,11 @@ func parseGrant(spec GrantSpec) (model.APIKeyGrant, error) {
 // A key is a subject holding grants, anchored to the account (design P8). Two
 // ways to say what it may reach:
 //
-//   - --loadbalancer, which is the common case and what an operator has in front
-//     of them. It creates the two challenge grants over that load balancer: the
-//     same authority the dropped api_keys.load_balancer_id column carried.
-//   - --grant, repeatable, for anything wider or narrower. A key anchored at a
-//     project is the request that started this whole change, and it is now one
-//     flag rather than four keys.
+//   - --project, which is the common case and what an operator has in front of
+//     them. It creates the two challenge grants over that project: the same
+//     authority the dropped api_keys.load_balancer_id column carried.
+//   - --grant, repeatable, for anything wider or narrower — a key confined to
+//     one domain, or one holding a single action.
 //
 // Both may be given; the grants add up, because authority is a union and never a
 // subtraction.
@@ -85,14 +84,14 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 
 	var describedFor string
 	if ref != "" {
-		lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
+		p, err := resolveProjectRef(ctx, db, sc, ref)
 		if err != nil {
 			return err
 		}
-		describedFor = lb.Slug
+		describedFor = p.Slug
 		k.Grants = append(k.Grants,
-			model.APIKeyGrant{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &lb.ID, Action: authz.ActionChallengePublish, Inheritable: true},
-			model.APIKeyGrant{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &lb.ID, Action: authz.ActionChallengeWithdraw, Inheritable: true},
+			model.APIKeyGrant{ObjectType: string(authz.TypeProject), ObjectID: &p.ID, Action: authz.ActionChallengePublish, Inheritable: true},
+			model.APIKeyGrant{ObjectType: string(authz.TypeProject), ObjectID: &p.ID, Action: authz.ActionChallengeWithdraw, Inheritable: true},
 		)
 	}
 	for _, spec := range specs {
@@ -106,7 +105,7 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 		// A key with no grants authenticates and can do nothing. That is a
 		// coherent row and a useless credential, and minting one silently is
 		// how an operator ends up debugging a 403 that was decided here.
-		return fmt.Errorf("a key needs some authority: pass --loadbalancer, or --grant TYPE:OBJECT:ACTION")
+		return fmt.Errorf("a key needs some authority: pass --project, or --grant TYPE:OBJECT:ACTION")
 	}
 
 	k.Note = note
@@ -150,14 +149,14 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 	return nil
 }
 
-// KeyList prints every key on a load balancer. The secret is never included —
-// there is nothing to show, only the digest is stored.
+// KeyList prints every key whose authority reaches a project. The secret is
+// never included — there is nothing to show, only the digest is stored.
 func KeyList(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
+	p, err := resolveProjectRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
-	ks, err := store.ListAPIKeysForLoadBalancer(ctx, db, sc, lb.ID)
+	ks, err := store.ListAPIKeysForProject(ctx, db, sc, p.ID)
 	if err != nil {
 		return err
 	}

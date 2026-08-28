@@ -575,6 +575,34 @@ A split-horizon resolver fails the same way, quietly: it answers for the interna
 customer's name, sees no `_acme-challenge` `CNAME`, and the domain never activates while the
 public internet has had the record all along. Point this at a public recursor.
 
+### `mail` — who the deployment is when it sends
+
+Two programs send mail to the same person about the same account: the identity provider about
+signing in, and this service about the product. They use the **same** sender identity, configured
+here and in the identity provider, because mail clients thread by sender — two spellings of you
+arrive as two correspondents, and a customer looking for an invitation finds a conversation that
+does not contain it.
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `mail.from` | `ACME_MAIL_FROM` | `no-reply@acmealias.com` | The address every message is sent as. The same value the identity provider is configured with. |
+| `mail.sender` | `ACME_MAIL_SENDER` | `AcmeAlias` | The display name beside it. Also shared with the identity provider — `acmealias` and `AcmeAlias` are two correspondents to a mail client. |
+| `mail.reply_to` | `ACME_MAIL_REPLY_TO` | `support@acmealias.com` | Where a reply goes, and **not** a no-reply address. Everything sent here — an invitation, a warning that an account is about to stop working, a notice that a delegation never appeared — is something a recipient may reasonably want to answer. |
+| `mail.footer` | `ACME_MAIL_FOOTER` | `AcmeAlias\nsupport@acmealias.com` | The footer beneath every message, carrying whatever identifying detail the jurisdiction requires. One value for both senders, so the fifth template cannot quietly disagree with the first four. |
+| `mail.smtp_addr` | `ACME_MAIL_SMTP_ADDR` | *empty* | The relay, as `host:port`. **Empty discards every message** — the service still starts and still serves, it simply sends nothing. In a container stack this is the mail service's own name (`mailpit:1025`), not the hostname its web interface is served on: that is HTTP and does not speak SMTP. |
+| `mail.smtp_user` | `ACME_MAIL_SMTP_USER` | *empty* | Relay username. Empty means the relay wants no authentication, which is the development case. |
+| `mail.smtp_password` | `ACME_MAIL_SMTP_PASSWORD` | *empty* | Relay password. Redacted in the startup log line and in `GET /api/v1/config`. |
+
+An identity that is incomplete is a **warning at startup, not a refusal to start**: this service
+exists to answer DNS and ACME challenges, and it would be wrong to take those down over a footer.
+So read the boot log — `mail identity is incomplete` names the settings that are missing.
+
+Configuring the sender is only half of it. Every host that sends for the domain must also be
+authorised by the domain's SPF record and sign with a published DKIM key, and the result must
+*align* with the address in `From`. That part is DNS work rather than configuration, and it fails
+in a way nothing here can detect — see [Mail that is sent but never
+arrives](troubleshooting.md#mail-that-is-sent-but-never-arrives).
+
 ### `limits` and `log`
 
 | Path | Variable | Default | Meaning |

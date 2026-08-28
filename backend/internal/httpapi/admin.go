@@ -13,6 +13,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/mail"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/resolvercheck"
@@ -75,6 +76,17 @@ type AdminOptions struct {
 	// always sets it (see ServerOptions.Metrics), so a nil here means a test.
 	Metrics *obs.Metrics
 
+	// Mail is how a handler sends a transactional message. Nothing here sends
+	// one yet: the messages belong to the changes that send them —
+	// `account-invitations` the invitation, `metering-and-credits` the credit
+	// warning — and transactional-email owns only the shape (task 3.1).
+	//
+	// nil becomes mail.Discard, so a handler written later can call it
+	// unconditionally. That is the point: the alternative is every send site
+	// carrying its own `if o.Mail != nil`, which is four chances to get a nil
+	// dereference into the request that issues an invitation.
+	Mail mail.Sender
+
 	// Log receives audit-write failures and 5xx detail. nil uses slog.Default().
 	Log *slog.Logger
 }
@@ -99,6 +111,9 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	}
 	if o.Log == nil {
 		o.Log = slog.Default()
+	}
+	if o.Mail == nil {
+		o.Mail = mail.Discard{}
 	}
 	a := &admin{opts: o, resolver: verificationResolver(o.Config, o.Log)}
 	// One Checker for the process, not one per request: its twenty-second memo
@@ -248,38 +263,38 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	acct.GET("/projects/:id/usage", a.getProjectUsage)
 	acct.GET("/projects/:id/inventory-history", a.getProjectInventoryHistory)
 
-	acct.GET("/projects/:id/loadbalancers", a.listLoadBalancers)
-	acct.POST("/projects/:id/loadbalancers", a.createLoadBalancer)
-	acct.GET("/loadbalancers/:id", a.getLoadBalancer)
-	acct.PATCH("/loadbalancers/:id", a.updateLoadBalancer)
-	acct.DELETE("/loadbalancers/:id", a.deleteLoadBalancer)
-
-	acct.POST("/loadbalancers/:id/nodes", a.createNode)
+	// Everything a project HOLDS hangs off /projects/:id. These paths were
+	// /loadbalancers/:id/... until the two objects became one; there is no alias
+	// and no deprecation window, because there is no caller programming against
+	// the old spelling and a compatibility layer for zero callers is two route
+	// trees carried forever to protect nobody (design L7). A console still
+	// asking for /loadbalancers/... gets a 404, which is loud and immediate.
+	acct.POST("/projects/:id/nodes", a.createNode)
 	acct.PATCH("/nodes/:id", a.updateNode)
 	acct.DELETE("/nodes/:id", a.deleteNode)
 
-	acct.GET("/loadbalancers/:id/domains", a.listDomains)
-	acct.POST("/loadbalancers/:id/domains", a.createDomain)
+	acct.GET("/projects/:id/domains", a.listDomains)
+	acct.POST("/projects/:id/domains", a.createDomain)
 	acct.DELETE("/domains/:id", a.deleteDomain)
 
-	acct.GET("/loadbalancers/:id/interactions", a.listInteractions)
-	acct.GET("/loadbalancers/:id/keys", a.listKeys)
-	acct.POST("/loadbalancers/:id/keys", a.createKey)
+	acct.GET("/projects/:id/interactions", a.listInteractions)
+	acct.GET("/projects/:id/keys", a.listKeys)
+	acct.POST("/projects/:id/keys", a.createKey)
 	acct.PUT("/keys/:id/networks", a.restrictKey)
 	acct.PUT("/keys/:id/expiry", a.setKeyExpiry)
 	acct.POST("/keys/:id/rotate", a.rotateKey)
 	acct.DELETE("/keys/:id", a.revokeKey)
 
-	acct.GET("/loadbalancers/:id/plan", a.getPlan)
-	acct.GET("/loadbalancers/:id/plan/zone", a.getPlanZone)
+	acct.GET("/projects/:id/plan", a.getPlan)
+	acct.GET("/projects/:id/plan/zone", a.getPlanZone)
 	// Verification is a read: it resolves names and stores nothing, so it is a
 	// GET and needs no CSRF token.
-	acct.GET("/loadbalancers/:id/verification", a.verifyPlan)
+	acct.GET("/projects/:id/verification", a.verifyPlan)
 	// The same check, asked for deliberately and RECORDED: the console's "check
 	// now", for somebody who has just published their CNAME and does not want
 	// to wait out the activation poller (domain-activation task 4.3). A POST
 	// because it writes, which is also what puts it behind the CSRF token.
-	acct.POST("/loadbalancers/:id/verification", a.recheckPlan)
+	acct.POST("/projects/:id/verification", a.recheckPlan)
 
 	acct.GET("/challenges", a.listChallenges)
 	acct.GET("/audit", a.listAudit)

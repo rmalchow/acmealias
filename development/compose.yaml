@@ -162,7 +162,25 @@ services:
       AUTHENTIK_EMAIL__HOST: mailpit
       AUTHENTIK_EMAIL__PORT: "1025"
       AUTHENTIK_EMAIL__USE_TLS: "false"
-      AUTHENTIK_EMAIL__FROM: no-reply@acmeservice.internal
+      # THE SAME SENDER THE SERVICE USES (../config.yaml, `mail:`), and that is
+      # the point rather than tidiness.
+      #
+      # Two programs send mail to the same person about the same account: this
+      # one about signing in, the service about the product. They cannot share
+      # code — Django templates in Python against Go templates in Go — so the
+      # identity is the thing they share, and it has to be identical in two
+      # places that nobody edits at the same time.
+      #
+      # Mail clients thread by sender, so two spellings of us arrive as two
+      # correspondents and a customer looking for an invitation finds a
+      # conversation that does not contain it. In production both hosts must
+      # additionally be authorised for this domain and must ALIGN with it, or
+      # the message is filed as spam rather than bounced — which never errors,
+      # and is first reported as "I never got it".
+      #
+      # It was `no-reply@acmeservice.internal`, which was neither the service's
+      # address nor a domain that exists.
+      AUTHENTIK_EMAIL__FROM: AcmeAlias <no-reply@acmealias.com>
     volumes:
       - ./authentik/blueprints:/blueprints/custom:ro
       - ./data/authentik_media:/media

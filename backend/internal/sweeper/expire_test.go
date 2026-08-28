@@ -28,10 +28,6 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, authz.CLISubject(sc.AccountID()), p.ID, "eu", "EU")
-	if err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
 
 	lapsed, _, err := apikey.New()
 	if err != nil {
@@ -40,7 +36,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	past := time.Now().UTC().Add(-time.Hour)
 	lapsed.ExpiresAt = &past
 	lapsed.Grants = []model.APIKeyGrant{
-		{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true},
+		{ObjectType: "project", ObjectID: &p.ID, Action: "challenge.publish", Inheritable: true},
 	}
 	lapsed.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
 	if err := store.CreateAPIKey(ctx, db, sc, lapsed, store.AllowAnyGrant); err != nil {
@@ -54,7 +50,7 @@ func TestIntegrationExpiredKeyIsRecordedOnceWithASystemActor(t *testing.T) {
 	}
 	future := time.Now().UTC().Add(time.Hour)
 	live.ExpiresAt = &future
-	live.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true}}
+	live.Grants = []model.APIKeyGrant{{ObjectType: "project", ObjectID: &p.ID, Action: "challenge.publish", Inheritable: true}}
 	if err := store.CreateAPIKey(ctx, db, sc, live, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create live key: %v", err)
 	}

@@ -8,7 +8,7 @@ import { NzInputModule } from 'ng-zorro-antd/input';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
 import { ApiService, DomainCreateRequest, DomainCreated, WILDCARD_NOTES, apiErrorMessage, counterpartDomain, domainNameProblem, normalizeDomain } from '@acme/shared';
 export interface DomainCreateData {
-  loadBalancerId: string;
+  projectId: string;
 }
 
 /**
@@ -185,7 +185,7 @@ export class DomainEditorComponent {
     const body: DomainCreateRequest = { name: this.name.trim() };
     if (this.includeWildcard) body.includeWildcard = true;
     this.api
-      .post<DomainCreated>(`/loadbalancers/${this.data.loadBalancerId}/domains`, body)
+      .post<DomainCreated>(`/projects/${this.data.projectId}/domains`, body)
       .subscribe({
         next: (d) => {
           this.submitting.set(false);
@@ -203,11 +203,11 @@ export class DomainEditorComponent {
 }
 
 /** Opens the editor; `afterClose` emits true when a domain was created. */
-export function openDomainEditor(modal: NzModalService, loadBalancerId: string) {
+export function openDomainEditor(modal: NzModalService, projectId: string) {
   return modal.create<DomainEditorComponent, DomainCreateData>({
     nzTitle: 'Add domain',
     nzContent: DomainEditorComponent,
-    nzData: { loadBalancerId },
+    nzData: { projectId },
     nzFooter: null,
     nzWidth: 520,
   }) as NzModalRef<DomainEditorComponent, boolean | undefined>;

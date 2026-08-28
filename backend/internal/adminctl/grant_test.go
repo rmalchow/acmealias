@@ -25,8 +25,8 @@ func TestParseGrant(t *testing.T) {
 		wantWildcard    bool
 	}{
 		{
-			name: "a load balancer grant", spec: "load_balancer:" + id.String() + ":challenge.publish",
-			wantType: "load_balancer", wantAction: "challenge.publish", wantInheritable: true,
+			name: "a project grant", spec: "project:" + id.String() + ":challenge.publish",
+			wantType: "project", wantAction: "challenge.publish", wantInheritable: true,
 		},
 		{
 			name:     "a project grant, which is the case the change exists for",
@@ -35,19 +35,19 @@ func TestParseGrant(t *testing.T) {
 		},
 		{
 			name:     "a wildcard object is anchored to the account, not to everywhere",
-			spec:     "load_balancer:*:challenge.publish",
-			wantType: "load_balancer", wantAction: "challenge.publish", wantInheritable: true, wantWildcard: true,
+			spec:     "project:*:challenge.publish",
+			wantType: "project", wantAction: "challenge.publish", wantInheritable: true, wantWildcard: true,
 		},
 		{
 			name:     "noinherit narrows it to the named object alone",
 			spec:     "project:" + id.String() + ":inventory.view:noinherit",
 			wantType: "project", wantAction: "inventory.view", wantInheritable: false,
 		},
-		{name: "too few parts", spec: "load_balancer:" + id.String(), wantErr: true},
+		{name: "too few parts", spec: "project:" + id.String(), wantErr: true},
 		{name: "too many parts", spec: "a:b:c:noinherit:extra", wantErr: true},
-		{name: "an empty part", spec: "load_balancer::challenge.publish", wantErr: true},
+		{name: "an empty part", spec: "project::challenge.publish", wantErr: true},
 		{name: "a fourth part that is not noinherit", spec: "a:*:c:maybe", wantErr: true},
-		{name: "an object that is not an identifier", spec: "load_balancer:seven:challenge.publish", wantErr: true},
+		{name: "an object that is not an identifier", spec: "project:seven:challenge.publish", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g, err := parseGrant(GrantSpec(tc.spec))

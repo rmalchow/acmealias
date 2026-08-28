@@ -340,20 +340,19 @@ func newEnv(t *testing.T) *env {
 	ctx := t.Context()
 	sc := challengeAccount(t, db)
 
-	p := &model.Project{Slug: "acme", Name: "Acme"}
-	if err := store.CreateProject(ctx, db, sc, p); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	lb := func(slug string) *model.LoadBalancer {
-		lb := &model.LoadBalancer{ProjectID: p.ID, Slug: slug, Name: slug}
-		if err := store.CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-			t.Fatalf("create load balancer %s: %v", slug, err)
+	// Two projects: "mine" holds the alias, "other" is what a key with the wrong
+	// authority is anchored to. They used to be two load balancers under one
+	// project, which is the same test one level down.
+	project := func(slug string) *model.Project {
+		p := &model.Project{Slug: slug, Name: slug}
+		if err := store.CreateProject(ctx, db, sc, p); err != nil {
+			t.Fatalf("create project %s: %v", slug, err)
 		}
-		return lb
+		return p
 	}
-	mine, other := lb("a"), lb("b")
+	mine, other := project("acme-a"), project("acme-b")
 
-	alias := &model.Alias{LoadBalancerID: mine.ID, ChallengeFQDN: testFQDN, Label: testLabel}
+	alias := &model.Alias{ProjectID: mine.ID, ChallengeFQDN: testFQDN, Label: testLabel}
 	if err := store.CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
@@ -363,7 +362,7 @@ func newEnv(t *testing.T) *env {
 	// is refused 409, which is correct behaviour and not what those tests are
 	// about; the fixture used to hold an alias with no domain at all, which is
 	// a shape the inventory service never creates.
-	domain := &model.Domain{LoadBalancerID: mine.ID, AliasID: alias.ID, Name: testDomain}
+	domain := &model.Domain{ProjectID: mine.ID, AliasID: alias.ID, Name: testDomain}
 	if err := store.CreateDomain(ctx, db, sc, domain); err != nil {
 		t.Fatalf("create domain: %v", err)
 	}
@@ -371,12 +370,12 @@ func newEnv(t *testing.T) *env {
 		t.Fatalf("activate domain: %v", err)
 	}
 
-	auth := func(loadBalancerID model.ID) func(*http.Request) {
+	auth := func(projectID model.ID) func(*http.Request) {
 		k, secret, err := apikey.New()
 		if err != nil {
 			t.Fatalf("new api key: %v", err)
 		}
-		k.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &loadBalancerID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "load_balancer", ObjectID: &loadBalancerID, Action: "challenge.withdraw", Inheritable: true}}
+		k.Grants = []model.APIKeyGrant{{ObjectType: "project", ObjectID: &projectID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "project", ObjectID: &projectID, Action: "challenge.withdraw", Inheritable: true}}
 		if err := store.CreateAPIKey(ctx, db, sc, k, store.AllowAnyGrant); err != nil {
 			t.Fatalf("create api key: %v", err)
 		}
@@ -528,7 +527,7 @@ func TestTwoValuesCoexistAndCleanupRemovesOnlyOne(t *testing.T) {
 	}
 }
 
-func TestUnmappedAndCrossLoadBalancerNamesAreRefused(t *testing.T) {
+func TestUnmappedAndCrossProjectNamesAreRefused(t *testing.T) {
 	v := newEnv(t)
 
 	// No alias is mapped to this name at all.
@@ -545,9 +544,9 @@ func TestUnmappedAndCrossLoadBalancerNamesAreRefused(t *testing.T) {
 
 	// Both refusals must be indistinguishable to the caller.
 	unmapped := post(v.e, "/present", `{"fqdn":"_acme-challenge.nobody.example.org.","value":"x"}`, v.ours)
-	crossLoadBalancer := post(v.e, "/present", `{"fqdn":"`+testFQDN+`.","value":"x"}`, v.theirs)
-	if unmapped.Body.String() != crossLoadBalancer.Body.String() {
-		t.Errorf("unmapped and cross-lb refusals differ:\n%q\n%q", unmapped.Body, crossLoadBalancer.Body)
+	crossProject := post(v.e, "/present", `{"fqdn":"`+testFQDN+`.","value":"x"}`, v.theirs)
+	if unmapped.Body.String() != crossProject.Body.String() {
+		t.Errorf("unmapped and cross-project refusals differ:\n%q\n%q", unmapped.Body, crossProject.Body)
 	}
 }
 
@@ -614,15 +613,11 @@ func TestRegisterChallengeRefusesUnprotectedCIDRRestriction(t *testing.T) {
 	if err := store.CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "a", Name: "a"}
-	if err := store.CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
 	k, _, err := apikey.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.Grants = []model.APIKeyGrant{{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.withdraw", Inheritable: true}}
+	k.Grants = []model.APIKeyGrant{{ObjectType: "project", ObjectID: &p.ID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "project", ObjectID: &p.ID, Action: "challenge.withdraw", Inheritable: true}}
 	k.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
 	if err := store.CreateAPIKey(ctx, db, sc, k, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create api key: %v", err)

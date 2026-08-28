@@ -114,7 +114,6 @@ func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
 	return db, sc
 }
 
-// loadBalancerFixture creates a project with one load balancer and one dual-stack node.
 // testSubject is the authority the service-layer tests act with: unrestricted
 // within the account under test. What each function does with a NARROWER
 // subject is the evaluator's business and is tested in internal/authz; what
@@ -123,29 +122,26 @@ func testSubject(sc store.Scope) authz.Subject {
 	return authz.CLISubject(sc.AccountID())
 }
 
-func loadBalancerFixture(t *testing.T, db *gorm.DB, sc store.Scope, slug string) model.ID {
+// projectFixture creates a project with one dual-stack node.
+func projectFixture(t *testing.T, db *gorm.DB, sc store.Scope, slug string) model.ID {
 	t.Helper()
 	ctx := context.Background()
 	p, err := CreateProject(ctx, db, sc, testSubject(sc), Limits{}, slug, "Project "+slug)
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb, err := CreateLoadBalancer(ctx, db, sc, testSubject(sc), p.ID, slug+"-prod", "Production")
-	if err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
-	if _, err := AddNode(ctx, db, sc, testSubject(sc), lb.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
+	if _, err := AddNode(ctx, db, sc, testSubject(sc), p.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
 		t.Fatalf("add node: %v", err)
 	}
-	return lb.ID
+	return p.ID
 }
 
 func TestIntegrationWildcardAndApexShareOneAlias(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
+	projectID := projectFixture(t, db, sc, "acme")
 
-	apex, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "Example.COM.", derived, false)
+	apex, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "Example.COM.", derived, false)
 	if err != nil {
 		t.Fatalf("create example.com: %v", err)
 	}
@@ -156,7 +152,7 @@ func TestIntegrationWildcardAndApexShareOneAlias(t *testing.T) {
 		t.Errorf("alias = %+v, want a freshly created example-com", apex.Alias)
 	}
 
-	wild, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "*.example.com", derived, false)
+	wild, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "*.example.com", derived, false)
 	if err != nil {
 		t.Fatalf("create *.example.com: %v", err)
 	}
@@ -164,12 +160,12 @@ func TestIntegrationWildcardAndApexShareOneAlias(t *testing.T) {
 		t.Fatalf("wildcard got alias %+v, want the apex's alias %d", wild.Alias, apex.Alias.ID)
 	}
 
-	aliases, err := store.ListAliasesForLoadBalancer(ctx, db, sc, loadBalancerID)
+	aliases, err := store.ListAliasesForProject(ctx, db, sc, projectID)
 	if err != nil || len(aliases) != 1 {
 		t.Fatalf("aliases = %v (err %v), want exactly one", aliases, err)
 	}
 
-	plan, err := Plan(ctx, db, sc, testSubject(sc), loadBalancerID, PlanOptions{Zone: "z.example.net.", CAAIssuers: []string{"letsencrypt.org"}})
+	plan, err := Plan(ctx, db, sc, testSubject(sc), projectID, PlanOptions{Zone: "z.example.net.", CAAIssuers: []string{"letsencrypt.org"}})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -191,7 +187,7 @@ func TestIntegrationWildcardAndApexShareOneAlias(t *testing.T) {
 	if removed {
 		t.Error("alias removed while another domain still references it")
 	}
-	if aliases, _ := store.ListAliasesForLoadBalancer(ctx, db, sc, loadBalancerID); len(aliases) != 1 {
+	if aliases, _ := store.ListAliasesForProject(ctx, db, sc, projectID); len(aliases) != 1 {
 		t.Errorf("aliases after partial removal = %v, want one", aliases)
 	}
 
@@ -203,16 +199,16 @@ func TestIntegrationWildcardAndApexShareOneAlias(t *testing.T) {
 	if !removed {
 		t.Error("last domain removed but alias survived")
 	}
-	if aliases, _ := store.ListAliasesForLoadBalancer(ctx, db, sc, loadBalancerID); len(aliases) != 0 {
+	if aliases, _ := store.ListAliasesForProject(ctx, db, sc, projectID); len(aliases) != 0 {
 		t.Errorf("aliases after full removal = %v, want none", aliases)
 	}
 }
 
-func TestIntegrationCrossLoadBalancerAliasConflictIsRefused(t *testing.T) {
+func TestIntegrationCrossProjectAliasConflictIsRefused(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	prodID := loadBalancerFixture(t, db, sc, "one")
-	otherID := loadBalancerFixture(t, db, sc, "two")
+	prodID := projectFixture(t, db, sc, "one")
+	otherID := projectFixture(t, db, sc, "two")
 
 	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), prodID, "example.com", derived, false); err != nil {
 		t.Fatalf("create example.com: %v", err)
@@ -221,23 +217,23 @@ func TestIntegrationCrossLoadBalancerAliasConflictIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
 	}
-	if !strings.Contains(err.Error(), "one-prod") {
-		t.Errorf("error %q does not name the owning lb", err)
+	if !strings.Contains(err.Error(), `"one"`) {
+		t.Errorf("error %q does not name the project that owns the challenge name", err)
 	}
 }
 
 func TestIntegrationDuplicateAndLabelRules(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
+	projectID := projectFixture(t, db, sc, "acme")
 
-	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "example.com", derived, false); err != nil {
+	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "example.com", derived, false); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "example.com", derived, false); !errors.Is(err, ErrConflict) {
+	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "example.com", derived, false); !errors.Is(err, ErrConflict) {
 		t.Errorf("duplicate domain: err = %v, want ErrConflict", err)
 	}
-	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "*.*.example.net", derived, false); !errors.Is(err, dnsname.ErrInvalid) {
+	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "*.*.example.net", derived, false); !errors.Is(err, dnsname.ErrInvalid) {
 		t.Errorf("bad domain: err = %v, want ErrInvalid", err)
 	}
 
@@ -250,7 +246,7 @@ func TestIntegrationDuplicateAndLabelRules(t *testing.T) {
 	if err := db.Exec(`update domains set name = 'example.com.test' where name = 'example.com'`).Error; err != nil {
 		t.Fatalf("nudge domain: %v", err)
 	}
-	c, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "example.com.", derived, false)
+	c, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "example.com.", derived, false)
 	if err != nil {
 		t.Fatalf("create after label collision: %v", err)
 	}
@@ -262,12 +258,12 @@ func TestIntegrationDuplicateAndLabelRules(t *testing.T) {
 func TestIntegrationRedundantHostWarnsButIsCreated(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
+	projectID := projectFixture(t, db, sc, "acme")
 
-	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "*.example.com", derived, false); err != nil {
+	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "*.example.com", derived, false); err != nil {
 		t.Fatalf("create wildcard: %v", err)
 	}
-	c, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "shop.example.com", derived, false)
+	c, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "shop.example.com", derived, false)
 	if err != nil {
 		t.Fatalf("create covered host: %v — it must be permitted, only warned about", err)
 	}
@@ -279,22 +275,15 @@ func TestIntegrationRedundantHostWarnsButIsCreated(t *testing.T) {
 func TestIntegrationNonEmptyParentIsNotDeleted(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
-	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "example.com", derived, false); err != nil {
+	projectID := projectFixture(t, db, sc, "acme")
+	if _, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "example.com", derived, false); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := DeleteLoadBalancer(ctx, db, sc, testSubject(sc), loadBalancerID); !errors.Is(err, ErrNotEmpty) {
-		t.Errorf("delete lb with a domain: err = %v, want ErrNotEmpty", err)
+	if err := DeleteProject(ctx, db, sc, testSubject(sc), projectID); !errors.Is(err, ErrNotEmpty) {
+		t.Errorf("delete project with a domain: err = %v, want ErrNotEmpty", err)
 	}
-	if err := DeleteProject(ctx, db, sc, testSubject(sc), lb.ProjectID); !errors.Is(err, ErrNotEmpty) {
-		t.Errorf("delete project with a load balancer: err = %v, want ErrNotEmpty", err)
-	}
-	if lbs, _ := store.ListLoadBalancersForProject(ctx, db, sc, lb.ProjectID); len(lbs) != 1 {
+	if _, err := store.GetProject(ctx, db, sc, projectID); err != nil {
 		t.Error("refused deletion still removed something")
 	}
 }
@@ -302,7 +291,7 @@ func TestIntegrationNonEmptyParentIsNotDeleted(t *testing.T) {
 func TestIntegrationNodeAddressValidation(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
+	projectID := projectFixture(t, db, sc, "acme")
 
 	for _, tc := range []struct{ v4, v6 string }{
 		{"2001:db8::1", ""},   // v6 in the v4 column
@@ -310,11 +299,11 @@ func TestIntegrationNodeAddressValidation(t *testing.T) {
 		{"", ""},              // a node with no address at all
 		{"203.0.113.999", ""}, // not an address
 	} {
-		if _, err := AddNode(ctx, db, sc, testSubject(sc), loadBalancerID, "b", tc.v4, tc.v6); !errors.Is(err, ErrInvalid) {
+		if _, err := AddNode(ctx, db, sc, testSubject(sc), projectID, "b", tc.v4, tc.v6); !errors.Is(err, ErrInvalid) {
 			t.Errorf("AddNode(%q, %q): err = %v, want ErrInvalid", tc.v4, tc.v6, err)
 		}
 	}
-	if _, err := AddNode(ctx, db, sc, testSubject(sc), loadBalancerID, "b", "203.0.113.11", ""); err != nil {
+	if _, err := AddNode(ctx, db, sc, testSubject(sc), projectID, "b", "203.0.113.11", ""); err != nil {
 		t.Errorf("v4-only node: %v", err)
 	}
 }
@@ -327,9 +316,9 @@ func TestIntegrationNodeAddressValidation(t *testing.T) {
 func TestIntegrationUpdateNodeAddressValidation(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
+	projectID := projectFixture(t, db, sc, "acme")
 
-	node, err := AddNode(ctx, db, sc, testSubject(sc), loadBalancerID, "c", "203.0.113.10", "2001:db8:1::10")
+	node, err := AddNode(ctx, db, sc, testSubject(sc), projectID, "c", "203.0.113.10", "2001:db8:1::10")
 	if err != nil {
 		t.Fatalf("add node: %v", err)
 	}
@@ -384,7 +373,7 @@ func TestIntegrationUpdateNodeAddressValidation(t *testing.T) {
 func TestIntegrationAnotherTenantsDomainIsRefusedWithoutNamingThem(t *testing.T) {
 	db, first := scopedDB(t)
 	ctx := context.Background()
-	firstLB := loadBalancerFixture(t, db, first, "acme")
+	firstLB := projectFixture(t, db, first, "acme")
 	if _, err := CreateDomain(ctx, db, first, testSubject(first), firstLB, "example.com", derived, false); err != nil {
 		t.Fatalf("the first account claims example.com: %v", err)
 	}
@@ -401,7 +390,7 @@ func TestIntegrationAnotherTenantsDomainIsRefusedWithoutNamingThem(t *testing.T)
 	if err != nil {
 		t.Fatalf("scope: %v", err)
 	}
-	secondLB := loadBalancerFixture(t, db, second, "other")
+	secondLB := projectFixture(t, db, second, "other")
 
 	_, err = CreateDomain(ctx, db, second, testSubject(second), secondLB, "example.com", derived, false)
 	if err == nil {
@@ -424,7 +413,7 @@ func TestIntegrationAnotherTenantsDomainIsRefusedWithoutNamingThem(t *testing.T)
 	// that it is the ALIAS conflict that fires — `*.example.com` is a different
 	// domain deriving the same challenge name, which is the case this branch is
 	// about; the apex would be caught one check earlier as a duplicate domain.
-	sibling := loadBalancerFixture(t, db, first, "sibling")
+	sibling := projectFixture(t, db, first, "sibling")
 	_, err = CreateDomain(ctx, db, first, testSubject(first), sibling, "*.example.com", derived, false)
 	if err == nil || !strings.Contains(err.Error(), "already owned by") {
 		t.Fatalf("within one account the conflict was reported as %v; it must say which load balancer holds it", err)

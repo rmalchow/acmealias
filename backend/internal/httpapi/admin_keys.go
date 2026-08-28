@@ -91,15 +91,15 @@ func (a *admin) listKeys(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	loadBalancerID, err := idParam(c, "id")
+	projectID, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
-	if _, err := store.GetLoadBalancer(ctx, a.db(), sc, loadBalancerID); err != nil {
+	if _, err := store.GetProject(ctx, a.db(), sc, projectID); err != nil {
 		return err
 	}
-	ks, err := store.ListAPIKeysForLoadBalancer(ctx, a.db(), sc, loadBalancerID)
+	ks, err := store.ListAPIKeysForProject(ctx, a.db(), sc, projectID)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (a *admin) createKey(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	loadBalancerID, err := idParam(c, "id")
+	projectID, err := idParam(c, "id")
 	if err != nil {
 		return err
 	}
@@ -136,26 +136,26 @@ func (a *admin) createKey(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	if _, err := store.GetLoadBalancer(ctx, a.db(), sc, loadBalancerID); err != nil {
+	if _, err := store.GetProject(ctx, a.db(), sc, projectID); err != nil {
 		return err
 	}
-	// The route is still POST /loadbalancers/{id}/keys, because that is the
-	// screen an operator is on. What it creates is a key anchored to the account
-	// holding grants over this load balancer — the same authority the dropped
-	// column carried, now expressed in a grammar that can also say "this whole
-	// project" when someone asks for it.
+	// The route is POST /projects/{id}/keys, because that is the screen an
+	// operator is on. What it creates is a key anchored to the account holding
+	// grants over this project — the same authority the dropped
+	// api_keys.load_balancer_id column carried, in a grammar that says it
+	// explicitly.
 	grants := []model.APIKeyGrant{
-		{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &loadBalancerID, Action: challengePublish, Inheritable: true},
-		{ObjectType: string(authz.TypeLoadBalancer), ObjectID: &loadBalancerID, Action: challengeWithdraw, Inheritable: true},
+		{ObjectType: string(authz.TypeProject), ObjectID: &projectID, Action: challengePublish, Inheritable: true},
+		{ObjectType: string(authz.TypeProject), ObjectID: &projectID, Action: challengeWithdraw, Inheritable: true},
 	}
 	return a.mint(c, grants, body.Note, nets, expires, authz.ActionKeyCreate)
 }
 
-// rotateKey mints a successor for the same load balancer, copying the note and the
+// rotateKey mints a successor for the same project, copying the note and the
 // address restrictions, and leaves the existing key working.
 //
 // That is the whole of design D3's rotation: create, deploy, then revoke the
-// old one — the model supports several live keys per load balancer precisely so the
+// old one — the model supports several live keys per project precisely so the
 // window between the two never has a gap. Revoking the predecessor here
 // automatically would reintroduce the downtime the design removed.
 func (a *admin) rotateKey(c echo.Context) error {

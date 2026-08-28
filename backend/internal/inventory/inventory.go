@@ -1,6 +1,6 @@
-// Package inventory is the service layer over internal/store: projects, LB
-// lbs, nodes, domains and their aliases, plus the DNS plan a load balancer implies
-// (design D4 and D5).
+// Package inventory is the service layer over internal/store: projects, their
+// nodes, domains and aliases, plus the DNS plan a project implies (design D4
+// and D5).
 //
 // Everything here is a plain function taking the *gorm.DB the caller already
 // holds — the HTTP handlers and the CLI both call these directly, so the
@@ -28,7 +28,7 @@ var ErrInvalid = dnsname.ErrInvalid
 
 // ErrConflict is a uniqueness or ownership clash: a domain that already
 // exists, an alias label already taken, or a challenge name owned by another
-// load balancer. The message always names the existing owner.
+// project. The message always names the existing owner.
 var ErrConflict = errors.New("inventory: conflict")
 
 // ErrNotEmpty is the refusal to delete a parent that still has children
@@ -134,9 +134,8 @@ func checkProjectQuota(ctx context.Context, db *gorm.DB, sc store.Scope, lim Lim
 		ErrNoRoom, lim.ProjectsPerPersonalAccount, n)
 }
 
-// ListProjects returns the whole inventory tree: projects, their load balancers,
-// and each load balancer's nodes and domains.
-func ListProjects(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject) ([]model.Project, error) {
+// ListProjects returns the account's projects, each with what is in it.
+func ListProjects(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject) ([]store.ProjectListing, error) {
 	ps, _, err := ListProjectsPage(ctx, db, sc, subj, "", 1000, 0)
 	return ps, err
 }
@@ -158,11 +157,19 @@ func ListProjects(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 // The count runs the same predicate as the page. A total counting rows the
 // caller cannot see would leak the existence of invisible objects through a
 // number, undoing what returning none of them was protecting.
-func ListProjectsPage(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, query string, limit, offset int) ([]model.Project, int64, error) {
+func ListProjectsPage(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, query string, limit, offset int) ([]store.ProjectListing, int64, error) {
 	return store.ListProjectsACL(ctx, db, sc, acl(subj, authz.ActionViewInventory, authz.TypeProject), query, limit, offset)
 }
 
-// DeleteProject refuses a project that still owns load balancers.
+// DeleteProject refuses a project that still holds domains or aliases. Nodes
+// cascade with the project, so they do not block it.
+//
+// Deleting is governed by MEMBERSHIP rather than by a grant, exactly as creating
+// is (design P14), and that survived the collapse deliberately: a project is
+// still the top of the containment tree inside an account, so a grant permitting
+// its deletion would have to name the account. What changed is that the object
+// being deleted now has contents, which is why the emptiness checks below moved
+// here from the load balancer.
 func DeleteProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, id model.ID) error {
 	if err := requireUnrestricted(subj, "deleting a project"); err != nil {
 		return err
@@ -171,75 +178,30 @@ func DeleteProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.
 	if err != nil {
 		return err
 	}
-	lbs, err := store.ListLoadBalancersForProject(ctx, db, sc, id)
-	if err != nil {
-		return err
-	}
-	if len(lbs) > 0 {
-		return fmt.Errorf("%w: project %q still has %d load balancer(s), delete them first", ErrNotEmpty, p.Slug, len(lbs))
-	}
-	// ponytail: check-then-delete races with a concurrent load balancer creation; the
-	// ON DELETE RESTRICT foreign key is the backstop that makes the race a
-	// failed delete rather than an orphaned lb.
-	return store.DeleteProject(ctx, db, sc, id)
-}
-
-// CreateLoadBalancer creates a load balancer under a project.
-func CreateLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, projectID model.ID, slug, name string) (*model.LoadBalancer, error) {
-	if err := dnsname.ValidateLabel(slug); err != nil {
-		return nil, fmt.Errorf("load balancer slug: %w", err)
-	}
-	if name == "" {
-		return nil, fmt.Errorf("%w: load balancer name is empty", ErrInvalid)
-	}
-	// Creating is authorized on the PARENT: there is no object yet to hold a
-	// grant, and "may write inventory in this project" is what confers the
-	// ability to add a load balancer to it.
-	parent, err := store.GetProject(ctx, db, sc, projectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(parent)); err != nil {
-		return nil, err
-	}
-	p := &model.LoadBalancer{ProjectID: projectID, Slug: slug, Name: name}
-	if err := store.CreateLoadBalancer(ctx, db, sc, p); err != nil {
-		return nil, err
-	}
-	return p, nil
-}
-
-// DeleteLoadBalancer refuses a load balancer that still owns domains or aliases. Nodes
-// cascade with the load balancer, so they do not block it.
-func DeleteLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, id model.ID) error {
-	lb, err := store.GetLoadBalancer(ctx, db, sc, id)
-	if err != nil {
-		return err
-	}
-	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(lb)); err != nil {
-		return err
-	}
-	domains, err := store.ListDomainsForLoadBalancer(ctx, db, sc, id)
+	domains, err := store.ListDomainsForProject(ctx, db, sc, id)
 	if err != nil {
 		return err
 	}
 	if len(domains) > 0 {
-		return fmt.Errorf("%w: load balancer %q still has %d domain(s), delete them first", ErrNotEmpty, lb.Slug, len(domains))
+		return fmt.Errorf("%w: project %q still has %d domain(s), delete them first", ErrNotEmpty, p.Slug, len(domains))
 	}
-	aliases, err := store.ListAliasesForLoadBalancer(ctx, db, sc, id)
+	aliases, err := store.ListAliasesForProject(ctx, db, sc, id)
 	if err != nil {
 		return err
 	}
 	if len(aliases) > 0 {
-		return fmt.Errorf("%w: load balancer %q still has %d alias(es)", ErrNotEmpty, lb.Slug, len(aliases))
+		return fmt.Errorf("%w: project %q still has %d alias(es)", ErrNotEmpty, p.Slug, len(aliases))
 	}
-	return store.DeleteLoadBalancer(ctx, db, sc, id)
+	// ponytail: check-then-delete races with a concurrent domain creation; the
+	// ON DELETE RESTRICT foreign key is the backstop that makes the race a
+	// failed delete rather than an orphaned domain.
+	return store.DeleteProject(ctx, db, sc, id)
 }
 
-// AddNode adds a node to a load balancer. ipv4 and ipv6 are optional strings, but
+// AddNode adds a node to a project. ipv4 and ipv6 are optional strings, but
 // a node with neither would contribute nothing to the DNS plan and is
 // refused. Addresses are stored canonicalized.
-func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, loadBalancerID model.ID, label, ipv4, ipv6 string) (*model.LBNode, error) {
+func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, projectID model.ID, label, ipv4, ipv6 string) (*model.LBNode, error) {
 	if err := dnsname.ValidateLabel(label); err != nil {
 		return nil, fmt.Errorf("node label: %w", err)
 	}
@@ -247,14 +209,14 @@ func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subjec
 	if err != nil {
 		return nil, err
 	}
-	parent, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
+	parent, err := store.GetProject(ctx, db, sc, projectID)
 	if err != nil {
 		return nil, err
 	}
 	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(parent)); err != nil {
 		return nil, err
 	}
-	n := &model.LBNode{LoadBalancerID: loadBalancerID, Label: label, IPv4: v4, IPv6: v6}
+	n := &model.LBNode{ProjectID: projectID, Label: label, IPv4: v4, IPv6: v6}
 	if err := store.CreateLBNode(ctx, db, sc, n); err != nil {
 		return nil, err
 	}

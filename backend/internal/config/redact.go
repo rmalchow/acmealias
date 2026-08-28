@@ -8,8 +8,8 @@ import (
 const redacted = "REDACTED"
 
 // LogValue renders the effective configuration for structured logging with
-// every secret redacted: the database password (via url.URL.Redacted) and
-// the OIDC client secret. Everything else — including CIDRs, group names
+// every secret redacted: the database password (via url.URL.Redacted), the
+// OIDC client secret and the SMTP password. Everything else — including CIDRs, group names
 // and listen addresses — is operationally useful and not sensitive, so it
 // is logged in full.
 func (c Config) LogValue() slog.Value {
@@ -47,6 +47,12 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("session_idle_timeout", c.SessionIdleTimeout),
 		slog.Duration("session_max_lifetime", c.SessionMaxLifetime),
 		slog.Any("caa_issuers", c.CAAIssuers),
+		slog.String("mail_from", c.MailFrom),
+		slog.String("mail_sender", c.MailSender),
+		slog.String("mail_reply_to", c.MailReplyTo),
+		slog.String("mail_smtp_addr", c.MailSMTPAddr),
+		slog.String("mail_smtp_user", c.MailSMTPUser),
+		slog.String("mail_smtp_password", redactNonEmpty(c.MailSMTPPass)),
 		slog.String("log_level", c.LogLevel),
 		slog.Duration("shutdown_grace_period", c.ShutdownGracePeriod),
 	)

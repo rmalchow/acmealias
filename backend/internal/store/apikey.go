@@ -47,20 +47,18 @@ func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey, c
 	})
 }
 
-// ListAPIKeysForLoadBalancer returns the keys whose authority reaches one load
-// balancer, with their networks and grants preloaded, ordered by creation time.
+// ListAPIKeysForProject returns the keys whose authority reaches one project,
+// with their networks and grants preloaded, ordered by creation time.
 //
-// "Reaches" is now a question about grants rather than a foreign key: a key
-// qualifies if it holds a grant naming this load balancer, or an inheritable
-// grant naming the project or account containing it, or a wildcard. That is a
-// wider set than the old column described — which is the feature, since a
-// project-anchored key is exactly what this change exists to allow, and it must
-// appear on the screens of every load balancer it can act on.
-func ListAPIKeysForLoadBalancer(ctx context.Context, db *gorm.DB, sc Scope, loadBalancerID model.ID) ([]model.APIKey, error) {
+// "Reaches" is a question about grants rather than a foreign key: a key
+// qualifies if it holds a grant naming this project, or a wildcard within the
+// account. The project's own row is read first so a caller cannot enumerate
+// another account's keys by naming a project identifier it guessed.
+func ListAPIKeysForProject(ctx context.Context, db *gorm.DB, sc Scope, projectID model.ID) ([]model.APIKey, error) {
 	var ks []model.APIKey
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		var lb model.LoadBalancer
-		if err := sc.Where(tx).First(&lb, "id = ?", loadBalancerID).Error; err != nil {
+		var p model.Project
+		if err := sc.Where(tx).First(&p, "id = ?", projectID).Error; err != nil {
 			return err
 		}
 		return sc.Where(tx).
@@ -71,14 +69,13 @@ func ListAPIKeysForLoadBalancer(ctx context.Context, db *gorm.DB, sc Scope, load
 				 where g.api_key_id = api_keys.id
 				   and (
 				     g.object_id is null
-				     or (g.object_type = 'load_balancer' and g.object_id = ?)
-				     or (g.inheritable and g.object_type = 'project' and g.object_id = ?)
-				   ))`, lb.ID, lb.ProjectID).
+				     or (g.object_type = 'project' and g.object_id = ?)
+				   ))`, p.ID).
 			Order("created_at").
 			Find(&ks).Error
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store: list api keys for load balancer %s: %w", loadBalancerID, err)
+		return nil, fmt.Errorf("store: list api keys for project %s: %w", projectID, err)
 	}
 	return ks, nil
 }

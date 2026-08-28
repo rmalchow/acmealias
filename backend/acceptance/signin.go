@@ -55,8 +55,8 @@ type session struct {
 
 // acct addresses one path within the account this session is acting in.
 //
-//	s.acct("/loadbalancers/" + lb + "/keys")
-//	  -> /api/v1/accounts/0199…-…/loadbalancers/0199…-…/keys
+//	s.acct("/projects/" + project + "/keys")
+//	  -> /api/v1/accounts/0199…-…/projects/0199…-…/keys
 //
 // Routes that are NOT account-scoped — /me, /accounts, the auth endpoints — are
 // written out in full at their call sites, because there are four of them and

@@ -12,21 +12,21 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
-// LoadBalancerDNS renders a load balancer's DNS plan: a human-readable table, followed
+// ProjectDNS renders a project's DNS plan: a human-readable table, followed
 // by the zone-file snippet inventory.RenderZoneSnippet produces — the same
 // rendering the console's DNS plan view uses, so the CLI output is what the
 // acceptance suite asserts against (task 20.3).
-func LoadBalancerDNS(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, opts inventory.PlanOptions, ref string) error {
-	lb, err := resolveLoadBalancerRef(ctx, db, sc, ref)
+func ProjectDNS(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, opts inventory.PlanOptions, ref string) error {
+	p, err := resolveProjectRef(ctx, db, sc, ref)
 	if err != nil {
 		return err
 	}
-	plan, err := inventory.Plan(ctx, db, sc, authz.CLISubject(sc.AccountID()), lb.ID, opts)
+	plan, err := inventory.Plan(ctx, db, sc, authz.CLISubject(sc.AccountID()), p.ID, opts)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "DNS plan for %s/%s (%s)\n", plan.ProjectSlug, plan.LoadBalancerSlug, plan.LoadBalancerName)
+	fmt.Fprintf(out, "DNS plan for %s (%s)\n", plan.ProjectSlug, plan.ProjectName)
 	if len(plan.Records) == 0 {
 		fmt.Fprintln(out, "no records")
 	} else {

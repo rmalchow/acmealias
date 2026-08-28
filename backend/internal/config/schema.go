@@ -34,6 +34,7 @@ type fileConfig struct {
 	Staff     staffBlock     `koanf:"staff"`
 	Challenge challengeBlock `koanf:"challenge"`
 	Limits    limitsBlock    `koanf:"limits"`
+	Mail      mailBlock      `koanf:"mail"`
 	Log       logBlock       `koanf:"log"`
 }
 
@@ -226,6 +227,69 @@ func (limitsBlock) Defaults() map[string]any {
 	return map[string]any{"projects_per_personal_account": 5}
 }
 
+// mailBlock is who the deployment is when it sends mail, and where it sends it
+// through.
+//
+// The identity settings look like presentation and are not (transactional-email
+// T1). Mail clients thread by SENDER, so two spellings of us — `acmealias` and
+// `AcmeAlias`, `no-reply@` and `noreply@` — arrive as two correspondents, and a
+// customer looking for an invitation finds a conversation that does not contain
+// it. More seriously, every host that sends on the domain's behalf has to be
+// authorised by the domain's published sender policy AND to sign with a
+// published key, and the result has to ALIGN with the address a reader sees. A
+// message that authenticates as the host that sent it but not as the domain in
+// its own From is filed as spam rather than bounced.
+//
+// This block exists because the identity provider sends from one machine and
+// this service from another. They cannot share a line of code — Django
+// templates in Python against Go templates in Go — so what they share is these
+// values, and a test reads both senders back out of the development stack's
+// mail sink to prove they agree (T2).
+type mailBlock struct {
+	// From is the address every message is sent as, and Sender is the display
+	// name beside it. Both senders use the same pair; see the type comment.
+	From   string `koanf:"from"`
+	Sender string `koanf:"sender"`
+
+	// ReplyTo goes somewhere a person reads (T3).
+	//
+	// `no-reply@` is the reflex and it is wrong for what this service sends.
+	// The messages are invitations, warnings that an account is about to stop
+	// working, and notices that a delegation never appeared — every one of them
+	// something a recipient may reasonably want to answer. An address that
+	// discards mail teaches them that answering us does not work, which they
+	// remember later, when we need them to answer.
+	ReplyTo string `koanf:"reply_to"`
+
+	// Footer identifies the sender, once, for both senders. It is settled in
+	// configuration rather than per-template because the alternative is
+	// discovering after the fifth template that three of them say something
+	// slightly different, and because the requirement is about the sender
+	// rather than about any one message (T5).
+	Footer string `koanf:"footer"`
+
+	// SMTPAddr is host:port. In development this is the compose service name
+	// `mailpit:1025` and NOT `mail.localhost`: that name is the web interface
+	// and is served through the HTTP overlay, which SMTP does not traverse.
+	SMTPAddr string `koanf:"smtp_addr"`
+	SMTPUser string `koanf:"smtp_user"`
+	SMTPPass string `koanf:"smtp_password"`
+}
+
+// The identity is a DEFAULT and not a required setting, so a deployment that
+// configures no mail at all still has a coherent sender rather than sending as
+// nobody. What it does NOT default is smtp_addr: with no relay the service
+// constructs a Discard sender and sends nothing, which is the right behaviour
+// for an unconfigured deployment — failing to send beats failing to serve.
+func (mailBlock) Defaults() map[string]any {
+	return map[string]any{
+		"from":     "no-reply@acmealias.com",
+		"sender":   "AcmeAlias",
+		"reply_to": "support@acmealias.com",
+		"footer":   "AcmeAlias — support@acmealias.com",
+	}
+}
+
 type logBlock struct {
 	Level string `koanf:"level"`
 }
@@ -290,6 +354,14 @@ func (f fileConfig) toConfig() Config {
 
 		SessionIdleTimeout: f.OIDC.SessionIdleTimeout,
 		SessionMaxLifetime: f.OIDC.SessionMaxLifetime,
+
+		MailFrom:     f.Mail.From,
+		MailSender:   f.Mail.Sender,
+		MailReplyTo:  f.Mail.ReplyTo,
+		MailFooter:   f.Mail.Footer,
+		MailSMTPAddr: f.Mail.SMTPAddr,
+		MailSMTPUser: f.Mail.SMTPUser,
+		MailSMTPPass: f.Mail.SMTPPass,
 
 		LogLevel: f.Log.Level,
 	}
@@ -378,6 +450,14 @@ var envBindings = []envBinding{
 
 	{"ACME_ALLOW_ACCOUNT_CREATION", "limits.allow_account_creation", kindBool},
 	{"ACME_PROJECT_QUOTA", "limits.projects_per_personal_account", kindInt},
+
+	{"ACME_MAIL_FROM", "mail.from", kindString},
+	{"ACME_MAIL_SENDER", "mail.sender", kindString},
+	{"ACME_MAIL_REPLY_TO", "mail.reply_to", kindString},
+	{"ACME_MAIL_FOOTER", "mail.footer", kindString},
+	{"ACME_MAIL_SMTP_ADDR", "mail.smtp_addr", kindString},
+	{"ACME_MAIL_SMTP_USER", "mail.smtp_user", kindString},
+	{"ACME_MAIL_SMTP_PASSWORD", "mail.smtp_password", kindString},
 
 	{"ACME_LOG_LEVEL", "log.level", kindString},
 }

@@ -92,20 +92,14 @@ func TestIntegrationGrantsStayLiveInAPersonalAccount(t *testing.T) {
 	var proj projectView
 	decode(t, rec, &proj)
 
-	rec = cl.do(http.MethodPost, acct+"/projects/"+proj.ID.String()+"/loadbalancers", `{"slug":"eu","name":"EU"}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create load balancer: %d %s", rec.Code, rec.Body.String())
-	}
-	var lb loadBalancerView
-	decode(t, rec, &lb)
-	lbPath := acct + "/loadbalancers/" + lb.ID.String()
+	projPath := acct + "/projects/" + proj.ID.String()
 
 	// The key minted here is NARROWER than its holder: the owner is
 	// unrestricted — every action on every object of the account — and the key
-	// gets two grants over one load balancer. That narrowing is the good
-	// practice C9 says survives in an account of one, and it is what breaks if
-	// somebody deletes the grant machinery along with the roles screen.
-	rec = cl.do(http.MethodPost, lbPath+"/keys", `{"note":"renewals"}`)
+	// gets two grants over one project. That narrowing is the good practice C9
+	// says survives in an account of one, and it is what breaks if somebody
+	// deletes the grant machinery along with the roles screen.
+	rec = cl.do(http.MethodPost, projPath+"/keys", `{"note":"renewals"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create a key in a personal account: %d %s, want 201 — the grant model is not conditional on kind",
 			rec.Code, rec.Body.String())
@@ -113,11 +107,11 @@ func TestIntegrationGrantsStayLiveInAPersonalAccount(t *testing.T) {
 	var created keyCreated
 	decode(t, rec, &created)
 	if len(created.Key.Grants) != 2 {
-		t.Fatalf("the key holds %d grants, want two over one load balancer: %s", len(created.Key.Grants), rec.Body.String())
+		t.Fatalf("the key holds %d grants, want two over one project: %s", len(created.Key.Grants), rec.Body.String())
 	}
 	for _, g := range created.Key.Grants {
-		if g.ObjectID == nil || *g.ObjectID != lb.ID {
-			t.Fatalf("a grant names %v rather than the load balancer the key was minted for; the key is not scoped", g.ObjectID)
+		if g.ObjectID == nil || *g.ObjectID != proj.ID {
+			t.Fatalf("a grant names %v rather than the project the key was minted for; the key is not scoped", g.ObjectID)
 		}
 	}
 

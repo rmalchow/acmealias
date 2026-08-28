@@ -81,6 +81,7 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
         <tr>
           <th nzWidth="14rem">Slug</th>
           <th>Name</th>
+          <th nzWidth="18rem">Contents</th>
           <th nzWidth="16rem">Created</th>
         </tr>
       </thead>
@@ -89,6 +90,7 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
           <tr>
             <td><a [routerLink]="['/projects', p.id]">{{ p.slug }}</a></td>
             <td>{{ p.name }}</td>
+            <td class="ac-nowrap" [class.ac-hint]="isEmpty(p)">{{ contents(p) }}</td>
             <td class="ac-nowrap">{{ p.createdAt | date: 'medium' }}</td>
           </tr>
         }
@@ -162,6 +164,38 @@ export class ProjectListComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+  }
+
+  /**
+   * What is IN a project, which is what stops this list from being the least useful one in the
+   * product (design L5).
+   *
+   * Before the collapse a row could at least say "3 load balancers"; a project is a concrete
+   * thing now, and a list of concrete things has to say how big each one is. The two numbers are
+   * the two questions somebody actually has: nodes is "how much infrastructure is this", domains
+   * is "how much of my certificate estate depends on it" — the one that decides how carefully to
+   * touch it. They come with the listing rather than a request per row.
+   */
+  contents(p: Project): string {
+    if (this.isEmpty(p)) return 'No nodes, no domains';
+    const nodes = p.nodeCount ?? 0;
+    const domains = p.domainCount ?? 0;
+    return `${nodes} ${nodes === 1 ? 'node' : 'nodes'} · ${domains} ${domains === 1 ? 'domain' : 'domains'}`;
+  }
+
+  /**
+   * Empty says so in words rather than as "0 · 0".
+   *
+   * A freshly created project is the commonest empty state in the product and it is the one with
+   * an obvious next action, so the row is where to say it — two zeroes read as a measurement
+   * where the sentence reads as an instruction.
+   *
+   * Undefined counts are NOT empty. The single-project read omits them because it carries the
+   * nodes and domains themselves, and a row rendering that as "no nodes, no domains" would be
+   * describing the response rather than the project.
+   */
+  isEmpty(p: Project): boolean {
+    return p.nodeCount === 0 && p.domainCount === 0;
   }
 
   /**

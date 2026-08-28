@@ -59,21 +59,17 @@ func TestIntegrationMigrateDownReverses(t *testing.T) {
 	if err := db.Create(&project).Error; err != nil {
 		t.Fatalf("insert project: %v", err)
 	}
-	lb := model.LoadBalancer{AccountID: account.ID, ProjectID: project.ID, Slug: "eu-prod", Name: "EU production"}
-	if err := db.Create(&lb).Error; err != nil {
-		t.Fatalf("insert load_balancer: %v", err)
-	}
 	ipv4, ipv6 := "192.0.2.10", "2001:db8::10"
-	if err := db.Create(&model.LBNode{AccountID: account.ID, ProjectID: project.ID, LoadBalancerID: lb.ID, Label: "a", IPv4: &ipv4, IPv6: &ipv6}).Error; err != nil {
+	if err := db.Create(&model.LBNode{AccountID: account.ID, ProjectID: project.ID, Label: "a", IPv4: &ipv4, IPv6: &ipv6}).Error; err != nil {
 		t.Fatalf("insert lb_node: %v", err)
 	}
-	alias := model.Alias{AccountID: account.ID, ProjectID: project.ID, LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
+	alias := model.Alias{AccountID: account.ID, ProjectID: project.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
 	if err := db.Create(&alias).Error; err != nil {
 		t.Fatalf("insert alias: %v", err)
 	}
 	// example.com and *.example.com share one alias — the wildcard case from design D4.
 	for _, name := range []string{"example.com", "*.example.com"} {
-		if err := db.Create(&model.Domain{AccountID: account.ID, ProjectID: project.ID, LoadBalancerID: lb.ID, AliasID: alias.ID, Name: name}).Error; err != nil {
+		if err := db.Create(&model.Domain{AccountID: account.ID, ProjectID: project.ID, AliasID: alias.ID, Name: name}).Error; err != nil {
 			t.Fatalf("insert domain %s: %v", name, err)
 		}
 	}
@@ -304,6 +300,12 @@ func ownerRoleURL(t *testing.T, adminDSN string) string {
 // user, account, project, load balancer, alias, domain. It writes with the
 // policies lifted the way store.CrossAccount does, because the owner is subject
 // to them here too — which is the very thing this file is about.
+//
+// It writes the BASELINE's shape, load balancer and all, and must keep doing so
+// however the schema moves afterwards: its caller stops at migration 000001 on
+// purpose, because the thing under test is what 000002 does to rows that already
+// existed. Writing today's shape here would be writing rows the schema at that
+// point cannot hold.
 func seedDomainForBackfill(t *testing.T, db *sql.DB) {
 	t.Helper()
 	withCrossAccount(t, db, func(tx *sql.Tx) {

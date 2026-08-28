@@ -25,11 +25,11 @@ func id(v model.ID) *model.ID { return &v }
 // object builders, so a test row reads as what it is about rather than as five
 // identifier fields.
 func lbObject(account, project, lb model.ID) Object {
-	return Object{Type: TypeLoadBalancer, ID: lb, AccountID: account, ProjectID: project, LoadBalancerID: lb}
+	return Object{Type: TypeProject, ID: lb, AccountID: account, ProjectID: project}
 }
 
 func nodeObject(account, project, lb, node model.ID) Object {
-	return Object{Type: TypeNode, ID: node, AccountID: account, ProjectID: project, LoadBalancerID: lb}
+	return Object{Type: TypeNode, ID: node, AccountID: account, ProjectID: project}
 }
 
 func projectObject(account, project model.ID) Object {
@@ -46,14 +46,14 @@ func TestCanCoversEveryCombination(t *testing.T) {
 	}{
 		{
 			name:   "a grant on one object permits that object",
-			grants: []Grant{{AccountID: acct, Type: TypeLoadBalancer, ObjectID: id(lbA), Action: "inventory.write"}},
+			grants: []Grant{{AccountID: acct, Type: TypeProject, ObjectID: id(lbA), Action: "inventory.write"}},
 			action: "inventory.write",
 			object: lbObject(acct, projA, lbA),
 			want:   true,
 		},
 		{
 			name:   "a grant on one object permits nothing else",
-			grants: []Grant{{AccountID: acct, Type: TypeLoadBalancer, ObjectID: id(lbA), Action: "inventory.write"}},
+			grants: []Grant{{AccountID: acct, Type: TypeProject, ObjectID: id(lbA), Action: "inventory.write"}},
 			action: "inventory.write",
 			object: lbObject(acct, projA, lbB),
 			want:   false,
@@ -67,14 +67,14 @@ func TestCanCoversEveryCombination(t *testing.T) {
 		},
 		{
 			name:   "a wildcard identifier covers the account it belongs to",
-			grants: []Grant{{AccountID: acct, Type: TypeLoadBalancer, Action: "inventory.write"}},
+			grants: []Grant{{AccountID: acct, Type: TypeProject, Action: "inventory.write"}},
 			action: "inventory.write",
 			object: lbObject(acct, projA, lbA),
 			want:   true,
 		},
 		{
 			name:   "a wildcard does not reach another account",
-			grants: []Grant{{AccountID: acct, Type: TypeLoadBalancer, Action: "inventory.write"}},
+			grants: []Grant{{AccountID: acct, Type: TypeProject, Action: "inventory.write"}},
 			action: "inventory.write",
 			object: lbObject(otherAc, projA, lbA),
 			want:   false,
@@ -95,7 +95,7 @@ func TestCanCoversEveryCombination(t *testing.T) {
 		},
 		{
 			name:   "inheritance does not reach upward",
-			grants: []Grant{{AccountID: acct, Type: TypeLoadBalancer, ObjectID: id(lbA), Action: "inventory.write", Inheritable: true}},
+			grants: []Grant{{AccountID: acct, Type: TypeProject, ObjectID: id(lbA), Action: "inventory.write", Inheritable: true}},
 			action: "inventory.write",
 			object: projectObject(acct, projA),
 			want:   false,
@@ -124,8 +124,8 @@ func TestCanCoversEveryCombination(t *testing.T) {
 		{
 			name: "authority is the union, and order does not matter",
 			grants: []Grant{
-				{AccountID: acct, Type: TypeLoadBalancer, ObjectID: id(lbB), Action: "inventory.write"},
-				{AccountID: acct, Type: TypeLoadBalancer, ObjectID: id(lbA), Action: "inventory.write"},
+				{AccountID: acct, Type: TypeProject, ObjectID: id(lbB), Action: "inventory.write"},
+				{AccountID: acct, Type: TypeProject, ObjectID: id(lbA), Action: "inventory.write"},
 			},
 			action: "inventory.write",
 			object: lbObject(acct, projA, lbA),
@@ -166,7 +166,7 @@ func TestZeroSubjectPermitsNothing(t *testing.T) {
 // rather than asserted, because a deny rule sneaking in would be invisible until
 // someone lost access they used to have.
 func TestGrantsAreOnlyAdditive(t *testing.T) {
-	base := []Grant{{AccountID: acct, Type: TypeLoadBalancer, ObjectID: id(lbA), Action: "inventory.write"}}
+	base := []Grant{{AccountID: acct, Type: TypeProject, ObjectID: id(lbA), Action: "inventory.write"}}
 	extra := Grant{AccountID: acct, Type: TypeProject, ObjectID: id(projB), Action: "inventory.view", Inheritable: true}
 
 	before := Subject{AccountID: acct, Grants: base}

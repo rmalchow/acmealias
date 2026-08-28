@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -170,5 +171,37 @@ func TestIntegrationUpdateRoleReplacesGrants(t *testing.T) {
 	}
 	if len(got[0].Grants) != 1 || got[0].Grants[0].Action != "inventory.view" {
 		t.Fatalf("grants = %+v, want exactly the one that was written", got[0].Grants)
+	}
+}
+
+// The check constraint 000004 added, asserted at the database rather than only
+// at authz.Grant.Validate.
+//
+// Two layers for one rule, deliberately. Validate is what produces a sentence a
+// caller can act on; the constraint is what makes the rule true of rows that
+// never went through Go — a psql session, a future import, a code path somebody
+// adds without knowing the vocabulary moved. The Go check being removed by
+// accident would leave this test as the one that notices.
+func TestIntegrationDatabaseRefusesTheRemovedObjectType(t *testing.T) {
+	db, sc := scopedDB(t)
+	ctx := context.Background()
+
+	role := &model.Role{Name: "writer"}
+	if err := CreateRole(ctx, db, sc, role, AllowAnyGrant); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		return tx.Create(&model.RoleGrant{
+			RoleID: role.ID, AccountID: sc.AccountID(),
+			ObjectType: "load_balancer", Action: "inventory.write",
+		}).Error
+	})
+	if err == nil {
+		t.Fatal("a grant naming load_balancer was stored; the object type is gone and the " +
+			"constraint that refuses it is what keeps the grammar from having two words for one thing")
+	}
+	if !strings.Contains(err.Error(), "object_type_not_load_balancer") {
+		t.Errorf("refused with %v, want the check constraint rather than something incidental", err)
 	}
 }

@@ -63,3 +63,18 @@ challenge:
   # development waits on it.
   activation_fresh_interval: '15s'
 
+
+
+# Mail goes to the stack's sink, which accepts everything and delivers nothing.
+#
+# `mailpit:1025` is the compose SERVICE NAME. It is not `mail.localhost` — that
+# name is mailpit's web interface, served through traefik, and SMTP does not
+# traverse an HTTP router. Setting the web name here fails at the first message
+# with a protocol error that reads like a broken mail server.
+#
+# The identity is deliberately NOT overridden. authentik is pointed at the same
+# from/sender in compose.yaml, and development is where the two are proved to
+# agree — overriding one of them here would make the stack the one place the
+# agreement is not exercised.
+mail:
+  smtp_addr: 'mailpit:1025'

@@ -25,7 +25,7 @@ import (
 // end-to-end test can tell them apart, because only here is the resolver real
 // and the answer genuinely absent rather than mocked as absent.
 //
-// Both halves are asserted on ONE load balancer holding TWO domains, which is
+// Both halves are asserted on ONE project holding TWO domains, which is
 // deliberate: it is also the join domainChecks does by challenge name, and a
 // regression there reads as every domain but the first reporting somebody
 // else's record as missing.
@@ -43,23 +43,16 @@ func TestTheSetupScreenSaysWhetherTheDelegationIsPublished(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _, _ = s.do(http.MethodDelete, s.acct("/projects/"+project.ID), nil) })
 
-	var lb lbRef
-	if err := s.json(http.MethodPost, s.acct("/projects/"+project.ID+"/loadbalancers"),
-		map[string]string{"slug": "prod", "name": "Acceptance (setup feedback)"},
-		http.StatusCreated, &lb); err != nil {
-		t.Fatalf("creating a load balancer: %v", err)
-	}
-
 	// Both under example.com, the only zone the fake internet answers for. The
 	// difference between them is not the name — it is that one of them has a
 	// CNAME published and the other does not.
-	published := newDomain(t, s, lb.ID, "published-"+slug+".example.com")
-	absent := newDomain(t, s, lb.ID, "absent-"+slug+".example.com")
+	published := newDomain(t, s, project.ID, "published-"+slug+".example.com")
+	absent := newDomain(t, s, project.ID, "absent-"+slug+".example.com")
 
 	// Before anything is published, BOTH read as absent. This is the assertion
 	// that a plain "not correct" would have passed while meaning nothing: the
 	// check ran, the answer came back, and the record is not there.
-	checks := verification(t, s, lb.ID)
+	checks := verification(t, s, project.ID)
 	for _, d := range []domainRef{published, absent} {
 		got := checks[strings.TrimSuffix(d.Name, ".")]
 		if got.Delegation.Status != "missing" {
@@ -79,14 +72,14 @@ func TestTheSetupScreenSaysWhetherTheDelegationIsPublished(t *testing.T) {
 	}
 
 	// Publish exactly one of them, the way a customer would.
-	onboardDomain(t, s, lb.ID, published)
+	onboardDomain(t, s, project.ID, published)
 
-	checks = verification(t, s, lb.ID)
+	checks = verification(t, s, project.ID)
 	if got := checks[strings.TrimSuffix(published.Name, ".")]; got.Delegation.Status != "correct" {
 		t.Errorf("after publishing, %s reads %q (found %q), want \"correct\"",
 			published.Name, got.Delegation.Status, got.Delegation.Found)
 	}
-	// And the other one is untouched. The two domains sit on one load balancer
+	// And the other one is untouched. The two domains sit in one project
 	// and are answered from one pass over DNS, so this is where a join on the
 	// wrong key would show: a delegation belonging to one domain reported as
 	// covering the other.
@@ -108,21 +101,21 @@ type acceptanceDomainCheck struct {
 	} `json:"delegation"`
 }
 
-// verification reads the load balancer's setup screen, keyed by domain name.
+// verification reads the project's setup screen, keyed by domain name.
 //
 // It uses the GET, not the POST beside it: the GET is what the screen runs on
 // open and it RECORDS NOTHING, which is what this test wants — asserting what a
 // customer is told, without activating anything as a side effect. onboardDomain
 // uses the POST precisely because it does want the side effect.
-func verification(t *testing.T, s *session, lb string) map[string]acceptanceDomainCheck {
+func verification(t *testing.T, s *session, project string) map[string]acceptanceDomainCheck {
 	t.Helper()
 	var res struct {
 		Resolver string                  `json:"resolver"`
 		Domains  []acceptanceDomainCheck `json:"domains"`
 	}
-	if err := s.json(http.MethodGet, s.acct("/loadbalancers/"+lb+"/verification"),
+	if err := s.json(http.MethodGet, s.acct("/projects/"+project+"/verification"),
 		nil, http.StatusOK, &res); err != nil {
-		t.Fatalf("reading the verification for %s: %v", lb, err)
+		t.Fatalf("reading the verification for %s: %v", project, err)
 	}
 	if res.Resolver == "" {
 		// Every domain would read "not checked", and the test would be
@@ -138,10 +131,10 @@ func verification(t *testing.T, s *session, lb string) map[string]acceptanceDoma
 	return out
 }
 
-func newDomain(t *testing.T, s *session, lb, name string) domainRef {
+func newDomain(t *testing.T, s *session, project, name string) domainRef {
 	t.Helper()
 	var d domainRef
-	if err := s.json(http.MethodPost, s.acct("/loadbalancers/"+lb+"/domains"),
+	if err := s.json(http.MethodPost, s.acct("/projects/"+project+"/domains"),
 		map[string]string{"name": name}, http.StatusCreated, &d); err != nil {
 		t.Fatalf("creating the domain %s: %v", name, err)
 	}

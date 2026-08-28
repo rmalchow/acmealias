@@ -15,11 +15,11 @@ import (
 // honest.
 //
 // This is the one assertion that needs inventory development/scripts/seed.sh
-// does not create: proving a key belonging to ANOTHER load balancer is refused
-// needs another load balancer, and the seed has exactly one. It is created here
+// does not create: proving a key belonging to ANOTHER project is refused
+// needs another project, and the seed has exactly one. It is created here
 // through the service's own admin API under a real admin session and removed
 // again — seed.sh is a human-facing fixture whose output a developer reads on
-// every reset, and a load balancer that exists only to be refused is noise in
+// every reset, and a project that exists only to be refused is noise in
 // it (design A3).
 
 type keyCreated struct {
@@ -53,16 +53,16 @@ func present(t *testing.T, path, id, secret, fqdn, value string, extra map[strin
 	return resp.StatusCode
 }
 
-// mintKey creates an API key on lb, restricted to networks (nil for none), and
-// registers its revocation.
-func mintKey(t *testing.T, s *session, lb string, note string, networks []string) keyCreated {
+// mintKey creates an API key over one project, restricted to networks (nil for
+// none), and registers its revocation.
+func mintKey(t *testing.T, s *session, project string, note string, networks []string) keyCreated {
 	t.Helper()
 	var out keyCreated
 	body := map[string]any{"note": note}
 	if networks != nil {
 		body["networks"] = networks
 	}
-	if err := s.json(http.MethodPost, s.acct("/loadbalancers/"+lb+"/keys"),
+	if err := s.json(http.MethodPost, s.acct("/projects/"+project+"/keys"),
 		body, http.StatusCreated, &out); err != nil {
 		t.Fatalf("creating key %q: %v", note, err)
 	}
@@ -74,23 +74,23 @@ func mintKey(t *testing.T, s *session, lb string, note string, networks []string
 
 func TestChallengeAuthorizationBoundaries(t *testing.T) {
 	s := mustSignInSeeded(t, adminUser)
-	project, lb := demoProd(t, s)
+	project := demoProject(t, s)
 
-	// --- (a) a valid key belonging to a different load balancer ------------
-	var other lbRef
-	if err := s.json(http.MethodPost, s.acct("/projects/"+project+"/loadbalancers"),
-		map[string]string{"slug": "acceptance-other", "name": "Acceptance (other LB)"},
+	// --- (a) a valid key belonging to a different project -------------------
+	var other projectRef
+	if err := s.json(http.MethodPost, s.acct("/projects"),
+		map[string]string{"slug": unique("acceptance-other"), "name": "Acceptance (other project)"},
 		http.StatusCreated, &other); err != nil {
-		t.Fatalf("creating the second load balancer: %v", err)
+		t.Fatalf("creating the second project: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _, _ = s.do(http.MethodDelete, s.acct("/loadbalancers/"+other.ID), nil)
+		_, _, _ = s.do(http.MethodDelete, s.acct("/projects/"+other.ID), nil)
 	})
 	foreign := mintKey(t, s, other.ID, "acceptance: foreign key", nil)
 
-	const trespass = "acceptance-cross-lb-value-should-never-be-published"
+	const trespass = "acceptance-cross-project-value-should-never-be-published"
 	if got := present(t, "/present", foreign.Key.Identifier, foreign.Secret, challengeName, trespass, nil); got != http.StatusForbidden {
-		t.Errorf("a key scoped to another load balancer published %s: got %d, want 403", challengeName, got)
+		t.Errorf("a key scoped to another project published %s: got %d, want 403", challengeName, got)
 	}
 	vals, _, err := txtValues(serviceDNS, aliasFQDN)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestChallengeAuthorizationBoundaries(t *testing.T) {
 	}
 	for _, v := range vals {
 		if v == trespass {
-			t.Fatalf("%s answers a value published by a key from another load balancer", aliasFQDN)
+			t.Fatalf("%s answers a value published by a key from another project", aliasFQDN)
 		}
 	}
 
@@ -110,18 +110,18 @@ func TestChallengeAuthorizationBoundaries(t *testing.T) {
 	// refuses everything and passes for the wrong reason forever, so it is
 	// observed: publish once with an unrestricted key and read back the client
 	// address the service recorded on the interaction.
-	open := mintKey(t, s, lb, "acceptance: calibration", nil)
+	open := mintKey(t, s, project, "acceptance: calibration", nil)
 	if got := present(t, "/present", open.Key.Identifier, open.Secret, challengeName, "acceptance-calibration", nil); got != http.StatusOK {
 		t.Fatalf("calibration publish: got %d, want 200", got)
 	}
-	peer := latestClientIP(t, s, lb)
+	peer := latestClientIP(t, s, project)
 	if got := present(t, "/cleanup", open.Key.Identifier, open.Secret, challengeName, "acceptance-calibration", nil); got != http.StatusOK {
 		t.Fatalf("calibration cleanup: got %d, want 200", got)
 	}
 	t.Logf("the challenge API observes this test's requests as coming from %s", peer)
 
 	// --- (b) the restriction, in BOTH directions ---------------------------
-	inside := mintKey(t, s, lb, "acceptance: inside the range", []string{peer + "/32"})
+	inside := mintKey(t, s, project, "acceptance: inside the range", []string{peer + "/32"})
 	if got := present(t, "/present", inside.Key.Identifier, inside.Secret, challengeName, "acceptance-inside", nil); got != http.StatusOK {
 		t.Errorf("a key permitting %s/32 was refused from %s: got %d, want 200", peer, peer, got)
 	}
@@ -130,7 +130,7 @@ func TestChallengeAuthorizationBoundaries(t *testing.T) {
 	}
 
 	// 10.99.0.0/16 is nowhere near the stack's 172.28.0.0/24.
-	outside := mintKey(t, s, lb, "acceptance: outside the range", []string{"10.99.0.0/16"})
+	outside := mintKey(t, s, project, "acceptance: outside the range", []string{"10.99.0.0/16"})
 	if got := present(t, "/present", outside.Key.Identifier, outside.Secret, challengeName, "acceptance-outside", nil); got != http.StatusUnauthorized {
 		t.Errorf("a key restricted to 10.99.0.0/16 was accepted from %s: got %d, want 401", peer, got)
 	}
@@ -152,12 +152,12 @@ func TestChallengeAuthorizationBoundaries(t *testing.T) {
 }
 
 // latestClientIP reads the client address the service recorded on the most
-// recent interaction for lb. The interaction history is written by /present
+// recent interaction for the project. The interaction history is written by /present
 // itself, so this is the address the CIDR check was actually made against.
-func latestClientIP(t *testing.T, s *session, lb string) string {
+func latestClientIP(t *testing.T, s *session, project string) string {
 	t.Helper()
 	var ins []interactionRow
-	if err := s.getJSON(s.acct("/loadbalancers/"+lb+"/interactions?limit=1"), &ins); err != nil {
+	if err := s.getJSON(s.acct("/projects/"+project+"/interactions?limit=1"), &ins); err != nil {
 		t.Fatalf("reading interactions: %v", err)
 	}
 	if len(ins) == 0 || ins[0].ClientIP == nil {

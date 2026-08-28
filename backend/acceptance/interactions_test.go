@@ -39,7 +39,7 @@ func TestBothAuthorizationsAreCreditedForTheOneQuery(t *testing.T) {
 	iss := forcedIssuance(t)
 
 	s := mustSignInSeeded(t, adminUser)
-	_, lb := demoProd(t, s)
+	project := demoProject(t, s)
 
 	var rows []interactionRow
 	// The window of the forced issuance. Scoping by time rather than taking
@@ -47,7 +47,7 @@ func TestBothAuthorizationsAreCreditedForTheOneQuery(t *testing.T) {
 	// published to this alias, and of any earlier `./scripts/dev.sh issue`.
 	eventually(t, 2*time.Minute, "two closed interactions for "+aliasLabel, func() error {
 		var all []interactionRow
-		if err := s.getJSON(s.acct("/loadbalancers/"+lb+"/interactions?limit=500"), &all); err != nil {
+		if err := s.getJSON(s.acct("/projects/"+project+"/interactions?limit=500"), &all); err != nil {
 			return err
 		}
 		rows = rows[:0]

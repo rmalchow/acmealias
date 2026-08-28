@@ -32,8 +32,8 @@ const (
 func TestIntegrationGeneratedLabelIsNotDerivableFromTheDomain(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	oneID := loadBalancerFixture(t, db, sc, "one")
-	twoID := loadBalancerFixture(t, db, sc, "two")
+	oneID := projectFixture(t, db, sc, "one")
+	twoID := projectFixture(t, db, sc, "two")
 
 	first, err := CreateDomain(ctx, db, sc, testSubject(sc), oneID, "demo.example.com", generated, false)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestIntegrationGeneratedLabelIsNotDerivableFromTheDomain(t *testing.T) {
 func TestIntegrationExistingAliasKeepsItsLabelWhenTheSettingChanges(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	loadBalancerID := loadBalancerFixture(t, db, sc, "acme")
+	loadBalancerID := projectFixture(t, db, sc, "acme")
 
 	apex, err := CreateDomain(ctx, db, sc, testSubject(sc), loadBalancerID, "demo.example.com", derived, false)
 	if err != nil {
@@ -126,11 +126,11 @@ func names(c *DomainCreation) []string {
 	return out
 }
 
-// domainNames lists what the load balancer actually holds, which is what
+// domainNames lists what the project actually holds, which is what
 // "neither domain exists" has to be checked against.
-func domainNames(t *testing.T, db *gorm.DB, sc store.Scope, loadBalancerID model.ID) []string {
+func domainNames(t *testing.T, db *gorm.DB, sc store.Scope, projectID model.ID) []string {
 	t.Helper()
-	rows, err := store.ListDomainsForLoadBalancer(context.Background(), db, sc, loadBalancerID)
+	rows, err := store.ListDomainsForProject(context.Background(), db, sc, projectID)
 	if err != nil {
 		t.Fatalf("list domains: %v", err)
 	}
@@ -158,9 +158,9 @@ func TestIntegrationCounterpartCreatesThePair(t *testing.T) {
 		t.Run(tc.submitted, func(t *testing.T) {
 			db, sc := scopedDB(t)
 			ctx := context.Background()
-			lbID := loadBalancerFixture(t, db, sc, "pair")
+			projectID := projectFixture(t, db, sc, "pair")
 
-			c, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, tc.submitted, generated, withCounterpart)
+			c, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, tc.submitted, generated, withCounterpart)
 			if err != nil {
 				t.Fatalf("create %q with its counterpart: %v", tc.submitted, err)
 			}
@@ -179,7 +179,7 @@ func TestIntegrationCounterpartCreatesThePair(t *testing.T) {
 					t.Errorf("challenge name of %q is %q, want %q", d.Name, got, c.Alias.ChallengeFQDN)
 				}
 			}
-			aliases, err := store.ListAliasesForLoadBalancer(ctx, db, sc, lbID)
+			aliases, err := store.ListAliasesForProject(ctx, db, sc, projectID)
 			if err != nil {
 				t.Fatalf("list aliases: %v", err)
 			}
@@ -199,16 +199,16 @@ func TestIntegrationCounterpartCreatesThePair(t *testing.T) {
 func TestIntegrationCounterpartIsOptional(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	lbID := loadBalancerFixture(t, db, sc, "single")
+	projectID := projectFixture(t, db, sc, "single")
 
-	c, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "example.com", generated, nameOnly)
+	c, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "example.com", generated, nameOnly)
 	if err != nil {
 		t.Fatalf("create example.com: %v", err)
 	}
 	if got := names(c); !reflect.DeepEqual(got, []string{"example.com"}) {
 		t.Fatalf("created %v, want only example.com", got)
 	}
-	if got := domainNames(t, db, sc, lbID); !reflect.DeepEqual(got, []string{"example.com"}) {
+	if got := domainNames(t, db, sc, projectID); !reflect.DeepEqual(got, []string{"example.com"}) {
 		t.Errorf("inventory holds %v, want only example.com", got)
 	}
 }
@@ -220,21 +220,21 @@ func TestIntegrationCounterpartIsOptional(t *testing.T) {
 func TestIntegrationRefusedCounterpartCreatesNothing(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()
-	lbID := loadBalancerFixture(t, db, sc, "suffix")
+	projectID := projectFixture(t, db, sc, "suffix")
 
 	// The premise: the submitted name is fine on its own.
 	if _, _, err := dnsname.ValidateDomain("co.uk"); err != nil {
 		t.Fatalf("co.uk should be a valid plain name: %v", err)
 	}
 
-	_, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "co.uk", generated, withCounterpart)
+	_, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "co.uk", generated, withCounterpart)
 	if !errors.Is(err, dnsname.ErrInvalid) {
 		t.Fatalf("error = %v, want a validation error", err)
 	}
 	if !strings.Contains(err.Error(), "*.co.uk") {
 		t.Errorf("error %q does not name the refused counterpart *.co.uk", err)
 	}
-	if got := domainNames(t, db, sc, lbID); len(got) != 0 {
+	if got := domainNames(t, db, sc, projectID); len(got) != 0 {
 		t.Errorf("inventory holds %v, want nothing created", got)
 	}
 }
@@ -247,16 +247,16 @@ func TestIntegrationConflictingCounterpartCreatesNothing(t *testing.T) {
 	t.Run("counterpart already exists here", func(t *testing.T) {
 		db, sc := scopedDB(t)
 		ctx := context.Background()
-		lbID := loadBalancerFixture(t, db, sc, "dup")
+		projectID := projectFixture(t, db, sc, "dup")
 
-		if _, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "*.example.com", generated, nameOnly); err != nil {
+		if _, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "*.example.com", generated, nameOnly); err != nil {
 			t.Fatalf("seed *.example.com: %v", err)
 		}
-		_, err := CreateDomain(ctx, db, sc, testSubject(sc), lbID, "example.com", generated, withCounterpart)
+		_, err := CreateDomain(ctx, db, sc, testSubject(sc), projectID, "example.com", generated, withCounterpart)
 		if !errors.Is(err, ErrConflict) {
 			t.Fatalf("error = %v, want a conflict", err)
 		}
-		if got := domainNames(t, db, sc, lbID); !reflect.DeepEqual(got, []string{"*.example.com"}) {
+		if got := domainNames(t, db, sc, projectID); !reflect.DeepEqual(got, []string{"*.example.com"}) {
 			t.Errorf("inventory holds %v, want only the seeded wildcard — example.com must not have been created", got)
 		}
 	})
@@ -264,8 +264,8 @@ func TestIntegrationConflictingCounterpartCreatesNothing(t *testing.T) {
 	t.Run("counterpart's alias belongs to another load balancer", func(t *testing.T) {
 		db, sc := scopedDB(t)
 		ctx := context.Background()
-		mine := loadBalancerFixture(t, db, sc, "mine")
-		theirs := loadBalancerFixture(t, db, sc, "theirs")
+		mine := projectFixture(t, db, sc, "mine")
+		theirs := projectFixture(t, db, sc, "theirs")
 
 		if _, err := CreateDomain(ctx, db, sc, testSubject(sc), theirs, "*.example.com", generated, nameOnly); err != nil {
 			t.Fatalf("seed *.example.com on the other load balancer: %v", err)

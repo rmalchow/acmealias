@@ -36,12 +36,10 @@ type recordView struct {
 }
 
 type planView struct {
-	ProjectSlug      string       `json:"projectSlug"`
-	ProjectName      string       `json:"projectName"`
-	LoadBalancerSlug string       `json:"loadBalancerSlug"`
-	LoadBalancerName string       `json:"loadBalancerName"`
-	Records          []recordView `json:"records"`
-	Zone             string       `json:"zone"`
+	ProjectSlug string       `json:"projectSlug"`
+	ProjectName string       `json:"projectName"`
+	Records     []recordView `json:"records"`
+	Zone        string       `json:"zone"`
 }
 
 func (a *admin) plan(c echo.Context) (*inventory.DNSPlan, error) {
@@ -67,7 +65,6 @@ func (a *admin) getPlan(c echo.Context) error {
 	}
 	v := planView{
 		ProjectSlug: p.ProjectSlug, ProjectName: p.ProjectName,
-		LoadBalancerSlug: p.LoadBalancerSlug, LoadBalancerName: p.LoadBalancerName,
 		Records: make([]recordView, 0, len(p.Records)),
 		Zone:    a.opts.Config.Zone,
 	}
@@ -86,7 +83,7 @@ func (a *admin) getPlanZone(c echo.Context) error {
 		return err
 	}
 	c.Response().Header().Set(echo.HeaderContentDisposition,
-		`attachment; filename="`+p.ProjectSlug+`-`+p.LoadBalancerSlug+`.zone"`)
+		`attachment; filename="`+p.ProjectSlug+`.zone"`)
 	return c.String(http.StatusOK, inventory.RenderZoneSnippet(p))
 }
 

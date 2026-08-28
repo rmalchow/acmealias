@@ -27,7 +27,7 @@ import (
 //   - the PERSONAL account, which nobody creates. It is materialized at the
 //     user's first sign-in (C1), so the fixture for it is signing in.
 //   - the SEEDED TEAM account `internal`, which holds the inventory the whole
-//     issuance arc runs against — the `demo` project, its `prod` load balancer,
+//     issuance arc runs against — the `demo` project,
 //     the domains, the alias the fake internet delegates to, and the API key
 //     traefik-lb authenticates with. development/scripts/seed.sh creates it
 //     through adminctl with a STAND-IN owner, because authentik's provider uses

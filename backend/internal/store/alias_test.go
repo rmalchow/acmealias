@@ -18,12 +18,8 @@ func TestIntegrationAliasRoundTrip(t *testing.T) {
 	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu-prod", Name: "EU Prod"}
-	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
 
-	alias := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
+	alias := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
 	if err := CreateAlias(ctx, db, sc, alias); err != nil {
 		t.Fatalf("create alias: %v", err)
 	}
@@ -41,8 +37,8 @@ func TestIntegrationAliasRoundTrip(t *testing.T) {
 	}
 
 	// Apex and wildcard share the alias.
-	apex := &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "example.com"}
-	wild := &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "*.example.com"}
+	apex := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "example.com"}
+	wild := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "*.example.com"}
 	if err := CreateDomain(ctx, db, sc, apex); err != nil {
 		t.Fatalf("create apex domain: %v", err)
 	}
@@ -50,7 +46,7 @@ func TestIntegrationAliasRoundTrip(t *testing.T) {
 		t.Fatalf("create wildcard domain: %v", err)
 	}
 
-	list, err := ListAliasesForLoadBalancer(ctx, db, sc, lb.ID)
+	list, err := ListAliasesForProject(ctx, db, sc, p.ID)
 	if err != nil {
 		t.Fatalf("list for lb: %v", err)
 	}

@@ -58,7 +58,7 @@ func (a *admin) listInteractions(c echo.Context) error {
 		return err
 	}
 
-	ins, total, err := store.ListInteractionsForLoadBalancer(
+	ins, total, err := store.ListInteractionsForProject(
 		c.Request().Context(), a.db(), sc, id,
 		c.QueryParam("q"),
 		c.QueryParam("unqueried") == "true",

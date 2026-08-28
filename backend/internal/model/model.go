@@ -72,7 +72,6 @@ func ensureID(id *ID) {
 // calls them for every create path, including the raw ones tests use.
 func (a *Account) BeforeCreate(*gorm.DB) error              { ensureID(&a.ID); return nil }
 func (p *Project) BeforeCreate(*gorm.DB) error              { ensureID(&p.ID); return nil }
-func (lb *LoadBalancer) BeforeCreate(*gorm.DB) error        { ensureID(&lb.ID); return nil }
 func (n *LBNode) BeforeCreate(*gorm.DB) error               { ensureID(&n.ID); return nil }
 func (a *Alias) BeforeCreate(*gorm.DB) error                { ensureID(&a.ID); return nil }
 func (d *Domain) BeforeCreate(*gorm.DB) error               { ensureID(&d.ID); return nil }
@@ -124,7 +123,7 @@ func (a StringArray) Value() (driver.Value, error) {
 func Models() []any {
 	return []any{
 		&Account{}, &User{}, &Role{}, &AccountMember{}, &RoleGrant{},
-		&Project{}, &LoadBalancer{}, &LBNode{}, &Alias{}, &Domain{},
+		&Project{}, &LBNode{}, &Alias{}, &Domain{},
 		&APIKey{}, &APIKeyGrant{}, &APIKeyNetwork{}, &Challenge{}, &Session{},
 		&AuditEntry{}, &ChallengeInteraction{}, &ProjectDailyStat{},
 	}
@@ -272,16 +271,25 @@ func (APIKeyGrant) TableName() string { return "api_key_grants" }
 // The row is a level, not an increment, which is what makes writing it twice in a
 // day harmless — see reporting.Snapshot.
 type ProjectDailyStat struct {
-	ProjectID         ID        `gorm:"primaryKey;column:project_id"`
-	Day               time.Time `gorm:"primaryKey;column:day;type:date"`
-	ProjectSlug       string    `gorm:"column:project_slug"`
-	AliasCount        int       `gorm:"column:alias_count"`
-	DomainCount       int       `gorm:"column:domain_count"`
-	LoadBalancerCount int       `gorm:"column:load_balancer_count"`
+	ProjectID   ID        `gorm:"primaryKey;column:project_id"`
+	Day         time.Time `gorm:"primaryKey;column:day;type:date"`
+	ProjectSlug string    `gorm:"column:project_slug"`
+	AliasCount  int       `gorm:"column:alias_count"`
+	DomainCount int       `gorm:"column:domain_count"`
 }
 
 func (ProjectDailyStat) TableName() string { return "project_daily_stats" }
 
+// Project is the whole of the inventory below an account: the nodes whose
+// addresses the DNS plan publishes, the domains, their aliases, and the keys
+// whose grants name it. It used to be a folder holding load balancers, and the
+// load balancer used to be all of the above; the two are one object now, keeping
+// the project's NAME and the load balancer's CONTENTS (change
+// collapse-project-and-loadbalancer, design L1).
+//
+// The name is the one we get to define. "Load balancer" named a piece of the
+// customer's infrastructure and was the wrong word for anyone running a single
+// host, a CDN origin or an appliance.
 type Project struct {
 	ID        ID `gorm:"primaryKey"`
 	AccountID ID `gorm:"column:account_id"`
@@ -289,63 +297,46 @@ type Project struct {
 	Name      string
 	CreatedAt time.Time
 
-	LoadBalancers []LoadBalancer `gorm:"foreignKey:ProjectID"`
+	Nodes   []LBNode `gorm:"foreignKey:ProjectID"`
+	Domains []Domain `gorm:"foreignKey:ProjectID"`
 }
 
 func (Project) TableName() string { return "projects" }
 
-type LoadBalancer struct {
-	ID        ID `gorm:"primaryKey"`
-	AccountID ID `gorm:"column:account_id"`
-	ProjectID ID `gorm:"column:project_id"`
-	Slug      string
-	Name      string
-	CreatedAt time.Time
-
-	Project *Project `gorm:"foreignKey:ProjectID"`
-	Nodes   []LBNode `gorm:"foreignKey:LoadBalancerID"`
-	Domains []Domain `gorm:"foreignKey:LoadBalancerID"`
-}
-
-func (LoadBalancer) TableName() string { return "load_balancers" }
-
 type LBNode struct {
-	ID             ID      `gorm:"primaryKey"`
-	AccountID      ID      `gorm:"column:account_id"`
-	ProjectID      ID      `gorm:"column:project_id"`
-	LoadBalancerID ID      `gorm:"column:load_balancer_id"`
-	Label          string  // 'a' / 'b'
-	IPv4           *string `gorm:"column:ipv4;type:inet"`
-	IPv6           *string `gorm:"column:ipv6;type:inet"`
+	ID        ID      `gorm:"primaryKey"`
+	AccountID ID      `gorm:"column:account_id"`
+	ProjectID ID      `gorm:"column:project_id"`
+	Label     string  // 'a' / 'b'
+	IPv4      *string `gorm:"column:ipv4;type:inet"`
+	IPv6      *string `gorm:"column:ipv6;type:inet"`
 }
 
 func (LBNode) TableName() string { return "lb_nodes" }
 
-// Alias is one challenge name, owned by exactly one load balancer. Several domains
+// Alias is one challenge name, owned by exactly one project. Several domains
 // (typically example.com and *.example.com) share one alias.
 type Alias struct {
-	ID             ID     `gorm:"primaryKey"`
-	AccountID      ID     `gorm:"column:account_id"`
-	ProjectID      ID     `gorm:"column:project_id"`
-	LoadBalancerID ID     `gorm:"column:load_balancer_id"`
-	ChallengeFQDN  string `gorm:"column:challenge_fqdn"`
-	Label          string
-	CreatedAt      time.Time
+	ID            ID     `gorm:"primaryKey"`
+	AccountID     ID     `gorm:"column:account_id"`
+	ProjectID     ID     `gorm:"column:project_id"`
+	ChallengeFQDN string `gorm:"column:challenge_fqdn"`
+	Label         string
+	CreatedAt     time.Time
 
-	LoadBalancer *LoadBalancer `gorm:"foreignKey:LoadBalancerID"`
-	Domains      []Domain      `gorm:"foreignKey:AliasID"`
+	Project *Project `gorm:"foreignKey:ProjectID"`
+	Domains []Domain `gorm:"foreignKey:AliasID"`
 }
 
 func (Alias) TableName() string { return "aliases" }
 
 type Domain struct {
-	ID             ID `gorm:"primaryKey"`
-	AccountID      ID `gorm:"column:account_id"`
-	ProjectID      ID `gorm:"column:project_id"`
-	LoadBalancerID ID `gorm:"column:load_balancer_id"`
-	AliasID        ID `gorm:"column:alias_id"`
-	Name           string
-	CreatedAt      time.Time
+	ID        ID `gorm:"primaryKey"`
+	AccountID ID `gorm:"column:account_id"`
+	ProjectID ID `gorm:"column:project_id"`
+	AliasID   ID `gorm:"column:alias_id"`
+	Name      string
+	CreatedAt time.Time
 
 	// Activation state, and nothing else derives from anything else (design
 	// domain-activation A1). Active is LastSuccessAt != nil; the check cadence
@@ -366,7 +357,7 @@ func (Domain) TableName() string { return "domains" }
 type APIKey struct {
 	ID        ID `gorm:"primaryKey"`
 	AccountID ID `gorm:"column:account_id"`
-	// There is no LoadBalancerID. A key is a subject anchored to an account,
+	// There is no ProjectID. A key is a subject anchored to an account,
 	// and what it may reach is its grants — see the api_keys section of the
 	// schema baseline for why the column could not stay alongside them.
 	Identifier    string // 'k_7f3a91c4', non-secret
@@ -404,7 +395,6 @@ func (APIKeyNetwork) TableName() string { return "api_key_networks" }
 type ChallengeInteraction struct {
 	ID             ID          `gorm:"primaryKey"`
 	ProjectID      *ID         `gorm:"column:project_id"`
-	LoadBalancerID *ID         `gorm:"column:load_balancer_id"`
 	AliasID        *ID         `gorm:"column:alias_id"`
 	AliasLabel     string      `gorm:"column:alias_label"`
 	ChallengeFQDN  string      `gorm:"column:challenge_fqdn"`

@@ -185,7 +185,7 @@ import { ApiService, Interaction, apiErrorMessage } from '@acme/shared';
 export class InteractionsPanelComponent implements OnChanges {
   private readonly api = inject(ApiService);
 
-  readonly loadBalancerId = input.required<string>();
+  readonly projectId = input.required<string>();
 
   readonly interactions = signal<Interaction[]>([]);
   readonly total = signal(0);
@@ -274,7 +274,7 @@ export class InteractionsPanelComponent implements OnChanges {
     };
     if (this.query.trim()) params['q'] = this.query.trim();
     if (this.onlyUnqueried) params['unqueried'] = 'true';
-    this.api.list<Interaction>(`/loadbalancers/${this.loadBalancerId()}/interactions`, params).subscribe({
+    this.api.list<Interaction>(`/projects/${this.projectId()}/interactions`, params).subscribe({
       next: (page) => {
         this.interactions.set(page.items);
         this.total.set(page.total);

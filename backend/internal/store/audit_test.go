@@ -21,7 +21,7 @@ func TestIntegrationAuditEntryAppendAndFilter(t *testing.T) {
 	entries := []model.AuditEntry{
 		{AccountID: &account, Action: "create", ObjectType: "domain", ObjectLabel: "example.com", ProjectID: &projectID, ActorSource: "console"},
 		{AccountID: &account, Action: "delete", ObjectType: "domain", ObjectLabel: "shop.example.com", ProjectID: &projectID, ActorSource: "console"},
-		{AccountID: &account, Action: "create", ObjectType: "load_balancer", ObjectLabel: "eu-prod", ProjectID: &otherProjectID, ActorSource: "cli"},
+		{AccountID: &account, Action: "create", ObjectType: "project", ObjectLabel: "eu-prod", ProjectID: &otherProjectID, ActorSource: "cli"},
 	}
 	for i := range entries {
 		if err := AppendAuditEntry(ctx, db, &entries[i]); err != nil {

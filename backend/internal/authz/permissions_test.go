@@ -35,7 +35,7 @@ import (
 func TestCanUnknownActionFailsClosed(t *testing.T) {
 	account := model.NewID()
 	lb := model.NewID()
-	object := Object{Type: TypeLoadBalancer, ID: lb, AccountID: account, LoadBalancerID: lb}
+	object := Object{Type: TypeProject, ID: lb, AccountID: account}
 
 	granted := Subject{AccountID: account, Grants: []Grant{
 		{AccountID: account, Type: TypeAny, Action: string(ActionInventoryWrite)},
@@ -74,10 +74,11 @@ func TestCanUnknownActionFailsClosed(t *testing.T) {
 func TestCanRolesAreAdditive(t *testing.T) {
 	account := model.NewID()
 	project := model.NewID()
-	lb := model.NewID()
-	object := Object{Type: TypeLoadBalancer, ID: lb, AccountID: account, ProjectID: project, LoadBalancerID: lb}
+	// A project is its own project ancestor: there is no level between it and
+	// the account any more, so the two identifiers are one.
+	object := Object{Type: TypeProject, ID: project, AccountID: account, ProjectID: project}
 
-	fromOneRole := Grant{AccountID: account, Type: TypeLoadBalancer, ObjectID: &lb, Action: string(ActionInventoryWrite)}
+	fromOneRole := Grant{AccountID: account, Type: TypeProject, ObjectID: &project, Action: string(ActionInventoryWrite)}
 	fromAnother := Grant{AccountID: account, Type: TypeProject, ObjectID: &project, Action: string(ActionKeyWrite), Inheritable: true}
 
 	both := Subject{AccountID: account, Grants: []Grant{fromOneRole, fromAnother}}

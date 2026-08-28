@@ -6,20 +6,20 @@
  *
  * JSON shapes returned by the management API (`backend/internal/httpapi/admin_*.go`).
  * Kept here, shared across the feature screens that all read pieces of the same inventory —
- * see admin.go's comment on `projectView`/`loadBalancerView`/etc for why these are hand-written
+ * see admin.go's comment on `projectView`/`domainView`/etc for why these are hand-written
  * views rather than 1:1 with the Go models: camelCase, and only what the console needs.
  */
 
 export interface LBNode {
   id: string;
-  loadBalancerId: string;
+  projectId: string;
   label: string;
   ipv4: string | null;
   ipv6: string | null;
 }
 
 /**
- * One publication seen through to its end: `GET /loadbalancers/:id/interactions`.
+ * One publication seen through to its end: `GET /projects/:id/interactions`.
  *
  * `outcome` is derived by the service, not stored, so it is correct for a row that is still open
  * while being read: validated · unqueried · live · pending.
@@ -42,7 +42,7 @@ export interface Interaction {
 
 export interface Domain {
   id: string;
-  loadBalancerId: string;
+  projectId: string;
   name: string;
   challengeName: string;
   aliasId: string;
@@ -71,7 +71,7 @@ export interface Domain {
   lastSuccessAt: string | null;
 }
 
-/** Body of `POST /loadbalancers/:id/domains`. */
+/** Body of `POST /projects/:id/domains`. */
 export interface DomainCreateRequest {
   name: string;
   /**
@@ -83,7 +83,7 @@ export interface DomainCreateRequest {
 }
 
 /**
- * Response of `POST /loadbalancers/:id/domains` — the submitted domain plus what the create
+ * Response of `POST /projects/:id/domains` — the submitted domain plus what the create
  * call learned. `domains` is every domain the request created: the submitted name alone, or it
  * followed by its counterpart when `includeWildcard` was set. Both share one alias.
  */
@@ -93,9 +93,14 @@ export interface DomainCreated extends Domain {
   warnings: string[];
 }
 
-export interface LoadBalancer {
+/**
+ * A project: the nodes, domains, aliases and keys that belong together, and the only level
+ * below an account. There was a `LoadBalancer` between the two and everything below hung off
+ * it; the two objects are one now, and this interface is what the merge produced — the
+ * project's identity with the load balancer's contents.
+ */
+export interface Project {
   id: string;
-  projectId: string;
   slug: string;
   name: string;
   createdAt: string;
@@ -107,18 +112,22 @@ export interface LoadBalancer {
    * it arrives — so a stale or tampered value costs a refusal, not access.
    */
   permittedActions: string[];
-  nodes: LBNode[];
+  /**
+   * The contents, present on the single-project read and ABSENT from a listing, which carries
+   * the counts below instead. Undefined is "not asked for" and is not an empty project.
+   */
+  nodes?: LBNode[];
   domains?: Domain[];
-}
-
-export interface Project {
-  id: string;
-  slug: string;
-  name: string;
-  createdAt: string;
-  /** What this caller may do to this project; see LoadBalancer.permittedActions. */
-  permittedActions: string[];
-  loadBalancers?: LoadBalancer[];
+  /**
+   * How much is in the project, carried by the LISTING and absent from the single-project read,
+   * which carries the nodes and domains themselves.
+   *
+   * Undefined therefore means "not asked for", never zero — a detail response is not an empty
+   * project. The list renders `0 · 0` as "no nodes, no domains", because a fresh project is the
+   * commonest empty state here and it has an obvious next action.
+   */
+  nodeCount?: number;
+  domainCount?: number;
 }
 
 export interface ApiKey {
@@ -167,8 +176,6 @@ export interface PlanRecord {
 export interface DNSPlan {
   projectSlug: string;
   projectName: string;
-  loadBalancerSlug: string;
-  loadBalancerName: string;
   records: PlanRecord[];
   zone: string;
 }

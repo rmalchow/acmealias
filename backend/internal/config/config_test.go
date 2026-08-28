@@ -15,7 +15,7 @@ func validEnv() map[string]string {
 		"ACME_ZONE":               "acmeservice.example.com.",
 		"ACME_SOA_PRIMARY_NS":     "ns1.acmeservice.example.com.",
 		"ACME_SOA_HOSTMASTER":     "hostmaster.example.com.",
-		"ACME_DATABASE_URL":       "postgres://user:pass@localhost:5432/acmeservice",
+		"ACME_DATABASE_URL":       "postgres://user:hunter2-db@localhost:5432/acmeservice",
 		"ACME_OIDC_ISSUER":        "https://idp.example.com/realms/acme",
 		"ACME_OIDC_CLIENT_ID":     "acmeservice",
 		"ACME_OIDC_CLIENT_SECRET": "s3cret",
@@ -159,7 +159,12 @@ func TestRedactionHidesDatabasePasswordAndClientSecret(t *testing.T) {
 	}
 
 	rec := logRecordAttrs(cfg)
-	if strings.Contains(rec, "pass") {
+	// The sentinel is distinctive on purpose. It was "pass", which this test
+	// then searched for as a substring — and that matches the KEY
+	// `mail_smtp_password` as readily as any leaked value, so the assertion
+	// would have started failing on a key name and passing on a password
+	// spelled like a word that appears anywhere in the rendering.
+	if strings.Contains(rec, "hunter2-db") {
 		t.Errorf("logged config contains the database password: %s", rec)
 	}
 	if strings.Contains(rec, "s3cret") {

@@ -12,24 +12,23 @@ func ptr(s string) *string { return &s }
 
 // fixture: three domains, two challenge names (the wildcard and the apex
 // share one), one registrable domain — design D5's worked example.
-func fixture(nodes []model.LBNode) (*model.Project, *model.LoadBalancer, []model.Domain, []model.Alias) {
+func fixture(nodes []model.LBNode) (*model.Project, []model.Domain, []model.Alias) {
 	// Identifiers are minted rather than written as small integers: the plan is
 	// built from the graph these values describe, so what matters is that the
 	// same value appears on both ends of each edge, not what the value is.
-	projectID, lbID := model.NewID(), model.NewID()
+	projectID := model.NewID()
 	apexAlias, shopAlias := model.NewID(), model.NewID()
 	project := &model.Project{ID: projectID, Slug: "acme-shop", Name: "Acme Shop"}
-	lb := &model.LoadBalancer{ID: lbID, ProjectID: projectID, Slug: "eu-prod", Name: "EU production"}
 	aliases := []model.Alias{
-		{ID: apexAlias, LoadBalancerID: lbID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"},
-		{ID: shopAlias, LoadBalancerID: lbID, ChallengeFQDN: "_acme-challenge.shop.example.com", Label: "shop-example-com"},
+		{ID: apexAlias, ProjectID: projectID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"},
+		{ID: shopAlias, ProjectID: projectID, ChallengeFQDN: "_acme-challenge.shop.example.com", Label: "shop-example-com"},
 	}
 	domains := []model.Domain{
-		{ID: model.NewID(), LoadBalancerID: lbID, AliasID: apexAlias, Name: "*.example.com"},
-		{ID: model.NewID(), LoadBalancerID: lbID, AliasID: apexAlias, Name: "example.com"},
-		{ID: model.NewID(), LoadBalancerID: lbID, AliasID: shopAlias, Name: "shop.example.com"},
+		{ID: model.NewID(), ProjectID: projectID, AliasID: apexAlias, Name: "*.example.com"},
+		{ID: model.NewID(), ProjectID: projectID, AliasID: apexAlias, Name: "example.com"},
+		{ID: model.NewID(), ProjectID: projectID, AliasID: shopAlias, Name: "shop.example.com"},
 	}
-	return project, lb, domains, aliases
+	return project, domains, aliases
 }
 
 func count(p *DNSPlan, typ string) int {
@@ -43,9 +42,9 @@ func count(p *DNSPlan, typ string) int {
 }
 
 func TestPlanCNAMEPerDistinctChallengeName(t *testing.T) {
-	project, lb, domains, aliases := fixture(nil)
+	project, domains, aliases := fixture(nil)
 	nodes := []model.LBNode{{Label: "a", IPv4: ptr("203.0.113.10")}}
-	p := buildPlan(project, lb, nodes, domains, aliases, PlanOptions{Zone: "acmeservice.example.net."})
+	p := buildPlan(project, nodes, domains, aliases, PlanOptions{Zone: "acmeservice.example.net."})
 
 	if got := count(p, "CNAME"); got != 2 {
 		t.Fatalf("three domains sharing two challenge names: want 2 CNAMEs, got %d (%v)", got, p.Records)
@@ -65,12 +64,12 @@ func TestPlanCNAMEPerDistinctChallengeName(t *testing.T) {
 }
 
 func TestPlanAddressFamilies(t *testing.T) {
-	project, lb, domains, aliases := fixture(nil)
+	project, domains, aliases := fixture(nil)
 	dual := []model.LBNode{
 		{Label: "a", IPv4: ptr("203.0.113.10"), IPv6: ptr("2001:db8:1::10")},
 		{Label: "b", IPv4: ptr("203.0.113.11"), IPv6: ptr("2001:db8:1::11")},
 	}
-	p := buildPlan(project, lb, dual, domains, aliases, PlanOptions{Zone: "z.example.net"})
+	p := buildPlan(project, dual, domains, aliases, PlanOptions{Zone: "z.example.net"})
 	// three domains x two nodes, per family.
 	if got := count(p, "A"); got != 6 {
 		t.Errorf("A records = %d, want 6", got)
@@ -83,7 +82,7 @@ func TestPlanAddressFamilies(t *testing.T) {
 		{Label: "a", IPv4: ptr("203.0.113.10"), IPv6: ptr("2001:db8:1::10")},
 		{Label: "b", IPv4: ptr("203.0.113.11")}, // v4 only
 	}
-	p = buildPlan(project, lb, mixed, domains, aliases, PlanOptions{Zone: "z.example.net"})
+	p = buildPlan(project, mixed, domains, aliases, PlanOptions{Zone: "z.example.net"})
 	if got := count(p, "A"); got != 6 {
 		t.Errorf("A records = %d, want 6", got)
 	}
@@ -98,10 +97,10 @@ func TestPlanAddressFamilies(t *testing.T) {
 }
 
 func TestPlanCAAPerRegistrableDomain(t *testing.T) {
-	project, lb, domains, aliases := fixture(nil)
+	project, domains, aliases := fixture(nil)
 	nodes := []model.LBNode{{Label: "a", IPv4: ptr("203.0.113.10")}}
 
-	p := buildPlan(project, lb, nodes, domains, aliases, PlanOptions{
+	p := buildPlan(project, nodes, domains, aliases, PlanOptions{
 		Zone: "z.example.net", CAAIssuers: []string{"letsencrypt.org"},
 	})
 	var caa []Record
@@ -123,8 +122,8 @@ func TestPlanCAAPerRegistrableDomain(t *testing.T) {
 	}
 
 	// Two registrable domains, two sets.
-	domains = append(domains, model.Domain{ID: model.NewID(), LoadBalancerID: lb.ID, AliasID: aliases[1].ID, Name: "www.example.org"})
-	p = buildPlan(project, lb, nodes, domains, aliases, PlanOptions{
+	domains = append(domains, model.Domain{ID: model.NewID(), ProjectID: project.ID, AliasID: aliases[1].ID, Name: "www.example.org"})
+	p = buildPlan(project, nodes, domains, aliases, PlanOptions{
 		Zone: "z.example.net", CAAIssuers: []string{"letsencrypt.org"},
 	})
 	if got := count(p, "CAA"); got != 4 {
@@ -132,20 +131,20 @@ func TestPlanCAAPerRegistrableDomain(t *testing.T) {
 	}
 
 	// Unset issuer: no rows at all, never a guess.
-	p = buildPlan(project, lb, nodes, domains, aliases, PlanOptions{Zone: "z.example.net"})
+	p = buildPlan(project, nodes, domains, aliases, PlanOptions{Zone: "z.example.net"})
 	if got := count(p, "CAA"); got != 0 {
 		t.Errorf("no ACME_CAA_ISSUER: CAA rows = %d, want 0", got)
 	}
 }
 
 func TestRenderZoneSnippet(t *testing.T) {
-	project, lb, domains, aliases := fixture(nil)
+	project, domains, aliases := fixture(nil)
 	nodes := []model.LBNode{{Label: "a", IPv4: ptr("203.0.113.10"), IPv6: ptr("2001:db8:1::10")}}
-	out := RenderZoneSnippet(buildPlan(project, lb, nodes, domains, aliases, PlanOptions{
+	out := RenderZoneSnippet(buildPlan(project, nodes, domains, aliases, PlanOptions{
 		Zone: "acmeservice.example.net.", CAAIssuers: []string{"letsencrypt.org"},
 	}))
 
-	if !strings.HasPrefix(out, "; DNS records for project acme-shop / load balancer eu-prod\n") {
+	if !strings.HasPrefix(out, "; DNS records for project acme-shop\n") {
 		t.Errorf("missing header:\n%s", out)
 	}
 	if !strings.Contains(out, "; nodes: a: 203.0.113.10 / 2001:db8:1::10") {
@@ -197,8 +196,8 @@ func TestPlanDomainsShareOneDelegation(t *testing.T) {
 	// The join the per-domain verification depends on: the apex and its
 	// wildcard must name the same delegation, or one of the two rows reports a
 	// record the other one already covers as absent (design D1).
-	project, lb, domains, aliases := fixture(nil)
-	p := buildPlan(project, lb, nil, domains, aliases, PlanOptions{
+	project, domains, aliases := fixture(nil)
+	p := buildPlan(project, nil, domains, aliases, PlanOptions{
 		Zone: "acmeservice.example.net.", CAAIssuers: []string{"letsencrypt.org"},
 	})
 
@@ -231,8 +230,8 @@ func TestPlanDomainsShareOneDelegation(t *testing.T) {
 func TestPlanDomainWithoutAliasStillAppears(t *testing.T) {
 	// A domain whose alias has gone missing keeps its row and asks for
 	// nothing, rather than dropping out of the verification silently.
-	project, lb, domains, _ := fixture(nil)
-	p := buildPlan(project, lb, nil, domains, nil, PlanOptions{Zone: "z.example.net"})
+	project, domains, _ := fixture(nil)
+	p := buildPlan(project, nil, domains, nil, PlanOptions{Zone: "z.example.net"})
 	if len(p.Domains) != len(domains) {
 		t.Fatalf("DomainPlans = %d, want %d", len(p.Domains), len(domains))
 	}

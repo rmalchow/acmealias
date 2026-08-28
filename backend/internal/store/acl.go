@@ -64,16 +64,47 @@ func (a ACL) Where(db *gorm.DB) *gorm.DB {
 	return db.Where(q)
 }
 
+// ProjectListing is a project plus what is IN it: the two numbers a project row
+// has to carry now that a project is a concrete thing rather than a folder
+// (design L5).
+//
+// Nodes answers "how much infrastructure is this" and domains answers "how much
+// of my certificate estate depends on it" — the second being the one that
+// decides how carefully somebody touches it. A row with neither is EMPTY, and
+// saying so is the console's job: this type reports two zeroes, which is the
+// truth, and "no nodes, no domains" is what a reader needs to see.
+type ProjectListing struct {
+	model.Project `gorm:"embedded"`
+	NodeCount     int `gorm:"column:node_count"`
+	DomainCount   int `gorm:"column:domain_count"`
+}
+
+// projectCounts is the counting half of the listing SELECT.
+//
+// Two correlated subqueries, not two LEFT JOINs, and not a query per row. The
+// joins would multiply: a project with four nodes and twelve domains produces
+// forty-eight rows, and both counts then need DISTINCT over a fan-out that the
+// planner has no reason to keep cheap. The query-per-row version is the one the
+// design names by its shape — ten projects issuing twenty-one queries looks fine
+// in development and falls over on the account with forty.
+//
+// Both subqueries run under the CALLER's policies, so lb_nodes and domains are
+// tenant-filtered inside them exactly as they are anywhere else; there is no
+// path here that counts another account's rows.
+const projectCounts = `projects.*,
+	(select count(*) from lb_nodes n where n.project_id = projects.id) as node_count,
+	(select count(*) from domains d where d.project_id = projects.id) as domain_count`
+
 // ListProjectsACL is the ACL-gated listing (task 2.5).
 //
 // The count and the page run the SAME predicate, and that is not tidiness. A
 // total that counted rows the caller cannot see would leak the existence of
 // invisible objects through a number — undoing the property that returning
 // nothing was protecting.
-func ListProjectsACL(ctx context.Context, db *gorm.DB, sc Scope, acl ACL, query string, limit, offset int) ([]model.Project, int64, error) {
+func ListProjectsACL(ctx context.Context, db *gorm.DB, sc Scope, acl ACL, query string, limit, offset int) ([]ProjectListing, int64, error) {
 	var (
 		total int64
-		ps    []model.Project
+		ps    []ProjectListing
 	)
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
 		base := func() *gorm.DB {
@@ -88,12 +119,11 @@ func ListProjectsACL(ctx context.Context, db *gorm.DB, sc Scope, acl ACL, query 
 			return fmt.Errorf("count projects: %w", err)
 		}
 		return base().
-			Preload("LoadBalancers.Nodes").
-			Preload("LoadBalancers.Domains").
+			Select(projectCounts).
 			Order("slug").
 			Limit(limit).
 			Offset(offset).
-			Find(&ps).Error
+			Scan(&ps).Error
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("store: list projects: %w", err)
@@ -110,39 +140,10 @@ func ListProjectsACL(ctx context.Context, db *gorm.DB, sc Scope, acl ACL, query 
 func GetProjectACL(ctx context.Context, db *gorm.DB, sc Scope, acl ACL, id model.ID) (*model.Project, error) {
 	var p model.Project
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		return acl.Where(sc.Where(tx)).First(&p, "id = ?", id).Error
+		return acl.Where(sc.Where(tx)).Preload("Nodes").First(&p, "id = ?", id).Error
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: get project %s: %w", id, err)
 	}
 	return &p, nil
-}
-
-// ListLoadBalancersACL is the ACL-gated listing for one project.
-func ListLoadBalancersACL(ctx context.Context, db *gorm.DB, sc Scope, acl ACL, projectID model.ID) ([]model.LoadBalancer, error) {
-	var lbs []model.LoadBalancer
-	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		return acl.Where(sc.Where(tx)).
-			Preload("Nodes").
-			Preload("Domains").
-			Where("project_id = ?", projectID).
-			Order("slug").
-			Find(&lbs).Error
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store: list load balancers for project %s: %w", projectID, err)
-	}
-	return lbs, nil
-}
-
-// GetLoadBalancerACL is the single-row read, gated identically.
-func GetLoadBalancerACL(ctx context.Context, db *gorm.DB, sc Scope, acl ACL, id model.ID) (*model.LoadBalancer, error) {
-	var lb model.LoadBalancer
-	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		return acl.Where(sc.Where(tx)).Preload("Nodes").First(&lb, "id = ?", id).Error
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store: get load balancer %s: %w", id, err)
-	}
-	return &lb, nil
 }

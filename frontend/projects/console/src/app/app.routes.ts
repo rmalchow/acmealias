@@ -53,14 +53,12 @@ export const routes: Routes = [
     loadComponent: () => import('./features/projects/project-list.component').then((m) => m.ProjectListComponent),
   },
   {
+    // One screen where there were two. `/loadbalancers/:id` is GONE rather than redirected:
+    // there is no customer with a bookmark and no caller with a link, so a redirect would be a
+    // second route carried forever to protect nobody, and a 404 says what happened.
     path: 'projects/:id',
     canActivate: [accountGuard, usableAccountGuard],
     loadComponent: () => import('./features/projects/project-detail.component').then((m) => m.ProjectDetailComponent),
-  },
-  {
-    path: 'loadbalancers/:id',
-    canActivate: [accountGuard, usableAccountGuard],
-    loadComponent: () => import('./features/loadbalancer/loadbalancer-detail.component').then((m) => m.LoadBalancerDetailComponent),
   },
   {
     // Deferred from the navigation, not deleted (task 6.2d, design C12): it is the only screen

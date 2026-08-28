@@ -6,7 +6,7 @@ import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, LBNode, LoadBalancer, NOT_PERMITTED, SessionService, apiErrorMessage, confirmAction, may } from '@acme/shared';
+import { ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, LBNode, NOT_PERMITTED, Project, SessionService, apiErrorMessage, confirmAction, may } from '@acme/shared';
 import { openApiKeyCreateModal } from './apikey-create.modal';
 import { openApiKeyRevealModal } from './apikey-reveal.modal';
 
@@ -161,9 +161,9 @@ export class ApiKeysPanelComponent implements OnChanges {
   private readonly modal = inject(NzModalService);
   private readonly session = inject(SessionService);
 
-  readonly loadBalancerId = input.required<string>();
+  readonly projectId = input.required<string>();
   /** The row this panel belongs to, for the per-object permission answer it carries. */
-  readonly loadBalancer = input<LoadBalancer | null>(null);
+  readonly project = input<Project | null>(null);
   readonly nodes = input<LBNode[]>([]);
 
   readonly keys = signal<ApiKey[]>([]);
@@ -173,7 +173,7 @@ export class ApiKeysPanelComponent implements OnChanges {
    * Whether keys may be minted here, answered for THIS load balancer rather than for the
    * caller's role. The panel is handed the row it belongs to, so the answer travels with it.
    */
-  readonly canWrite = computed(() => may(this.loadBalancer(), CAN_WRITE_KEYS));
+  readonly canWrite = computed(() => may(this.project(), CAN_WRITE_KEYS));
   protected readonly NOT_PERMITTED = NOT_PERMITTED;
 
   ngOnChanges(): void {
@@ -181,14 +181,14 @@ export class ApiKeysPanelComponent implements OnChanges {
   }
 
   private load(): void {
-    this.api.get<ApiKey[]>(`/loadbalancers/${this.loadBalancerId()}/keys`).subscribe({
+    this.api.get<ApiKey[]>(`/projects/${this.projectId()}/keys`).subscribe({
       next: (ks) => this.keys.set(ks),
       error: (err) => this.error.set(apiErrorMessage(err)),
     });
   }
 
   create(): void {
-    openApiKeyCreateModal(this.modal, { loadBalancerId: this.loadBalancerId(), nodes: this.nodes() })
+    openApiKeyCreateModal(this.modal, { projectId: this.projectId(), nodes: this.nodes() })
       .afterClose.subscribe((created?: ApiKeyCreated) => {
         if (!created) return;
         this.reveal(created);

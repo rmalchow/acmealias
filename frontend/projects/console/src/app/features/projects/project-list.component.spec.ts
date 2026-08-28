@@ -8,7 +8,17 @@ import { provideNzIconsTesting } from 'ng-zorro-antd/icon/testing';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { ProjectListComponent } from './project-list.component';
 function project(over: Partial<Project> = {}): Project {
-  return { id: '00000000-0000-7000-8000-000000000001', slug: 'shop', name: 'Shop', createdAt: '2026-01-01T00:00:00Z', permittedActions: [], ...over };
+  return {
+    id: '00000000-0000-7000-8000-000000000001',
+    slug: 'shop',
+    name: 'Shop',
+    createdAt: '2026-01-01T00:00:00Z',
+    permittedActions: [],
+    // What the LISTING carries: the counts, not the contents.
+    nodeCount: 2,
+    domainCount: 3,
+    ...over,
+  };
 }
 
 describe('ProjectListComponent', () => {

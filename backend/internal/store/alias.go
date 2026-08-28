@@ -10,15 +10,14 @@ import (
 )
 
 // CreateAlias inserts a new alias, keyed by challenge name (design D4), under a
-// load balancer of the scope's account.
+// project of the scope's account.
 func CreateAlias(ctx context.Context, db *gorm.DB, sc Scope, a *model.Alias) error {
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
-		var parent model.LoadBalancer
-		if err := sc.Where(tx).First(&parent, "id = ?", a.LoadBalancerID).Error; err != nil {
-			return fmt.Errorf("parent load balancer %s: %w", a.LoadBalancerID, err)
+		var parent model.Project
+		if err := sc.Where(tx).First(&parent, "id = ?", a.ProjectID).Error; err != nil {
+			return fmt.Errorf("parent project %s: %w", a.ProjectID, err)
 		}
 		a.AccountID = parent.AccountID
-		a.ProjectID = parent.ProjectID
 		if a.ID == model.NilID {
 			a.ID = model.NewID()
 		}
@@ -31,7 +30,7 @@ func CreateAlias(ctx context.Context, db *gorm.DB, sc Scope, a *model.Alias) err
 
 // FindAliasByChallengeName looks up the alias owning a challenge FQDN
 // (e.g. "_acme-challenge.example.com"). Returns gorm.ErrRecordNotFound when
-// no load balancer has claimed that name yet.
+// no project has claimed that name yet.
 //
 // This one deliberately takes no Scope, and the reason is worth stating because it
 // looks like an omission. A challenge name is claimed globally: aliases.label and
@@ -76,19 +75,19 @@ func ScopedAlias(ctx context.Context, db *gorm.DB, sc Scope, challengeFQDN strin
 	return a, nil
 }
 
-// ListAliasesForLoadBalancer returns every alias owned by a load balancer, with their
+// ListAliasesForProject returns every alias owned by a project, with their
 // domains preloaded, ordered by label.
-func ListAliasesForLoadBalancer(ctx context.Context, db *gorm.DB, sc Scope, loadBalancerID model.ID) ([]model.Alias, error) {
+func ListAliasesForProject(ctx context.Context, db *gorm.DB, sc Scope, projectID model.ID) ([]model.Alias, error) {
 	var as []model.Alias
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
 		return sc.Where(tx).
 			Preload("Domains").
-			Where("load_balancer_id = ?", loadBalancerID).
+			Where("project_id = ?", projectID).
 			Order("label").
 			Find(&as).Error
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store: list aliases for load balancer %s: %w", loadBalancerID, err)
+		return nil, fmt.Errorf("store: list aliases for project %s: %w", projectID, err)
 	}
 	return as, nil
 }

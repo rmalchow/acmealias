@@ -174,12 +174,12 @@ func TestRolesComeFromMembershipRatherThanFromAGroup(t *testing.T) {
 // old configured matrix did.
 func TestRoleEnforcementThroughTheManagementAPI(t *testing.T) {
 	admin := mustSignInSeeded(t, adminUser)
-	_, lb := demoProd(t, admin)
+	project := demoProject(t, admin)
 	// Every session below is a member of the SAME account and has selected it,
 	// so one address serves all four. That is now a property of the fixture
 	// rather than of the edition: a session acting in another account would be
 	// refused this path outright (design P19).
-	domains := admin.acct("/loadbalancers/" + lb + "/domains")
+	domains := admin.acct("/projects/" + project + "/domains")
 
 	// A name of its own, in a zone the plan comparison in plan_test.go does not
 	// look at, and removed again either way.
@@ -212,7 +212,7 @@ func TestRoleEnforcementThroughTheManagementAPI(t *testing.T) {
 		t.Errorf("%s creating a domain: got %d, want 403: %s", keyRotationUser, status, body)
 	}
 	var key keyCreated
-	if err := rotation.json(http.MethodPost, rotation.acct("/loadbalancers/"+lb+"/keys"),
+	if err := rotation.json(http.MethodPost, rotation.acct("/projects/"+project+"/keys"),
 		map[string]any{"note": "acceptance: key-rotation may mint"}, http.StatusCreated, &key); err != nil {
 		t.Errorf("%s creating an API key: %v", keyRotationUser, err)
 	} else {

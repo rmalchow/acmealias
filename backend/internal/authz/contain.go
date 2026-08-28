@@ -14,15 +14,15 @@ import (
 //
 // # Why coverage is not evaluated across several held grants
 //
-// A writer holding [load_balancer, A, *] and [load_balancer, B, *] cannot write
-// [project, P, *] even when A and B are the only load balancers in P today. The
-// union does cover it, and the check refuses anyway.
+// A writer holding [domain, A, *] and [domain, B, *] cannot write
+// [project, P, *] even when A and B are the only domains in P today. The union
+// does cover it, and the check refuses anyway.
 //
-// Two reasons. The union is true only of the inventory as it stands: add load
-// balancer C to P tomorrow and the grant the writer issued now reaches something
-// they never had authority over — an escalation that happens with nobody
-// touching a permission. And a union test is a set-cover problem over patterns
-// and wildcards, which is where an evaluator acquires the bugs that make it
+// Two reasons. The union is true only of the inventory as it stands: add domain
+// C to P tomorrow and the grant the writer issued now reaches something they
+// never had authority over — an escalation that happens with nobody touching a
+// permission. And a union test is a set-cover problem over patterns and
+// wildcards, which is where an evaluator acquires the bugs that make it
 // unreviewable.
 //
 // The cost is real and is accepted: a legitimate grant is sometimes refused, and

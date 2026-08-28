@@ -6,8 +6,8 @@ import { provideNzIconsTesting } from 'ng-zorro-antd/icon/testing';
 import { provideRouter } from '@angular/router';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzMessageService } from 'ng-zorro-antd/message';
-import { ApiService, Domain, LoadBalancer, VerificationResult } from '@acme/shared';
-import { LoadBalancerDetailComponent } from './loadbalancer-detail.component';
+import { ApiService, Domain, Project, VerificationResult } from '@acme/shared';
+import { ProjectDetailComponent } from './project-detail.component';
 
 const ACCOUNT = '00000000-0000-7000-8000-0000000000a1';
 const BASE = `/api/v1/accounts/${ACCOUNT}`;
@@ -15,7 +15,7 @@ const BASE = `/api/v1/accounts/${ACCOUNT}`;
 function domain(over: Partial<Domain> = {}): Domain {
   return {
     id: 'd-1',
-    loadBalancerId: '7',
+    projectId: '7',
     name: 'shop.example.com',
     challengeName: '_acme-challenge.shop.example.com',
     aliasId: 'a-1',
@@ -30,17 +30,16 @@ function domain(over: Partial<Domain> = {}): Domain {
   };
 }
 
-function loadBalancer(): LoadBalancer {
+function project(): Project {
   return {
     id: '7',
-    projectId: 'p-1',
-    slug: 'lb',
-    name: 'Load balancer',
+    slug: 'shop',
+    name: 'Shop',
     createdAt: '2026-01-01T00:00:00Z',
     permittedActions: [],
     nodes: [],
     domains: [domain()],
-  } as unknown as LoadBalancer;
+  } as unknown as Project;
 }
 
 function verification(over: Partial<VerificationResult> = {}): VerificationResult {
@@ -61,12 +60,12 @@ function verification(over: Partial<VerificationResult> = {}): VerificationResul
   };
 }
 
-describe('LoadBalancerDetailComponent', () => {
+describe('ProjectDetailComponent', () => {
   let http: HttpTestingController;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [LoadBalancerDetailComponent],
+      imports: [ProjectDetailComponent],
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
@@ -87,22 +86,40 @@ describe('LoadBalancerDetailComponent', () => {
 
   afterEach(() => http.verify());
 
-  /** Opens the screen and answers everything but the verification, which the caller drives. */
+  /**
+   * Opens the screen and answers everything but the verification, which the caller drives.
+   *
+   * ONE read of the project where there used to be two requests — the load balancer, then its
+   * parent for a breadcrumb label. The screen and the object are the same thing now, so there is
+   * no parent to look up, and this helper is where that shows.
+   *
+   * The two reporting panels folded in from the screen this one absorbed ask for their own
+   * ranges as soon as they render, so they are answered here — emptily. They are not what this
+   * spec is about, and an unanswered request fails http.verify() in afterEach.
+   */
   function open() {
-    const fixture = TestBed.createComponent(LoadBalancerDetailComponent);
+    const fixture = TestBed.createComponent(ProjectDetailComponent);
     fixture.componentRef.setInput('id', '7');
     fixture.detectChanges();
-    http.expectOne(`${BASE}/loadbalancers/7`).flush(loadBalancer());
-    http.expectOne(`${BASE}/projects/p-1`).flush({ id: 'p-1', slug: 'proj', name: 'Project' });
-    http.expectOne(`${BASE}/loadbalancers/7/plan`).flush({ records: [], zone: 'svc.example.net' });
+    http.expectOne(`${BASE}/projects/7`).flush(project());
+    http.expectOne(`${BASE}/projects/7/plan`).flush({ records: [], zone: 'svc.example.net' });
+    reporting();
     return fixture;
+  }
+
+  /** The usage and inventory-history panels' own reads, answered with "nothing recorded". */
+  function reporting() {
+    http.expectOne((r) => r.url === `${BASE}/projects/7/usage`).flush({ recorded: false, buckets: [] });
+    http
+      .expectOne((r) => r.url === `${BASE}/projects/7/inventory-history`)
+      .flush({ recorded: false, days: [], current: { day: '2026-01-01', aliasCount: 0, domainCount: 0 }, measures: {} });
   }
 
   it('asks without being asked, and says nothing about the button while it does', () => {
     // The check runs on load (design D1). The manual control is a different question and must
     // not look pressed: a spinner nobody started reads as work somebody set going.
     const fixture = open();
-    const req = http.expectOne(`${BASE}/loadbalancers/7/verification`);
+    const req = http.expectOne(`${BASE}/projects/7/verification`);
     expect(fixture.componentInstance.verifying()).toBeFalse();
     req.flush(verification());
     expect(fixture.componentInstance.verifying()).toBeFalse();
@@ -112,7 +129,7 @@ describe('LoadBalancerDetailComponent', () => {
     // Task 3.3: a check nobody asked for that fails is not an error on the page. It degrades the
     // rows it concerns and never the screen (design D1, D4).
     const fixture = open();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush('boom', { status: 500, statusText: 'Server Error' });
+    http.expectOne(`${BASE}/projects/7/verification`).flush('boom', { status: 500, statusText: 'Server Error' });
 
     expect(fixture.componentInstance.verifyError()).toBeNull();
     const chips = fixture.componentInstance.checks(domain());
@@ -121,11 +138,11 @@ describe('LoadBalancerDetailComponent', () => {
 
   it('banners a failure somebody pressed for', () => {
     const fixture = open();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush(verification());
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
 
     fixture.componentInstance.checkNow();
     expect(fixture.componentInstance.verifying()).toBeTrue();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush('boom', { status: 500, statusText: 'Server Error' });
+    http.expectOne(`${BASE}/projects/7/verification`).flush('boom', { status: 500, statusText: 'Server Error' });
     expect(fixture.componentInstance.verifyError()).not.toBeNull();
     expect(fixture.componentInstance.verifying()).toBeFalse();
   });
@@ -135,11 +152,11 @@ describe('LoadBalancerDetailComponent', () => {
     // must not go on asserting the old answer either: the banner and the chips would then
     // disagree about whether anything is known.
     const fixture = open();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush(verification());
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
     expect(fixture.componentInstance.checks(domain()).caa?.label).toBe('blocks us');
 
     fixture.componentInstance.verify();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush('boom', { status: 503, statusText: 'Unavailable' });
+    http.expectOne(`${BASE}/projects/7/verification`).flush('boom', { status: 503, statusText: 'Unavailable' });
 
     const chips = fixture.componentInstance.checks(domain());
     expect(chips.caa?.label).toBe('could not check');
@@ -150,7 +167,7 @@ describe('LoadBalancerDetailComponent', () => {
     // `found` on an undetermined row is our own error text, addressed to an operator. The table
     // is painted on every screen open now, so it would reach a customer unprompted (design D4).
     const fixture = open();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush(
+    http.expectOne(`${BASE}/projects/7/verification`).flush(
       verification({
         results: [
           {
@@ -171,24 +188,23 @@ describe('LoadBalancerDetailComponent', () => {
   // changed and the person pressing it is watching for exactly that.
   it('records what a check-now saw and reloads the rows it changed', () => {
     const fixture = open();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush(verification());
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
 
     fixture.componentInstance.checkNow();
-    const req = http.expectOne(`${BASE}/loadbalancers/7/verification`);
+    const req = http.expectOne(`${BASE}/projects/7/verification`);
     expect(req.request.method).toBe('POST');
     req.flush(verification());
 
-    // The reload, and its breadcrumb follow-up. Without it the row would still read "waiting for
-    // delegation" for a domain the service has just activated.
-    http.expectOne(`${BASE}/loadbalancers/7`).flush(loadBalancer());
-    http.expectOne(`${BASE}/projects/p-1`).flush({ id: 'p-1', slug: 'proj', name: 'Project' });
+    // The reload. Without it the row would still read "waiting for delegation" for a domain
+    // the service has just activated.
+    http.expectOne(`${BASE}/projects/7`).flush(project());
   });
 
   // The automatic pass must stay a GET. It runs on every screen open, and a page that activated
   // domains as a side effect of being looked at is a page nobody can safely open.
   it('asks the automatic check as a read', () => {
     const fixture = open();
-    const req = http.expectOne(`${BASE}/loadbalancers/7/verification`);
+    const req = http.expectOne(`${BASE}/projects/7/verification`);
     expect(req.request.method).toBe('GET');
     req.flush(verification());
     expect(fixture.componentInstance.verifyError()).toBeNull();
@@ -198,8 +214,8 @@ describe('LoadBalancerDetailComponent', () => {
   // the chip has to say so as an expectation rather than as a fault.
   it('reads a never-seen delegation as waiting, and one that stopped resolving as still active', () => {
     const fixture = open();
-    http.expectOne(`${BASE}/loadbalancers/7/verification`).flush(verification());
-    const c = fixture.componentInstance;
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    const c: ProjectDetailComponent = fixture.componentInstance;
 
     expect(c.activation(domain({ lastCheckedAt: null, lastSuccessAt: null })).label).toBe('waiting for delegation');
     expect(c.activation(domain({ lastCheckedAt: '2026-02-01T00:00:00Z', lastSuccessAt: null })).colour).toBe('blue');

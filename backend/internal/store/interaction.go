@@ -242,38 +242,38 @@ func DeleteOldClosedInteractions(ctx context.Context, db *gorm.DB, olderThan tim
 	return res.RowsAffected, nil
 }
 
-// ListInteractionsForLoadBalancer returns one page of a load balancer's history, newest first,
+// ListInteractionsForProject returns one page of a project's history, newest first,
 // with the number of rows matching the filter.
 //
 // `onlyUnqueried` is the filter that earns its place: an interaction nobody ever
 // queried is the signature of a customer CNAME that was never published, and
 // being able to list exactly those turns a vague "renewals are failing" into a
 // list of domains to go and fix.
-func ListInteractionsForLoadBalancer(
-	ctx context.Context, db *gorm.DB, sc Scope, loadBalancerID model.ID, query string, onlyUnqueried bool, limit, offset int,
+func ListInteractionsForProject(
+	ctx context.Context, db *gorm.DB, sc Scope, projectID model.ID, query string, onlyUnqueried bool, limit, offset int,
 ) ([]model.ChallengeInteraction, int64, error) {
 	// The interaction history carries no account_id and no foreign keys, on
 	// purpose: a history that disappears when its subject is deleted
 	// cannot answer the question it exists for. Confinement therefore happens one
-	// level up — the load balancer named here must belong to the scope, and the
+	// level up — the project named here must belong to the scope, and the
 	// listing is refused as not-found when it does not.
 	//
-	// The consequence, stated rather than discovered: history for a load balancer
+	// The consequence, stated rather than discovered: history for a project
 	// that has since been deleted is not reachable through this listing, because
 	// there is no row left to prove which account it belonged to. It is still in
 	// the table, and reaching it is a staff-plane question rather than a tenant
 	// one.
 	if err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		var lb model.LoadBalancer
-		return sc.Where(tx).First(&lb, "id = ?", loadBalancerID).Error
+		var p model.Project
+		return sc.Where(tx).First(&p, "id = ?", projectID).Error
 	}); err != nil {
-		return nil, 0, fmt.Errorf("store: list interactions for load balancer %s: %w", loadBalancerID, err)
+		return nil, 0, fmt.Errorf("store: list interactions for project %s: %w", projectID, err)
 	}
 
 	base := func() *gorm.DB {
 		q := db.WithContext(ctx).
 			Model(&model.ChallengeInteraction{}).
-			Where("load_balancer_id = ?", loadBalancerID)
+			Where("project_id = ?", projectID)
 		if s := strings.TrimSpace(query); s != "" {
 			pattern := likeEscape(s)
 			q = q.Where(

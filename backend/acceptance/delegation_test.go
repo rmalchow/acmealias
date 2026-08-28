@@ -94,7 +94,7 @@ func renderZone(t *testing.T, lines []string) {
 // onboardDomain publishes d's delegation into the fake internet and then makes
 // the service look, leaving d activated and therefore publishable.
 //
-// The second half is a POST to the load balancer's verification route — the
+// The second half is a POST to the project's verification route — the
 // console's "check now", which unlike the GET beside it RECORDS what it saw
 // (internal/httpapi/admin_plan.go, recheckPlan). Activation is deliberately not
 // waited for from the poller: development/config-development.yaml runs it every
@@ -109,7 +109,7 @@ func renderZone(t *testing.T, lines []string) {
 // The zone is restored on cleanup. TestGeneratedPlanMatchesTheServedZone
 // compares the seeded plan against the served zone record for record, in both
 // directions, so a delegation left behind by one test fails another.
-func onboardDomain(t *testing.T, s *session, lb string, d domainRef) {
+func onboardDomain(t *testing.T, s *session, project string, d domainRef) {
 	t.Helper()
 
 	target := dns.Fqdn(aliasNameFor(d.AliasLabel))
@@ -144,7 +144,7 @@ func onboardDomain(t *testing.T, s *session, lb string, d domainRef) {
 				} `json:"delegation"`
 			} `json:"domains"`
 		}
-		if err := s.json(http.MethodPost, s.acct("/loadbalancers/"+lb+"/verification"),
+		if err := s.json(http.MethodPost, s.acct("/projects/"+project+"/verification"),
 			nil, http.StatusOK, &res); err != nil {
 			return err
 		}

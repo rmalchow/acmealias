@@ -59,11 +59,11 @@ func TestIntegrationDefaultRolesAreTheOldMatrix(t *testing.T) {
 	project, lb, node := model.NewID(), model.NewID(), model.NewID()
 	objects := []Object{
 		{Type: TypeProject, ID: project, AccountID: account, ProjectID: project},
-		{Type: TypeLoadBalancer, ID: lb, AccountID: account, ProjectID: project, LoadBalancerID: lb},
-		{Type: TypeNode, ID: node, AccountID: account, ProjectID: project, LoadBalancerID: lb},
-		{Type: TypeAPIKey, ID: model.NewID(), AccountID: account, ProjectID: project, LoadBalancerID: lb},
-		{Type: TypeDomain, ID: model.NewID(), AccountID: account, ProjectID: project, LoadBalancerID: lb},
-		{Type: TypeAlias, ID: model.NewID(), AccountID: account, ProjectID: project, LoadBalancerID: lb},
+		{Type: TypeProject, ID: lb, AccountID: account, ProjectID: project},
+		{Type: TypeNode, ID: node, AccountID: account, ProjectID: project},
+		{Type: TypeAPIKey, ID: model.NewID(), AccountID: account, ProjectID: project},
+		{Type: TypeDomain, ID: model.NewID(), AccountID: account, ProjectID: project},
+		{Type: TypeAlias, ID: model.NewID(), AccountID: account, ProjectID: project},
 	}
 
 	for _, roleName := range theOldSeededRoles {
@@ -121,7 +121,7 @@ func TestIntegrationConfigAdminAndKeyRotationDifferByOneAction(t *testing.T) {
 	}
 
 	lb := model.NewID()
-	o := Object{Type: TypeLoadBalancer, ID: lb, AccountID: sc.AccountID(), ProjectID: model.NewID(), LoadBalancerID: lb}
+	o := Object{Type: TypeProject, ID: lb, AccountID: sc.AccountID(), ProjectID: model.NewID()}
 	if !Can(subjects["CONFIG_ADMIN"], string(ActionInventoryWrite), o) {
 		t.Error("CONFIG_ADMIN cannot write inventory")
 	}
@@ -144,7 +144,7 @@ func TestIntegrationKeyMintingRolesHoldWhatAKeyIsMintedWith(t *testing.T) {
 	ctx := context.Background()
 
 	lb := model.NewID()
-	o := Object{Type: TypeLoadBalancer, ID: lb, AccountID: sc.AccountID(), ProjectID: model.NewID(), LoadBalancerID: lb}
+	o := Object{Type: TypeProject, ID: lb, AccountID: sc.AccountID(), ProjectID: model.NewID()}
 	for _, name := range []string{"CONFIG_ADMIN", "KEY_ROTATION"} {
 		rows, err := store.RolesByName(ctx, db, sc, name)
 		if err != nil || len(rows) != 1 {
@@ -171,7 +171,7 @@ func TestIntegrationDefaultRolesConferNothingElsewhere(t *testing.T) {
 	}
 	subject := SubjectFromRoles(sc.AccountID(), rows)
 
-	elsewhere := Object{Type: TypeLoadBalancer, ID: model.NewID(), AccountID: model.NewID()}
+	elsewhere := Object{Type: TypeProject, ID: model.NewID(), AccountID: model.NewID()}
 	for _, action := range AllActions {
 		if Can(subject, string(action), elsewhere) {
 			t.Fatalf("ADMIN permitted %q on an object of another account", action)

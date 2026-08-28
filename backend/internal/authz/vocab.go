@@ -12,16 +12,23 @@ package authz
 // Object types. The value is what lands in audit_entries.object_type and what
 // GET /api/v1/audit?objectType= matches.
 const (
-	ObjectProject      = "project"
-	ObjectLoadBalancer = "load_balancer"
-	ObjectNode         = "lb_node"
-	ObjectDomain       = "domain"
-	ObjectAlias        = "alias"
-	ObjectAPIKey       = "api_key"
-	ObjectSession      = "session"
-	ObjectRole         = "role"
-	ObjectMember       = "member"
-	ObjectAccount      = "account"
+	ObjectProject = "project"
+	ObjectNode    = "lb_node"
+	ObjectDomain  = "domain"
+	ObjectAlias   = "alias"
+	ObjectAPIKey  = "api_key"
+	ObjectSession = "session"
+	ObjectRole    = "role"
+	ObjectMember  = "member"
+	ObjectAccount = "account"
+
+	// There was an ObjectLoadBalancer, and the project actions below now cover
+	// what its three covered: a project IS the load balancer, so creating one
+	// is project.create and there is nothing left for load_balancer.create to
+	// describe. Entries already written keep the old word — audit_entries is
+	// append-only and a record of what happened is not editable — so a filter
+	// on object_type=load_balancer returns exactly the history that used it,
+	// and nothing new ever joins it.
 )
 
 // Actions, named `<object>.<verb>`. The object prefix is part of the action so
@@ -32,10 +39,6 @@ const (
 	ActionProjectCreate = "project.create"
 	ActionProjectUpdate = "project.update"
 	ActionProjectDelete = "project.delete"
-
-	ActionLoadBalancerCreate = "load_balancer.create"
-	ActionLoadBalancerUpdate = "load_balancer.update"
-	ActionLoadBalancerDelete = "load_balancer.delete"
 
 	ActionNodeCreate = "lb_node.create"
 	ActionNodeUpdate = "lb_node.update"
@@ -85,8 +88,8 @@ const (
 
 	// The two actions a challenge key performs. They are separate so a key can
 	// publish without being able to withdraw — which is what an operator wants
-	// for a load balancer that renews automatically but should never take a
-	// live value away.
+	// for a project that renews automatically but should never take a live
+	// value away.
 	//
 	// They live here rather than beside the handler because two packages
 	// authorize against them now — the challenge API and the CLI that mints
@@ -107,7 +110,6 @@ const (
 var actionClasses = map[string][]string{
 	ClassConfig: {
 		ActionProjectCreate, ActionProjectUpdate, ActionProjectDelete,
-		ActionLoadBalancerCreate, ActionLoadBalancerUpdate, ActionLoadBalancerDelete,
 		ActionNodeCreate, ActionNodeUpdate, ActionNodeDelete,
 		ActionDomainCreate, ActionDomainDelete,
 		ActionAliasCreate, ActionAliasDelete,

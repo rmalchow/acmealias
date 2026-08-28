@@ -159,9 +159,9 @@ func typeName(e ast.Expr) string {
 	return ""
 }
 
-// twoAccounts seeds one project, load balancer, alias and domain in each of two
-// accounts, and returns a scope for each.
-func twoAccounts(t *testing.T) (db *gorm.DB, mine, theirs Scope, myLB, theirLB model.ID) {
+// twoAccounts seeds one project, alias and domain in each of two accounts, and
+// returns a scope for each.
+func twoAccounts(t *testing.T) (db *gorm.DB, mine, theirs Scope, myProject, theirProject model.ID) {
 	t.Helper()
 	// isolatedDB, not scopedDB: these tests are about what the DATABASE enforces,
 	// and a superuser or table owner bypasses every policy, so a handle connected
@@ -175,19 +175,15 @@ func twoAccounts(t *testing.T) (db *gorm.DB, mine, theirs Scope, myLB, theirLB m
 		if err := CreateProject(ctx, db, sc, p); err != nil {
 			t.Fatalf("create project %s: %v", slug, err)
 		}
-		lb := &model.LoadBalancer{ProjectID: p.ID, Slug: slug + "-lb", Name: slug}
-		if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-			t.Fatalf("create load balancer %s: %v", slug, err)
-		}
-		a := &model.Alias{LoadBalancerID: lb.ID, ChallengeFQDN: "_acme-challenge." + slug + ".example.com", Label: slug + "-label"}
+		a := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge." + slug + ".example.com", Label: slug + "-label"}
 		if err := CreateAlias(ctx, db, sc, a); err != nil {
 			t.Fatalf("create alias %s: %v", slug, err)
 		}
-		d := &model.Domain{LoadBalancerID: lb.ID, AliasID: a.ID, Name: slug + ".example.com"}
+		d := &model.Domain{ProjectID: p.ID, AliasID: a.ID, Name: slug + ".example.com"}
 		if err := CreateDomain(ctx, db, sc, d); err != nil {
 			t.Fatalf("create domain %s: %v", slug, err)
 		}
-		return lb.ID
+		return p.ID
 	}
 	return db, mine, theirs, seed(mine, "acme"), seed(theirs, "globex")
 }
@@ -197,11 +193,11 @@ func twoAccounts(t *testing.T) (db *gorm.DB, mine, theirs Scope, myLB, theirLB m
 // object did not exist" — the same error, so the endpoint is not an oracle for
 // what other tenants hold.
 func TestIntegrationAnotherAccountsObjectIsNotFound(t *testing.T) {
-	db, mine, _, _, theirLB := twoAccounts(t)
+	db, mine, _, _, theirProject := twoAccounts(t)
 	ctx := context.Background()
 
 	t.Run("read", func(t *testing.T) {
-		_, err := GetLoadBalancer(ctx, db, mine, theirLB)
+		_, err := GetProject(ctx, db, mine, theirProject)
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			t.Fatalf("err = %v, want ErrRecordNotFound", err)
 		}
@@ -223,7 +219,7 @@ func TestIntegrationAnotherAccountsObjectIsNotFound(t *testing.T) {
 	})
 
 	t.Run("count", func(t *testing.T) {
-		_, total, err := ListProjectsWithLoadBalancersPage(ctx, db, mine, "", 10, 0)
+		_, total, err := ListProjectsACL(ctx, db, mine, ACL{All: true}, "", 10, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -233,13 +229,13 @@ func TestIntegrationAnotherAccountsObjectIsNotFound(t *testing.T) {
 	})
 
 	t.Run("write", func(t *testing.T) {
-		err := DeleteLoadBalancer(ctx, db, mine, theirLB)
+		err := DeleteProject(ctx, db, mine, theirProject)
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			t.Fatalf("err = %v, want ErrRecordNotFound", err)
 		}
 		// And it is still there.
-		if _, err := GetLoadBalancer(ctx, db, Scope{accountID: mustAccount(t, db, "globex")}, theirLB); err != nil {
-			t.Fatalf("the other account's load balancer was deleted: %v", err)
+		if _, err := GetProject(ctx, db, Scope{accountID: mustAccount(t, db, "globex")}, theirProject); err != nil {
+			t.Fatalf("the other account's project was deleted: %v", err)
 		}
 	})
 
@@ -249,15 +245,9 @@ func TestIntegrationAnotherAccountsObjectIsNotFound(t *testing.T) {
 		// service with a database constraint as the weapon.
 		theirScope := Scope{accountID: mustAccount(t, db, "globex")}
 		for _, sc := range []Scope{mine, theirScope} {
-			lbs, err := ListProjects(ctx, db, sc)
-			if err != nil || len(lbs) != 1 {
-				t.Fatalf("setup: %d projects, err %v", len(lbs), err)
-			}
-			var lb model.LoadBalancer
-			if err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-				return sc.Where(tx).First(&lb).Error
-			}); err != nil {
-				t.Fatalf("read load balancer: %v", err)
+			ps, err := ListProjects(ctx, db, sc)
+			if err != nil || len(ps) != 1 {
+				t.Fatalf("setup: %d projects, err %v", len(ps), err)
 			}
 			var alias model.Alias
 			if err := sc.Run(ctx, db, func(tx *gorm.DB) error {
@@ -265,7 +255,7 @@ func TestIntegrationAnotherAccountsObjectIsNotFound(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("read alias: %v", err)
 			}
-			d := &model.Domain{LoadBalancerID: lb.ID, AliasID: alias.ID, Name: "shared.example.com"}
+			d := &model.Domain{ProjectID: ps[0].ID, AliasID: alias.ID, Name: "shared.example.com"}
 			if err := CreateDomain(ctx, db, sc, d); err != nil {
 				t.Fatalf("both accounts must be able to hold shared.example.com: %v", err)
 			}
@@ -290,10 +280,10 @@ func mustAccount(t *testing.T, db *gorm.DB, slug string) model.ID {
 // supposed to catch and sometimes will not — and asserts the database refuses it
 // anyway.
 func TestIntegrationAQueryThatForgetsItsPredicateStillReturnsNothing(t *testing.T) {
-	db, mine, _, myLB, theirLB := twoAccounts(t)
+	db, mine, _, myProject, theirProject := twoAccounts(t)
 	ctx := context.Background()
 
-	var got []model.LoadBalancer
+	var got []model.Project
 	err := mine.Run(ctx, db, func(tx *gorm.DB) error {
 		// Deliberately NOT sc.Where(tx): this is the forgotten predicate.
 		return tx.Find(&got).Error
@@ -301,18 +291,21 @@ func TestIntegrationAQueryThatForgetsItsPredicateStillReturnsNothing(t *testing.
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != myLB {
+	if len(got) != 1 || got[0].ID != myProject {
 		ids := make([]string, 0, len(got))
-		for _, lb := range got {
-			ids = append(ids, lb.ID.String())
+		for _, p := range got {
+			ids = append(ids, p.ID.String())
 		}
 		t.Fatalf("an unfiltered SELECT inside a scope returned %d rows (%s), want only %s.\n"+
 			"The row-level security policy is what is supposed to make this true — check that "+
-			"FORCE ROW LEVEL SECURITY survived the migration.", len(got), strings.Join(ids, ", "), myLB)
+			"FORCE ROW LEVEL SECURITY survived the migration, and that the policy still names a "+
+			"column that exists: a policy naming a dropped column is removed with it, and the "+
+			"table is then forced with no policy at all, which EMPTIES rather than errors.",
+			len(got), strings.Join(ids, ", "), myProject)
 	}
-	for _, lb := range got {
-		if lb.ID == theirLB {
-			t.Fatal("the other account's load balancer was visible to an unfiltered query")
+	for _, p := range got {
+		if p.ID == theirProject {
+			t.Fatal("the other account's project was visible to an unfiltered query")
 		}
 	}
 }
@@ -322,7 +315,7 @@ func TestIntegrationAQueryThatForgetsItsPredicateStillReturnsNothing(t *testing.
 // connection that is handed to the next request. SET LOCAL is discarded at
 // commit, so borrowing the same connection again must see nothing.
 func TestIntegrationScopeDoesNotSurviveAPooledConnection(t *testing.T) {
-	db, mine, theirs, myLB, theirLB := twoAccounts(t)
+	db, mine, theirs, myProject, theirProject := twoAccounts(t)
 	ctx := context.Background()
 
 	// Pin the pool to a single connection, so the second read is guaranteed to
@@ -335,22 +328,22 @@ func TestIntegrationScopeDoesNotSurviveAPooledConnection(t *testing.T) {
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 
-	if _, err := GetLoadBalancer(ctx, db, mine, myLB); err != nil {
+	if _, err := GetProject(ctx, db, mine, myProject); err != nil {
 		t.Fatalf("first read: %v", err)
 	}
 	// The same connection now serves the other account.
-	if _, err := GetLoadBalancer(ctx, db, theirs, theirLB); err != nil {
+	if _, err := GetProject(ctx, db, theirs, theirProject); err != nil {
 		t.Fatalf("second read on the recycled connection: %v — a residual app.account_id "+
 			"from the first read would produce exactly this", err)
 	}
 	// And with no scope at all, the connection must be inert rather than
 	// carrying whichever account happened to use it last.
-	var leaked []model.LoadBalancer
+	var leaked []model.Project
 	if err := db.WithContext(ctx).Find(&leaked).Error; err != nil {
 		t.Fatalf("unscoped read: %v", err)
 	}
 	if len(leaked) != 0 {
-		t.Fatalf("a connection outside any scope returned %d load balancers, want 0 — "+
+		t.Fatalf("a connection outside any scope returned %d projects, want 0 — "+
 			"the tenant setting survived its transaction", len(leaked))
 	}
 }
@@ -439,7 +432,7 @@ func TestIntegrationCrossAccountDoesNotOutliveItsNesting(t *testing.T) {
 	db, mine, theirs, _, _ := twoAccounts(t)
 	ctx := context.Background()
 
-	var seenInside, seenAfter []model.LoadBalancer
+	var seenInside, seenAfter []model.Project
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := mine.Run(ctx, tx, func(tx *gorm.DB) error { return nil }); err != nil {
 			return err
@@ -458,11 +451,11 @@ func TestIntegrationCrossAccountDoesNotOutliveItsNesting(t *testing.T) {
 		t.Fatalf("transaction: %v", err)
 	}
 	if len(seenInside) < 2 {
-		t.Fatalf("the nested cross-account read saw %d load balancers, want both accounts' — "+
+		t.Fatalf("the nested cross-account read saw %d projects, want both accounts' — "+
 			"the escape did not take effect, so the assertion below proves nothing", len(seenInside))
 	}
 	if len(seenAfter) != 1 {
-		t.Fatalf("after a nested cross-account read, a predicate-less query saw %d load balancers, want 1: "+
+		t.Fatalf("after a nested cross-account read, a predicate-less query saw %d projects, want 1: "+
 			"the policies were still lifted for the rest of the transaction", len(seenAfter))
 	}
 	_ = theirs

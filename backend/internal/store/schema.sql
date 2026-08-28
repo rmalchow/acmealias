@@ -49,26 +49,23 @@ table aliases
   column created_at timestamp with time zone not null default now()
   column id uuid not null default uuidv7()
   column label text not null
-  column load_balancer_id uuid not null
   column project_id uuid not null
   constraint aliases_challenge_fqdn_key unique (challenge_fqdn)
   constraint aliases_id_account_id_key unique (id,account_id)
   constraint aliases_label_key unique (label)
-  constraint aliases_lb_account_fkey foreign key (load_balancer_id,account_id)
-  constraint aliases_lb_project_fkey foreign key (load_balancer_id,project_id)
-  constraint aliases_load_balancer_id_fkey foreign key (load_balancer_id)
   constraint aliases_pkey primary key (id)
+  constraint aliases_project_account_fkey foreign key (project_id,account_id)
   index aliases_account_id_idx CREATE INDEX aliases_account_id_idx ON aliases USING btree (account_id)
   index aliases_challenge_fqdn_key CREATE UNIQUE INDEX aliases_challenge_fqdn_key ON aliases USING btree (challenge_fqdn)
   index aliases_id_account_id_key CREATE UNIQUE INDEX aliases_id_account_id_key ON aliases USING btree (id, account_id)
   index aliases_label_key CREATE UNIQUE INDEX aliases_label_key ON aliases USING btree (label)
-  index aliases_load_balancer_id_idx CREATE INDEX aliases_load_balancer_id_idx ON aliases USING btree (load_balancer_id)
   index aliases_pkey CREATE UNIQUE INDEX aliases_pkey ON aliases USING btree (id)
   index aliases_project_id_idx CREATE INDEX aliases_project_id_idx ON aliases USING btree (project_id)
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
   rls enabled=true forced=true
 
 table api_key_grants
+  check api_key_grants_object_type_not_load_balancer CHECK ((object_type <> 'load_balancer'::text))
   column account_id uuid not null
   column action text not null
   column api_key_id uuid not null
@@ -79,6 +76,7 @@ table api_key_grants
   column object_type text not null
   constraint api_key_grants_account_id_fkey foreign key (account_id)
   constraint api_key_grants_api_key_id_fkey foreign key (api_key_id)
+  constraint api_key_grants_object_type_not_load_balancer check ()
   constraint api_key_grants_pkey primary key (id)
   index api_key_grants_key_idx CREATE INDEX api_key_grants_key_idx ON api_key_grants USING btree (api_key_id)
   index api_key_grants_pkey CREATE UNIQUE INDEX api_key_grants_pkey ON api_key_grants USING btree (id)
@@ -154,7 +152,6 @@ table challenge_interactions
   column id uuid not null default uuidv7()
   column key_id text null
   column last_queried_at timestamp with time zone null
-  column load_balancer_id uuid null
   column project_id uuid null
   column published_at timestamp with time zone not null default now()
   column query_count bigint not null default 0
@@ -162,7 +159,6 @@ table challenge_interactions
   column withdrawn_at timestamp with time zone null
   constraint challenge_interactions_pkey primary key (id)
   index challenge_interactions_live_idx CREATE INDEX challenge_interactions_live_idx ON challenge_interactions USING btree (alias_id, value_digest) WHERE (withdrawn_at IS NULL)
-  index challenge_interactions_pair_published_idx CREATE INDEX challenge_interactions_pair_published_idx ON challenge_interactions USING btree (load_balancer_id, published_at DESC)
   index challenge_interactions_pkey CREATE UNIQUE INDEX challenge_interactions_pkey ON challenge_interactions USING btree (id)
   index challenge_interactions_project_published_idx CREATE INDEX challenge_interactions_project_published_idx ON challenge_interactions USING btree (project_id, published_at DESC)
   rls enabled=false forced=false
@@ -194,16 +190,13 @@ table domains
   column id uuid not null default uuidv7()
   column last_checked_at timestamp with time zone null
   column last_success_at timestamp with time zone null
-  column load_balancer_id uuid not null
   column name text not null
   column project_id uuid not null
   constraint domains_account_id_name_key unique (account_id,name)
   constraint domains_alias_account_fkey foreign key (alias_id,account_id)
   constraint domains_alias_id_fkey foreign key (alias_id)
-  constraint domains_lb_account_fkey foreign key (load_balancer_id,account_id)
-  constraint domains_lb_project_fkey foreign key (load_balancer_id,project_id)
-  constraint domains_load_balancer_id_fkey foreign key (load_balancer_id)
   constraint domains_pkey primary key (id)
+  constraint domains_project_account_fkey foreign key (project_id,account_id)
   index domains_account_id_idx CREATE INDEX domains_account_id_idx ON domains USING btree (account_id)
   index domains_account_id_name_key CREATE UNIQUE INDEX domains_account_id_name_key ON domains USING btree (account_id, name)
   index domains_activation_due_idx CREATE INDEX domains_activation_due_idx ON domains USING btree (last_checked_at NULLS FIRST, last_success_at)
@@ -219,38 +212,14 @@ table lb_nodes
   column ipv4 inet null
   column ipv6 inet null
   column label text not null
-  column load_balancer_id uuid not null
   column project_id uuid not null
-  constraint lb_nodes_lb_account_fkey foreign key (load_balancer_id,account_id)
-  constraint lb_nodes_lb_project_fkey foreign key (load_balancer_id,project_id)
-  constraint lb_nodes_load_balancer_id_fkey foreign key (load_balancer_id)
-  constraint lb_nodes_load_balancer_id_label_key unique (load_balancer_id,label)
   constraint lb_nodes_pkey primary key (id)
+  constraint lb_nodes_project_account_fkey foreign key (project_id,account_id)
+  constraint lb_nodes_project_id_label_key unique (project_id,label)
   index lb_nodes_account_id_idx CREATE INDEX lb_nodes_account_id_idx ON lb_nodes USING btree (account_id)
-  index lb_nodes_load_balancer_id_label_key CREATE UNIQUE INDEX lb_nodes_load_balancer_id_label_key ON lb_nodes USING btree (load_balancer_id, label)
   index lb_nodes_pkey CREATE UNIQUE INDEX lb_nodes_pkey ON lb_nodes USING btree (id)
   index lb_nodes_project_id_idx CREATE INDEX lb_nodes_project_id_idx ON lb_nodes USING btree (project_id)
-  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
-  rls enabled=true forced=true
-
-table load_balancers
-  column account_id uuid not null
-  column created_at timestamp with time zone not null default now()
-  column id uuid not null default uuidv7()
-  column name text not null
-  column project_id uuid not null
-  column slug text not null
-  constraint load_balancers_id_account_id_key unique (id,account_id)
-  constraint load_balancers_id_project_id_key unique (id,project_id)
-  constraint load_balancers_pkey primary key (id)
-  constraint load_balancers_project_account_fkey foreign key (project_id,account_id)
-  constraint load_balancers_project_id_fkey foreign key (project_id)
-  constraint load_balancers_project_id_slug_key unique (project_id,slug)
-  index load_balancers_account_id_idx CREATE INDEX load_balancers_account_id_idx ON load_balancers USING btree (account_id)
-  index load_balancers_id_account_id_key CREATE UNIQUE INDEX load_balancers_id_account_id_key ON load_balancers USING btree (id, account_id)
-  index load_balancers_id_project_id_key CREATE UNIQUE INDEX load_balancers_id_project_id_key ON load_balancers USING btree (id, project_id)
-  index load_balancers_pkey CREATE UNIQUE INDEX load_balancers_pkey ON load_balancers USING btree (id)
-  index load_balancers_project_id_slug_key CREATE UNIQUE INDEX load_balancers_project_id_slug_key ON load_balancers USING btree (project_id, slug)
+  index lb_nodes_project_id_label_key CREATE UNIQUE INDEX lb_nodes_project_id_label_key ON lb_nodes USING btree (project_id, label)
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
   rls enabled=true forced=true
 
@@ -258,7 +227,6 @@ table project_daily_stats
   column alias_count integer not null
   column day date not null
   column domain_count integer not null
-  column load_balancer_count integer not null
   column project_id uuid not null
   column project_slug text not null
   constraint project_daily_stats_pkey primary key (project_id,day)
@@ -284,6 +252,7 @@ table projects
   rls enabled=true forced=true
 
 table role_grants
+  check role_grants_object_type_not_load_balancer CHECK ((object_type <> 'load_balancer'::text))
   column account_id uuid not null
   column action text not null
   column created_at timestamp with time zone not null default now()
@@ -293,6 +262,7 @@ table role_grants
   column object_type text not null
   column role_id uuid not null
   constraint role_grants_account_id_fkey foreign key (account_id)
+  constraint role_grants_object_type_not_load_balancer check ()
   constraint role_grants_pkey primary key (id)
   constraint role_grants_role_id_fkey foreign key (role_id)
   index role_grants_pkey CREATE UNIQUE INDEX role_grants_pkey ON role_grants USING btree (id)

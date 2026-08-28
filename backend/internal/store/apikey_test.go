@@ -15,14 +15,10 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 	if err := CreateProject(ctx, db, sc, p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := &model.LoadBalancer{ProjectID: p.ID, Slug: "eu-prod", Name: "EU Prod"}
-	if err := CreateLoadBalancer(ctx, db, sc, lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
 
-	// The key's authority is its grants now, and the per-load-balancer listing
-	// asks a question about them rather than about a foreign key — so a key with
-	// no grants appears on no load balancer's screen, correctly.
+	// The key's authority is its grants, and the per-project listing asks a
+	// question about them rather than about a foreign key — so a key with no
+	// grants appears on no project's screen, correctly.
 	key := &model.APIKey{
 		Identifier:    "k_7f3a91c4",
 		SecretHash:    []byte("digest"),
@@ -31,14 +27,14 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 			{CIDR: "203.0.113.0/24"},
 		},
 		Grants: []model.APIKeyGrant{
-			{ObjectType: "load_balancer", ObjectID: &lb.ID, Action: "challenge.publish", Inheritable: true},
+			{ObjectType: "project", ObjectID: &p.ID, Action: "challenge.publish", Inheritable: true},
 		},
 	}
 	if err := CreateAPIKey(ctx, db, sc, key, AllowAnyGrant); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	list, err := ListAPIKeysForLoadBalancer(ctx, db, sc, lb.ID)
+	list, err := ListAPIKeysForProject(ctx, db, sc, p.ID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

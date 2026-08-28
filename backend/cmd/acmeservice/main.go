@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/smtp"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/dnsserver"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/httpapi"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/mail"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/obs"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/oidcauth"
@@ -135,6 +137,8 @@ func runService(cfg config.Config, log *slog.Logger) error {
 	// D10), so discovery happens lazily on the first sign-in.
 	auth := oidcauth.New(cfg, db)
 
+	mailer := mailSender(cfg, log)
+
 	// listenersUp gates readiness: false until every listener is serving, and
 	// false again the moment a shutdown starts.
 	var up upFlag
@@ -159,6 +163,7 @@ func runService(cfg config.Config, log *slog.Logger) error {
 			Auth:    auth,
 			View:    view,
 			Config:  cfg,
+			Mail:    mailer,
 			Log:     log,
 		},
 		Console:  webui.Handler(cfg.StaffHost),
@@ -350,6 +355,66 @@ type upFlag struct {
 
 func (f *upFlag) set(v bool) { f.mu.Lock(); f.v = v; f.mu.Unlock() }
 func (f *upFlag) get() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.v }
+
+// mailSender builds the process's one mail.Sender from configuration.
+//
+// A deployment with no relay configured gets mail.Discard, and an identity that
+// does not validate is a WARNING rather than a startup failure. That asymmetry
+// is deliberate: this service's reason to exist is answering DNS and ACME
+// challenges, and refusing to serve those because nobody filled in a footer
+// would take a deployment down over mail it may not send for weeks. The failure
+// mode chosen instead is loud at startup and silent afterwards — which is why
+// the warning names the settings, not just the problem.
+//
+// Rejected: falling back to a no-reply Reply-To, or to From, when reply_to is
+// empty. That is exactly the outcome transactional-email T3 rejects, performed
+// silently, and a substituted value can never be told from a configured one
+// later.
+//
+// Nothing sends a message yet. The sender is constructed here so that the
+// changes that do send — `account-invitations`, `metering-and-credits` — find
+// one already wired and configured rather than each building its own from cfg,
+// which is how two spellings of the sender identity get into one deployment
+// (T1).
+func mailSender(cfg config.Config, log *slog.Logger) mail.Sender {
+	id := mail.Identity{
+		From:    cfg.MailFrom,
+		Name:    cfg.MailSender,
+		ReplyTo: cfg.MailReplyTo,
+		Footer:  cfg.MailFooter,
+	}
+	if err := id.Validate(); err != nil {
+		log.Warn("mail identity is incomplete; messages sent with it may be filed as spam",
+			"settings", "ACME_MAIL_FROM, ACME_MAIL_SENDER, ACME_MAIL_REPLY_TO, ACME_MAIL_FOOTER",
+			"error", err)
+	}
+	if cfg.MailSMTPAddr == "" {
+		log.Info("no mail relay configured; messages will be discarded", "setting", "ACME_MAIL_SMTP_ADDR")
+		return mail.Discard{}
+	}
+
+	s := &mail.SMTP{Identity: id, Addr: cfg.MailSMTPAddr}
+	if cfg.MailSMTPUser != "" {
+		// PlainAuth is refused by net/smtp over an unencrypted connection to
+		// anything but localhost, which is the behaviour we want: credentials
+		// are not put on the wire in the clear because a relay asked nicely.
+		// The host has to be split off the address because PlainAuth checks it
+		// against the server's certificate name.
+		host, _, err := net.SplitHostPort(cfg.MailSMTPAddr)
+		if err != nil {
+			// Not fatal for the same reason the identity is not: SendMail will
+			// report this per message, and it is a mail outage rather than a
+			// DNS one.
+			log.Warn("mail relay address is not host:port; sending will fail",
+				"setting", "ACME_MAIL_SMTP_ADDR", "addr", cfg.MailSMTPAddr, "error", err)
+		} else {
+			s.Auth = smtp.PlainAuth("", cfg.MailSMTPUser, cfg.MailSMTPPass, host)
+		}
+	}
+	log.Info("mail relay configured", "addr", cfg.MailSMTPAddr, "from", cfg.MailFrom,
+		"authenticated", s.Auth != nil)
+	return s
+}
 
 // dbLookup is the production wiring of apikey.Lookup.
 func dbLookup(db *gorm.DB) apikey.Lookup {

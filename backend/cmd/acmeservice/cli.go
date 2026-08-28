@@ -49,13 +49,12 @@ func usage() {
   acmeservice adminctl --account SLUG <noun> <verb> ...
 
   acmeservice adminctl account   credit --credits N | transfer --owner SUBJECT | member-add --subject S --role NAME
-  acmeservice adminctl project   create --slug S --name N | list | delete --slug S
-  acmeservice adminctl loadbalancer    create --project S --slug S --name N | delete --loadbalancer REF | dns REF
-  acmeservice adminctl node      add --loadbalancer REF --label L [--ipv4 A] [--ipv6 A] | delete --id ID
-  acmeservice adminctl domain    create --loadbalancer REF --name N [--include-wildcard] | list --loadbalancer REF | delete --id ID
-  acmeservice adminctl key       create [--loadbalancer REF] [--grant T:O:A]... --name N [--expires DUR] | list --loadbalancer REF | revoke --id ID
+  acmeservice adminctl project   create --slug S --name N | list | delete --slug S | dns REF
+  acmeservice adminctl node      add --project REF --label L [--ipv4 A] [--ipv6 A] | delete --id ID
+  acmeservice adminctl domain    create --project REF --name N [--include-wildcard] | list --project REF | delete --id ID
+  acmeservice adminctl key       create [--project REF] [--grant T:O:A]... --name N [--expires DUR] | list --project REF | revoke --id ID
 
-REF is a load balancer reference: a numeric id, or "project-slug/loadbalancer-slug".
+REF is a project reference: its slug, or its identifier.
 
 --account names the account every adminctl verb acts in. ACME_ADMINCTL_ACCOUNT
 sets the default; the flag wins. There is no deployment-wide account to fall
@@ -267,33 +266,21 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 		fs.Parse(args)
 		return adminctl.ProjectDelete(ctx, db, sc, out, *slug)
 
-	case "loadbalancer create":
-		fs := flag.NewFlagSet("loadbalancer create", flag.ExitOnError)
-		project := fs.String("project", "", "project slug")
-		slug := fs.String("slug", "", "load balancer slug")
-		name := fs.String("name", "", "load balancer name")
-		fs.Parse(args)
-		return adminctl.LoadBalancerCreate(ctx, db, sc, out, *project, *slug, *name)
-	case "loadbalancer delete":
-		fs := flag.NewFlagSet("loadbalancer delete", flag.ExitOnError)
-		loadbalancer := fs.String("loadbalancer", "", "load balancer reference (project-slug/loadbalancer-slug or id)")
-		fs.Parse(args)
-		return adminctl.LoadBalancerDelete(ctx, db, sc, out, *loadbalancer)
-	case "loadbalancer dns":
+	case "project dns":
 		if len(args) != 1 {
-			return fmt.Errorf("usage: acmeservice adminctl loadbalancer dns REF")
+			return fmt.Errorf("usage: acmeservice adminctl project dns REF")
 		}
 		opts := inventory.PlanOptions{Zone: cfg.Zone, CAAIssuers: cfg.CAAIssuers}
-		return adminctl.LoadBalancerDNS(ctx, db, sc, out, opts, args[0])
+		return adminctl.ProjectDNS(ctx, db, sc, out, opts, args[0])
 
 	case "node add":
 		fs := flag.NewFlagSet("node add", flag.ExitOnError)
-		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
+		project := fs.String("project", "", "project reference")
 		label := fs.String("label", "", "node label")
 		ipv4 := fs.String("ipv4", "", "node IPv4 address")
 		ipv6 := fs.String("ipv6", "", "node IPv6 address")
 		fs.Parse(args)
-		return adminctl.NodeAdd(ctx, db, sc, out, *loadbalancer, *label, *ipv4, *ipv6)
+		return adminctl.NodeAdd(ctx, db, sc, out, *project, *label, *ipv4, *ipv6)
 	case "node delete":
 		fs := flag.NewFlagSet("node delete", flag.ExitOnError)
 		id := fs.String("id", "", "node id")
@@ -306,17 +293,17 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 
 	case "domain create":
 		fs := flag.NewFlagSet("domain create", flag.ExitOnError)
-		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
+		project := fs.String("project", "", "project reference")
 		name := fs.String("name", "", "domain name")
 		includeWildcard := fs.Bool("include-wildcard", false,
 			"also create the name's counterpart: the wildcard of a plain name, the base name of a wildcard")
 		fs.Parse(args)
-		return adminctl.DomainCreate(ctx, db, sc, out, cfg.Zone, cfg.AliasUseDomain, *loadbalancer, *name, *includeWildcard)
+		return adminctl.DomainCreate(ctx, db, sc, out, cfg.Zone, cfg.AliasUseDomain, *project, *name, *includeWildcard)
 	case "domain list":
 		fs := flag.NewFlagSet("domain list", flag.ExitOnError)
-		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
+		project := fs.String("project", "", "project reference")
 		fs.Parse(args)
-		return adminctl.DomainList(ctx, db, sc, out, *loadbalancer)
+		return adminctl.DomainList(ctx, db, sc, out, *project)
 	case "domain delete":
 		fs := flag.NewFlagSet("domain delete", flag.ExitOnError)
 		id := fs.String("id", "", "domain id")
@@ -329,7 +316,7 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 
 	case "key create":
 		fs := flag.NewFlagSet("key create", flag.ExitOnError)
-		loadbalancer := fs.String("loadbalancer", "", "load balancer reference: the two challenge grants over it")
+		project := fs.String("project", "", "project reference: the two challenge grants over it")
 		name := fs.String("name", "", "key note")
 		expires := fs.String("expires", "", "key lifetime, e.g. 8760h (empty: never expires)")
 		var grants grantFlag
@@ -343,12 +330,12 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 				return fmt.Errorf("--expires: %w", err)
 			}
 		}
-		return adminctl.KeyCreate(ctx, db, sc, out, *loadbalancer, *name, d, grants)
+		return adminctl.KeyCreate(ctx, db, sc, out, *project, *name, d, grants)
 	case "key list":
 		fs := flag.NewFlagSet("key list", flag.ExitOnError)
-		loadbalancer := fs.String("loadbalancer", "", "load balancer reference")
+		project := fs.String("project", "", "project reference")
 		fs.Parse(args)
-		return adminctl.KeyList(ctx, db, sc, out, *loadbalancer)
+		return adminctl.KeyList(ctx, db, sc, out, *project)
 	case "key revoke":
 		fs := flag.NewFlagSet("key revoke", flag.ExitOnError)
 		id := fs.String("id", "", "key id")

@@ -26,7 +26,7 @@ import (
 //
 // which is the one record the issuance under test validated against — with the
 // label the running service generated, since the zone file is itself rendered
-// from `adminctl loadbalancer dns demo/prod` by development/scripts/seed.sh.
+// from `adminctl project dns demo` by development/scripts/seed.sh.
 // That the two sides share a source does not make the comparison empty: the
 // seed copies only the challenge rows, through a text pipeline, into a zone
 // CoreDNS then has to parse and serve, and this asserts that round trip.
@@ -83,11 +83,11 @@ func challengeRecords(t *testing.T, rrs []dns.RR) []string {
 func planRecords(t *testing.T) []dns.RR {
 	t.Helper()
 	out := compose(t, "exec", "-T", "api", "go", "run", "./cmd/acmeservice",
-		"adminctl", "loadbalancer", "dns", "demo/prod")
+		"adminctl", "project", "dns", "demo")
 
 	_, snippet, ok := strings.Cut(out, "Zone snippet:")
 	if !ok {
-		t.Fatalf("`adminctl loadbalancer dns demo/prod` printed no zone snippet:\n%s", out)
+		t.Fatalf("`adminctl project dns demo` printed no zone snippet:\n%s", out)
 	}
 	var rrs []dns.RR
 	for _, line := range strings.Split(snippet, "\n") {

@@ -96,7 +96,6 @@ type adminEnv struct {
 	t      *testing.T
 	db     *gorm.DB
 	e      *echo.Echo
-	lb     *model.LoadBalancer
 	projID model.ID
 	roleID model.ID
 	sc     store.Scope
@@ -131,11 +130,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb, err := inventory.CreateLoadBalancer(ctx, db, sc, authz.CLISubject(sc.AccountID()), p.ID, "eu-prod", "EU production")
-	if err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
-	if _, err := inventory.AddNode(ctx, db, sc, authz.CLISubject(sc.AccountID()), lb.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
+	if _, err := inventory.AddNode(ctx, db, sc, authz.CLISubject(sc.AccountID()), p.ID, "a", "203.0.113.10", "2001:db8:1::10"); err != nil {
 		t.Fatalf("add node: %v", err)
 	}
 
@@ -173,7 +168,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	if err := store.CreateRole(t.Context(), db, sc, spare, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create spare role: %v", err)
 	}
-	return &adminEnv{t: t, db: db, sc: sc, e: e, lb: lb, projID: p.ID, roleID: spare.ID, opts: opts}
+	return &adminEnv{t: t, db: db, sc: sc, e: e, projID: p.ID, roleID: spare.ID, opts: opts}
 }
 
 // Seeders for the destructive rows of TestEveryRouteEnforcesItsRole. Each
@@ -195,26 +190,15 @@ func seedProject(t *testing.T, v *adminEnv, suffix string) string {
 	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + p.ID.String()
 }
 
-func seedLoadBalancer(t *testing.T, v *adminEnv, suffix string) string {
-	t.Helper()
-	subj := authz.CLISubject(v.sc.AccountID())
-	lb, err := inventory.CreateLoadBalancer(t.Context(), v.db, v.sc, subj, v.projID,
-		fmt.Sprintf("seed-lb%d", seedCounter.Add(1)), "Seed LB "+suffix)
-	if err != nil {
-		t.Fatalf("seed load balancer: %v", err)
-	}
-	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + lb.ID.String()
-}
-
 // seedCounter keeps seeded labels and slugs distinct. A node label is unique
-// per load balancer, so deriving one from the role name collides the moment two
+// per project, so deriving one from the role name collides the moment two
 // rows seed for the same role.
 var seedCounter atomic.Int64
 
 func seedNode(t *testing.T, v *adminEnv, suffix string) string {
 	t.Helper()
 	subj := authz.CLISubject(v.sc.AccountID())
-	n, err := inventory.AddNode(t.Context(), v.db, v.sc, subj, v.lb.ID,
+	n, err := inventory.AddNode(t.Context(), v.db, v.sc, subj, v.projID,
 		fmt.Sprintf("n%d", seedCounter.Add(1)), "203.0.113.200", "")
 	if err != nil {
 		t.Fatalf("seed node: %v", err)
@@ -225,7 +209,7 @@ func seedNode(t *testing.T, v *adminEnv, suffix string) string {
 func seedDomain(t *testing.T, v *adminEnv, suffix string) string {
 	t.Helper()
 	subj := authz.CLISubject(v.sc.AccountID())
-	res, err := inventory.CreateDomain(t.Context(), v.db, v.sc, subj, v.lb.ID,
+	res, err := inventory.CreateDomain(t.Context(), v.db, v.sc, subj, v.projID,
 		fmt.Sprintf("seed-d%d.example.com", seedCounter.Add(1)), false, false)
 	if err != nil {
 		t.Fatalf("seed domain: %v", err)
@@ -243,7 +227,7 @@ func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
 			t.Fatalf("seed key: %v", err)
 		}
 		k.Grants = []model.APIKeyGrant{
-			{ObjectType: "load_balancer", ObjectID: &v.lb.ID, Action: "challenge.publish", Inheritable: true},
+			{ObjectType: "project", ObjectID: &v.projID, Action: "challenge.publish", Inheritable: true},
 		}
 		if err := store.CreateAPIKey(t.Context(), v.db, v.sc, k, store.AllowAnyGrant); err != nil {
 			t.Fatalf("seed key: %v", err)
@@ -510,7 +494,8 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 	}
 
 	acct := "/api/v1/accounts/" + v.sc.AccountID().String()
-	lb := acct + "/loadbalancers/" + itoa(v.lb.ID)
+	// One path where there were two: `lb` and `proj` used to address different
+	// objects, and the whole of this change is that they no longer do.
 	proj := acct + "/projects/" + itoa(v.projID)
 
 	// A refusal is 403 everywhere except here, and the asymmetry with transfer
@@ -537,27 +522,25 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		// Reads: every role.
 		{"GET", "/api/v1/me", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", proj + "/loadbalancers", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", lb, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", lb + "/domains", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", lb + "/keys", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", lb + "/plan", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", lb + "/plan/zone", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/domains", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/keys", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/plan", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/plan/zone", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/challenges", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/config", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj, "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj + "/usage", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj + "/inventory-history", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", lb + "/interactions", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", lb + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/interactions", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"GET", proj + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		// "Check now" writes activation state, but the authority it needs is the
 		// authority to run the check — dns.plan, exactly as the GET — because it
 		// asks the same questions of the same names. A read-only member watching
 		// a domain they have just delegated is the person this control exists
 		// for, and requiring inventory.write of them would put it out of reach
 		// of everyone except the account's administrators.
-		{"POST", lb + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", proj + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 
 		// Projects: ADMIN only.
 		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects", `{"slug":"other","name":"Other"}`, []string{"ADMIN"}, nil},
@@ -565,17 +548,14 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"DELETE", "", "", []string{"ADMIN"}, seedProject},
 
 		// Inventory: ADMIN and CONFIG_ADMIN. KEY_ROTATION must not pass here.
-		{"POST", proj + "/loadbalancers", `{"slug":"x","name":"X"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
-		{"PATCH", lb, `{"name":"Renamed"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
-		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedLoadBalancer},
-		{"POST", lb + "/nodes", `{"label":"z","ipv4":"203.0.113.99"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
+		{"POST", proj + "/nodes", `{"label":"z","ipv4":"203.0.113.99"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
 		{"PATCH", "", `{"ipv4":"203.0.113.1"}`, []string{"ADMIN", "CONFIG_ADMIN"}, seedNode},
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedNode},
-		{"POST", lb + "/domains", `{"name":"shop.example.com"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
+		{"POST", proj + "/domains", `{"name":"shop.example.com"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedDomain},
 
 		// Keys: ADMIN, CONFIG_ADMIN and KEY_ROTATION.
-		{"POST", lb + "/keys", `{"note":"traefik"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, nil},
+		{"POST", proj + "/keys", `{"note":"traefik"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, nil},
 		{"PUT", "", `{"networks":[]}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/networks")},
 		{"PUT", "", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/expiry")},
 		{"POST", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/rotate")},
@@ -706,9 +686,9 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 func TestKeyRotationMayMintAKeyButNotADomain(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("keys", roleKey)
-	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+	proj := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
-	rec := cl.do(http.MethodPost, lb+"/keys", `{"note":"traefik"}`)
+	rec := cl.do(http.MethodPost, proj+"/keys", `{"note":"traefik"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create key: %d %s, want 201", rec.Code, rec.Body.String())
 	}
@@ -718,7 +698,7 @@ func TestKeyRotationMayMintAKeyButNotADomain(t *testing.T) {
 		t.Fatal("key creation returned no secret; the one time it is ever available is now")
 	}
 
-	rec = cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com"}`)
+	rec = cl.do(http.MethodPost, proj+"/domains", `{"name":"shop.example.com"}`)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("create domain as KEY_ROTATION: %d %s, want 403", rec.Code, rec.Body.String())
 	}
@@ -802,9 +782,9 @@ func TestMeCarriesDisplayNameGroupsAndRoles(t *testing.T) {
 func TestDomainErrorsMapToStatusesAndOneJSONShape(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", roleAdmin)
-	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+	proj := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
-	if rec := cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com"}`); rec.Code != http.StatusCreated {
+	if rec := cl.do(http.MethodPost, proj+"/domains", `{"name":"shop.example.com"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("seed domain: %d %s", rec.Code, rec.Body.String())
 	}
 
@@ -812,11 +792,11 @@ func TestDomainErrorsMapToStatusesAndOneJSONShape(t *testing.T) {
 		name, method, path, body string
 		want                     int
 	}{
-		{"invalid wildcard", "POST", lb + "/domains", `{"name":"*.*.example.com"}`, http.StatusBadRequest},
-		{"duplicate domain", "POST", lb + "/domains", `{"name":"shop.example.com"}`, http.StatusConflict},
-		{"unknown lb", "GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/00000000-0000-7000-8000-000000000999", "", http.StatusNotFound},
+		{"invalid wildcard", "POST", proj + "/domains", `{"name":"*.*.example.com"}`, http.StatusBadRequest},
+		{"duplicate domain", "POST", proj + "/domains", `{"name":"shop.example.com"}`, http.StatusConflict},
+		{"unknown project", "GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/00000000-0000-7000-8000-000000000999", "", http.StatusNotFound},
 		{"non-empty project", "DELETE", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID), "", http.StatusConflict},
-		{"non-numeric id", "GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/banana", "", http.StatusBadRequest},
+		{"non-numeric id", "GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/banana", "", http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -859,7 +839,7 @@ func TestUnknownAPIPathIsJSONNotTheConsole(t *testing.T) {
 	}
 
 	// The fallback still serves everything that is not the API.
-	if rec := cl.do(http.MethodGet, "/loadbalancers/1", ""); !strings.Contains(rec.Body.String(), "<html>") {
+	if rec := cl.do(http.MethodGet, "/projects/1", ""); !strings.Contains(rec.Body.String(), "<html>") {
 		t.Errorf("the console fallback stopped working: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -869,9 +849,9 @@ func TestUnknownAPIPathIsJSONNotTheConsole(t *testing.T) {
 func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", roleAdmin)
-	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+	proj := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
-	rec := cl.do(http.MethodPost, lb+"/keys", `{"note":"traefik","networks":["203.0.113.5/24"]}`)
+	rec := cl.do(http.MethodPost, proj+"/keys", `{"note":"traefik","networks":["203.0.113.5/24"]}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create key: %d %s", rec.Code, rec.Body.String())
 	}
@@ -885,7 +865,7 @@ func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 		t.Fatalf("networks %v, want the masked prefix", created.Key.Networks)
 	}
 
-	rec = cl.do(http.MethodGet, lb+"/keys", "")
+	rec = cl.do(http.MethodGet, proj+"/keys", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list keys: %d %s", rec.Code, rec.Body.String())
 	}
@@ -932,7 +912,7 @@ func TestKeySecretIsReturnedOnceAndNeverRead(t *testing.T) {
 func TestKeyRestrictionRejectsGarbageCIDR(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", roleAdmin)
-	rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/loadbalancers/"+itoa(v.lb.ID)+"/keys", `{"networks":["not-a-cidr"]}`)
+	rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects/"+itoa(v.projID)+"/keys", `{"networks":["not-a-cidr"]}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body.String())
 	}
@@ -1233,18 +1213,8 @@ func TestMutationsAreAudited(t *testing.T) {
 	r.step(t, http.MethodPatch, projPath, `{"name":"Beta Renamed"}`,
 		http.StatusOK, wantEntry{authz.ActionProjectUpdate, "beta", pid})
 
-	// --- load balancers ---
-	rec = r.step(t, http.MethodPost, projPath+"/loadbalancers", `{"slug":"eu","name":"EU"}`,
-		http.StatusCreated, wantEntry{authz.ActionLoadBalancerCreate, "eu", pid})
-	var lb loadBalancerView
-	decode(t, rec, &lb)
-	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(lb.ID)
-
-	r.step(t, http.MethodPatch, lbPath, `{"name":"EU Renamed"}`,
-		http.StatusOK, wantEntry{authz.ActionLoadBalancerUpdate, "eu", pid})
-
 	// --- nodes ---
-	rec = r.step(t, http.MethodPost, lbPath+"/nodes", `{"label":"n1","ipv4":"203.0.113.20"}`,
+	rec = r.step(t, http.MethodPost, projPath+"/nodes", `{"label":"n1","ipv4":"203.0.113.20"}`,
 		http.StatusCreated, wantEntry{authz.ActionNodeCreate, "n1", pid})
 	var n nodeView
 	decode(t, rec, &n)
@@ -1256,7 +1226,7 @@ func TestMutationsAreAudited(t *testing.T) {
 	// --- domains, and the alias that appears and disappears with them ---
 	// The alias entry's label is whatever the service generated — the request
 	// cannot ask for one (design A5), so the test cannot know it either.
-	rec = r.step(t, http.MethodPost, lbPath+"/domains", `{"name":"shop.example.com"}`,
+	rec = r.step(t, http.MethodPost, projPath+"/domains", `{"name":"shop.example.com"}`,
 		http.StatusCreated,
 		wantEntry{authz.ActionDomainCreate, "shop.example.com", pid},
 		wantEntry{authz.ActionAliasCreate, anything, pid})
@@ -1265,7 +1235,7 @@ func TestMutationsAreAudited(t *testing.T) {
 
 	// A second domain on the same challenge name reuses the alias, so no
 	// alias entry this time — the wildcard-and-apex case.
-	rec = r.step(t, http.MethodPost, lbPath+"/domains", `{"name":"*.shop.example.com"}`,
+	rec = r.step(t, http.MethodPost, projPath+"/domains", `{"name":"*.shop.example.com"}`,
 		http.StatusCreated, wantEntry{authz.ActionDomainCreate, "*.shop.example.com", pid})
 	var wildcard domainCreated
 	decode(t, rec, &wildcard)
@@ -1286,7 +1256,7 @@ func TestMutationsAreAudited(t *testing.T) {
 	// whatever its grants name, which may be several projects or none, so there
 	// is no single project the entry belongs to — and inventing one would make
 	// the trail's project filter lie.
-	rec = r.step(t, http.MethodPost, lbPath+"/keys", `{"note":"traefik","networks":["203.0.113.0/24"]}`,
+	rec = r.step(t, http.MethodPost, projPath+"/keys", `{"note":"traefik","networks":["203.0.113.0/24"]}`,
 		http.StatusCreated, wantEntry{authz.ActionKeyCreate, anything, nil})
 	var created keyCreated
 	decode(t, rec, &created)
@@ -1343,12 +1313,12 @@ func assertProjectID(t *testing.T, cl *client, auditAt, action string, projectID
 func TestActionClassFilterNarrowsTheTrail(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", roleAdmin)
-	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+	projPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
 	if rec := cl.do(http.MethodPost, "/api/v1/accounts/"+v.sc.AccountID().String()+"/projects", `{"slug":"gamma","name":"Gamma"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("create project: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := cl.do(http.MethodPost, lbPath+"/keys", `{"note":"k"}`); rec.Code != http.StatusCreated {
+	if rec := cl.do(http.MethodPost, projPath+"/keys", `{"note":"k"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("create key: %d %s", rec.Code, rec.Body.String())
 	}
 
@@ -1453,16 +1423,16 @@ func TestFailedAuditWriteRollsBackTheChange(t *testing.T) {
 func TestPlanIsServedStructuredAndAsAZoneSnippet(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("reader", roleRead)
-	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+	proj := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
 	admin := v.session("admin", roleAdmin)
 	for _, name := range []string{"example.com", "*.example.com"} {
-		if rec := admin.do(http.MethodPost, lb+"/domains", `{"name":"`+name+`"}`); rec.Code != http.StatusCreated {
+		if rec := admin.do(http.MethodPost, proj+"/domains", `{"name":"`+name+`"}`); rec.Code != http.StatusCreated {
 			t.Fatalf("seed %s: %d %s", name, rec.Code, rec.Body.String())
 		}
 	}
 
-	rec := cl.do(http.MethodGet, lb+"/plan", "")
+	rec := cl.do(http.MethodGet, proj+"/plan", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("plan: %d %s", rec.Code, rec.Body.String())
 	}
@@ -1479,7 +1449,7 @@ func TestPlanIsServedStructuredAndAsAZoneSnippet(t *testing.T) {
 		t.Errorf("%d CNAME rows, want 1: %+v", cnames, plan.Records)
 	}
 
-	rec = cl.do(http.MethodGet, lb+"/plan/zone", "")
+	rec = cl.do(http.MethodGet, proj+"/plan/zone", "")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "IN  CNAME") {
 		t.Fatalf("zone snippet: %d %s", rec.Code, rec.Body.String())
 	}
@@ -1767,23 +1737,23 @@ func TestProjectOutsideTheFirstPageIsStillReadableByID(t *testing.T) {
 
 // --- the interaction history endpoint --------------------------------------
 
-// seedInteraction inserts one history row for the fixture's load balancer.
+// seedInteraction inserts one history row for the fixture's project.
 // Written straight to the table rather than through the challenge API, because
 // what is under test here is the READING: three of the five outcomes cannot be
 // produced through /present and /cleanup at all without waiting for a sweep.
 func (v *adminEnv) seedInteraction(label string, withdrawn bool, abandoned bool, queries int64) {
 	v.t.Helper()
 	in := &model.ChallengeInteraction{
-		LoadBalancerID: &v.lb.ID,
-		AliasID:        &v.lb.ID, // no alias is needed: the history keeps no foreign keys
-		AliasLabel:     label,
-		ChallengeFQDN:  "_acme-challenge." + label + ".example.com",
-		DomainNames:    model.StringArray{label + ".example.com"},
-		FQDNForm:       "alias",
-		ValueDigest:    store.ValueDigest(label),
-		PublishedAt:    time.Now(),
-		Abandoned:      abandoned,
-		QueryCount:     queries,
+		ProjectID:     &v.projID,
+		AliasID:       &v.projID, // no alias is needed: the history keeps no foreign keys
+		AliasLabel:    label,
+		ChallengeFQDN: "_acme-challenge." + label + ".example.com",
+		DomainNames:   model.StringArray{label + ".example.com"},
+		FQDNForm:      "alias",
+		ValueDigest:   store.ValueDigest(label),
+		PublishedAt:   time.Now(),
+		Abandoned:     abandoned,
+		QueryCount:    queries,
 	}
 	if withdrawn {
 		now := time.Now()
@@ -1808,7 +1778,7 @@ func (v *adminEnv) seedInteraction(label string, withdrawn bool, abandoned bool,
 func TestInteractionOutcomesFilterAndTotal(t *testing.T) {
 	v := newAdminEnv(t)
 	reader := v.session("reader", roleRead)
-	path := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID) + "/interactions"
+	path := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID) + "/interactions"
 
 	v.seedInteraction("validated-one", true, false, 4)
 	v.seedInteraction("unqueried-one", true, false, 0)
@@ -1888,15 +1858,15 @@ func TestInteractionOutcomesFilterAndTotal(t *testing.T) {
 func TestDomainCreateRefusesASuppliedAliasLabel(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", roleAdmin)
-	lb := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+	proj := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
-	rec := cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com","aliasLabel":"shop-alias"}`)
+	rec := cl.do(http.MethodPost, proj+"/domains", `{"name":"shop.example.com","aliasLabel":"shop-alias"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d %s, want 400 for an unknown aliasLabel field", rec.Code, rec.Body.String())
 	}
 
 	// And the service reports the label it chose itself.
-	rec = cl.do(http.MethodPost, lb+"/domains", `{"name":"shop.example.com"}`)
+	rec = cl.do(http.MethodPost, proj+"/domains", `{"name":"shop.example.com"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d %s, want 201", rec.Code, rec.Body.String())
 	}
@@ -1915,10 +1885,10 @@ func TestDomainCreateRefusesASuppliedAliasLabel(t *testing.T) {
 // domainNamesOn lists what the load balancer holds, which is how "neither
 // domain was created" is checked: a refusal that left a row behind is the
 // failure this whole feature is designed around.
-func domainNamesOn(t *testing.T, cl *client, lbPath string) []string {
+func domainNamesOn(t *testing.T, cl *client, projPath string) []string {
 	t.Helper()
 	var listed []domainView
-	decode(t, cl.do(http.MethodGet, lbPath+"/domains", ""), &listed)
+	decode(t, cl.do(http.MethodGet, projPath+"/domains", ""), &listed)
 	out := make([]string, 0, len(listed))
 	for _, d := range listed {
 		out = append(out, d.Name)
@@ -1948,9 +1918,9 @@ func TestDomainCreateIncludeWildcard(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			v := newAdminEnv(t)
 			cl := v.session("admin", roleAdmin)
-			lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+			projPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
-			rec := cl.do(http.MethodPost, lbPath+"/domains", tc.body)
+			rec := cl.do(http.MethodPost, projPath+"/domains", tc.body)
 			if rec.Code != http.StatusCreated {
 				t.Fatalf("status %d %s, want 201", rec.Code, rec.Body.String())
 			}
@@ -1971,7 +1941,7 @@ func TestDomainCreateIncludeWildcard(t *testing.T) {
 			if got.Domains[0].Name != got.Name {
 				t.Errorf("first reported domain is %q, want the submitted %q", got.Domains[0].Name, got.Name)
 			}
-			if listed := domainNamesOn(t, cl, lbPath); !reflect.DeepEqual(listed, tc.want) {
+			if listed := domainNamesOn(t, cl, projPath); !reflect.DeepEqual(listed, tc.want) {
 				t.Errorf("inventory holds %v, want %v", listed, tc.want)
 			}
 		})
@@ -1985,17 +1955,17 @@ func TestDomainCreateIncludeWildcard(t *testing.T) {
 func TestDomainCreateIncludeWildcardRefusesTheWholeRequest(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", roleAdmin)
-	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
+	projPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
 
 	// The premise: without the flag, `co.uk` is accepted.
-	rec := cl.do(http.MethodPost, lbPath+"/domains", `{"name":"co.uk","includeWildcard":true}`)
+	rec := cl.do(http.MethodPost, projPath+"/domains", `{"name":"co.uk","includeWildcard":true}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d %s, want 400", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "*.co.uk") {
 		t.Errorf("error %s does not name the refused counterpart *.co.uk", rec.Body.String())
 	}
-	if listed := domainNamesOn(t, cl, lbPath); len(listed) != 0 {
+	if listed := domainNamesOn(t, cl, projPath); len(listed) != 0 {
 		t.Fatalf("inventory holds %v after the refusal, want nothing — not even the valid half", listed)
 	}
 }
@@ -2006,10 +1976,10 @@ func TestDomainPairIsAuditedTwice(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("admin", roleAdmin)
 	r := &auditRecorder{cl: cl, auditAt: "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit"}
-	lbPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/loadbalancers/" + itoa(v.lb.ID)
-	pid := &v.lb.ProjectID
+	projPath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
+	pid := &v.projID
 
-	r.step(t, http.MethodPost, lbPath+"/domains", `{"name":"shop.example.com","includeWildcard":true}`,
+	r.step(t, http.MethodPost, projPath+"/domains", `{"name":"shop.example.com","includeWildcard":true}`,
 		http.StatusCreated,
 		wantEntry{authz.ActionDomainCreate, "shop.example.com", pid},
 		wantEntry{authz.ActionDomainCreate, "*.shop.example.com", pid},
@@ -2017,6 +1987,6 @@ func TestDomainPairIsAuditedTwice(t *testing.T) {
 		wantEntry{authz.ActionAliasCreate, anything, pid})
 
 	// A refused pair writes nothing at all — the transaction rolled back.
-	r.step(t, http.MethodPost, lbPath+"/domains", `{"name":"co.uk","includeWildcard":true}`,
+	r.step(t, http.MethodPost, projPath+"/domains", `{"name":"co.uk","includeWildcard":true}`,
 		http.StatusBadRequest)
 }

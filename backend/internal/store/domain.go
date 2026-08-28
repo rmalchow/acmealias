@@ -90,17 +90,17 @@ func FindDomainByName(ctx context.Context, db *gorm.DB, sc Scope, name string) (
 	return &d, nil
 }
 
-// ListDomainsForLoadBalancer returns every domain on a load balancer, ordered by name.
-func ListDomainsForLoadBalancer(ctx context.Context, db *gorm.DB, sc Scope, loadBalancerID model.ID) ([]model.Domain, error) {
+// ListDomainsForProject returns every domain in a project, ordered by name.
+func ListDomainsForProject(ctx context.Context, db *gorm.DB, sc Scope, projectID model.ID) ([]model.Domain, error) {
 	var ds []model.Domain
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
 		return sc.Where(tx).
-			Where("load_balancer_id = ?", loadBalancerID).
+			Where("project_id = ?", projectID).
 			Order("name").
 			Find(&ds).Error
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store: list domains for load balancer %s: %w", loadBalancerID, err)
+		return nil, fmt.Errorf("store: list domains for project %s: %w", projectID, err)
 	}
 	return ds, nil
 }

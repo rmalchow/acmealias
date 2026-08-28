@@ -56,15 +56,13 @@ type DomainPlan struct {
 	Registrable   string   // the CAA set governing this domain, "" when the name has none
 }
 
-// DNSPlan is the complete set of records for one load balancer, plus enough context
+// DNSPlan is the complete set of records for one project, plus enough context
 // to render a legible header.
 type DNSPlan struct {
-	ProjectSlug      string
-	ProjectName      string
-	LoadBalancerSlug string
-	LoadBalancerName string
-	Nodes            []model.LBNode
-	Records          []Record
+	ProjectSlug string
+	ProjectName string
+	Nodes       []model.LBNode
+	Records     []Record
 
 	// Domains maps each domain onto the records above. It is not rendered into
 	// the zone snippet — a zone file has no room for who asked for a record —
@@ -73,34 +71,29 @@ type DNSPlan struct {
 	Domains []DomainPlan
 }
 
-// Plan generates the DNS plan for a load balancer (acme-alias-service D5).
-func Plan(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, loadBalancerID model.ID, opts PlanOptions) (*DNSPlan, error) {
-	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
+// Plan generates the DNS plan for a project (acme-alias-service D5).
+func Plan(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, projectID model.ID, opts PlanOptions) (*DNSPlan, error) {
+	project, err := store.GetProject(ctx, db, sc, projectID)
 	if err != nil {
 		return nil, err
 	}
-	if err := authorize(subj, authz.ActionDNSPlan, authz.ObjectOf(lb)); err != nil {
+	if err := authorize(subj, authz.ActionDNSPlan, authz.ObjectOf(project)); err != nil {
 		return nil, err
 	}
-	project, err := store.GetProject(ctx, db, sc, lb.ProjectID)
+	domains, err := store.ListDomainsForProject(ctx, db, sc, projectID)
 	if err != nil {
 		return nil, err
 	}
-	domains, err := store.ListDomainsForLoadBalancer(ctx, db, sc, loadBalancerID)
+	aliases, err := store.ListAliasesForProject(ctx, db, sc, projectID)
 	if err != nil {
 		return nil, err
 	}
-	aliases, err := store.ListAliasesForLoadBalancer(ctx, db, sc, loadBalancerID)
-	if err != nil {
-		return nil, err
-	}
-	plan := buildPlan(project, lb, lb.Nodes, domains, aliases, opts)
-	return plan, nil
+	return buildPlan(project, project.Nodes, domains, aliases, opts), nil
 }
 
 // buildPlan is Plan without the database, which is also what makes the record
 // rules testable without one.
-func buildPlan(project *model.Project, lb *model.LoadBalancer, nodes []model.LBNode, domains []model.Domain, aliases []model.Alias, opts PlanOptions) *DNSPlan {
+func buildPlan(project *model.Project, nodes []model.LBNode, domains []model.Domain, aliases []model.Alias, opts PlanOptions) *DNSPlan {
 	ttl := opts.TTL
 	if ttl <= 0 {
 		ttl = DefaultTTL
@@ -109,12 +102,11 @@ func buildPlan(project *model.Project, lb *model.LoadBalancer, nodes []model.LBN
 
 	plan := &DNSPlan{
 		ProjectSlug: project.Slug, ProjectName: project.Name,
-		LoadBalancerSlug: lb.Slug, LoadBalancerName: lb.Name,
 		Nodes: nodes,
 	}
 
 	// Address records: every domain at every node address, per family. A node
-	// missing a family contributes nothing for it — and a dual-stack load balancer that
+	// missing a family contributes nothing for it — and a dual-stack project that
 	// emitted only A records would leave v6 traffic on the customer's old
 	// address, which looks like "the site works for most people".
 	for _, d := range domains {
@@ -223,11 +215,11 @@ func caaRecords(domains []model.Domain, issuers []string, ttl int) []Record {
 }
 
 // RenderZoneSnippet renders the plan as a zone-file fragment with
-// fully-qualified names, prefixed by a comment header naming the project, the
-// load balancer and its nodes.
+// fully-qualified names, prefixed by a comment header naming the project and
+// its nodes.
 func RenderZoneSnippet(p *DNSPlan) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "; DNS records for project %s / load balancer %s\n", p.ProjectSlug, p.LoadBalancerSlug)
+	fmt.Fprintf(&b, "; DNS records for project %s\n", p.ProjectSlug)
 	if len(p.Nodes) == 0 {
 		b.WriteString("; nodes: none configured — this plan has no address records\n")
 	} else {

@@ -106,21 +106,63 @@ components:
         currency: { type: string }
     Project:
       type: object
+      description: |
+        A project holds the nodes, domains, aliases and keys that belong together. There is no
+        level below it and no level between it and the account: what used to be a load balancer
+        inside a project IS the project.
       properties:
         id: { type: string, format: uuid }
         slug: { type: string }
         name: { type: string }
         createdAt: { type: string, format: date-time }
         permittedActions: { $ref: "#/components/schemas/PermittedActions" }
-    LoadBalancer:
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/Node" }
+          description: Present on the single-project read; empty in a listing.
+        domains:
+          type: array
+          items: { $ref: "#/components/schemas/Domain" }
+          description: Present on the single-project read; absent from a listing.
+        nodeCount:
+          type: integer
+          description: |
+            How many nodes the project holds. Present in a LISTING and absent from the
+            single-project read, which carries the nodes themselves. Absent is not zero.
+        domainCount:
+          type: integer
+          description: How many domains the project holds. Same rule as nodeCount.
+    Node:
       type: object
       properties:
         id: { type: string, format: uuid }
         projectId: { type: string, format: uuid }
-        slug: { type: string }
+        label: { type: string }
+        ipv4: { type: string, nullable: true }
+        ipv6: { type: string, nullable: true }
+    Domain:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
         name: { type: string }
+        challengeName: { type: string }
+        aliasId: { type: string, format: uuid }
+        aliasLabel: { type: string }
         createdAt: { type: string, format: date-time }
-        permittedActions: { $ref: "#/components/schemas/PermittedActions" }
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When a check last looked. Null means we have not looked yet.
+        lastSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When a check last SAW the delegation. Null means never, and a domain that has never
+            been seen cannot have challenge values published for it. There is deliberately no
+            `active` flag beside these: it would be a third representation of one fact.
     Grant:
       type: object
       description: |
@@ -323,20 +365,7 @@ paths:
       summary: Delete an empty project
       responses:
         "200": { description: Deleted }
-        "409": { description: The project still has load balancers }
-
-  /accounts/{accountId}/projects/{id}/loadbalancers:
-    parameters:
-      - { $ref: "#/components/parameters/accountId" }
-      - { $ref: "#/components/parameters/id" }
-    get:
-      summary: A project's load balancers
-      responses:
-        "200": { description: OK }
-    post:
-      summary: Create a load balancer
-      responses:
-        "201": { description: Created }
+        "409": { description: The project still has domains or aliases }
 
   /accounts/{accountId}/projects/{id}/usage:
     parameters:
@@ -356,25 +385,7 @@ paths:
       responses:
         "200": { description: OK }
 
-  /accounts/{accountId}/loadbalancers/{id}:
-    parameters:
-      - { $ref: "#/components/parameters/accountId" }
-      - { $ref: "#/components/parameters/id" }
-    get:
-      summary: One load balancer
-      responses:
-        "200": { description: OK }
-        "404": { $ref: "#/components/responses/NotFound" }
-    patch:
-      summary: Rename a load balancer
-      responses:
-        "200": { description: OK }
-    delete:
-      summary: Delete an empty load balancer
-      responses:
-        "200": { description: Deleted }
-
-  /accounts/{accountId}/loadbalancers/{id}/nodes:
+  /accounts/{accountId}/projects/{id}/nodes:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
@@ -396,19 +407,19 @@ paths:
       responses:
         "200": { description: Deleted }
 
-  /accounts/{accountId}/loadbalancers/{id}/domains:
+  /accounts/{accountId}/projects/{id}/domains:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
     get:
-      summary: A load balancer's domains
+      summary: A project's domains
       responses:
         "200": { description: OK }
     post:
       summary: Add a domain, creating or reusing its challenge alias
       responses:
         "201": { description: Created }
-        "409": { description: The challenge name belongs to another load balancer }
+        "409": { description: The challenge name belongs to another project }
 
   /accounts/{accountId}/domains/{id}:
     parameters:
@@ -419,12 +430,12 @@ paths:
       responses:
         "200": { description: Deleted }
 
-  /accounts/{accountId}/loadbalancers/{id}/keys:
+  /accounts/{accountId}/projects/{id}/keys:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
     get:
-      summary: The keys whose authority reaches this load balancer
+      summary: The keys whose authority reaches this project
       responses:
         "200":
           description: OK
@@ -432,7 +443,7 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/ApiKey" } }
     post:
-      summary: Create a key with grants over this load balancer
+      summary: Create a key with grants over this project
       description: |
         Refused unless every grant is covered by a single grant the creator holds. Coverage is not
         assembled from several held grants: the union is true only of today's inventory.
@@ -475,7 +486,7 @@ paths:
       responses:
         "200": { description: Revoked }
 
-  /accounts/{accountId}/loadbalancers/{id}/plan:
+  /accounts/{accountId}/projects/{id}/plan:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
@@ -484,7 +495,7 @@ paths:
       responses:
         "200": { description: OK }
 
-  /accounts/{accountId}/loadbalancers/{id}/plan/zone:
+  /accounts/{accountId}/projects/{id}/plan/zone:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
@@ -493,7 +504,7 @@ paths:
       responses:
         "200": { description: OK }
 
-  /accounts/{accountId}/loadbalancers/{id}/verification:
+  /accounts/{accountId}/projects/{id}/verification:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
@@ -516,7 +527,7 @@ paths:
       responses:
         "200": { description: OK }
 
-  /accounts/{accountId}/loadbalancers/{id}/interactions:
+  /accounts/{accountId}/projects/{id}/interactions:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }

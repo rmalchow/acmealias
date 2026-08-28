@@ -52,6 +52,7 @@ curl -si -u "k_7f3a91c4:$ACME_KEY" -X POST https://acme-api.cloudpowered.service
 | A value appears in Live challenges and never disappears | [Validation failed after publish](#value-stuck-in-live-challenges) — the interesting logs are Traefik-side, not ours. |
 | CA reports no TXT record, but our logs show a successful publish | [`LEGO_DISABLE_CNAME_SUPPORT` is set](#ca-sees-no-txt-record-despite-a-logged-successful-publish), or the customer's CNAME points at the wrong alias. |
 | Console: signed in, but [no account to select](#console-signed-in-but-there-is-nothing-to-work-in) | The person is not a member of any account. Groups no longer grant anything; somebody has to add them. |
+| Somebody never received a message we can see we sent | [The message was filed as spam, not bounced](#mail-that-is-sent-but-never-arrives) — usually SPF/DKIM alignment, occasionally no relay configured at all. |
 | Service refuses to start | Configuration [validation names the offending setting](#service-refuses-to-start); the special case is an API key with a CIDR restriction while `ACME_TRUSTED_PROXY_CIDRS` is empty — it fails closed on purpose. |
 
 ## Detail, per cause
@@ -219,6 +220,45 @@ no longer seeds one. Create the first from the command line; see
 
 A person must have signed in at least once before they can be added, because that is when the
 service first learns their subject exists.
+
+### Mail that is sent but never arrives
+
+A person says they never got an invitation, a credit warning, or a password reset — and the logs
+show the message went out without an error.
+
+**Take that report seriously; there is no error to find.** A message whose sending host is
+authorised but whose authenticated domain does not *align* with the domain in its own `From` is
+accepted by the receiver and filed as spam. It is not bounced, nothing is retried, and no signal of
+any kind comes back to us. The first and only report is the person saying it never arrived.
+
+Two senders send on this domain: the identity provider (signing in — verification, recovery) and
+this service (the product — invitations, credit warnings, delegation notices). They run on
+different hosts, so **both** must be covered, and covering one is the usual mistake.
+
+Check, in this order:
+
+1. **Is a relay configured at all?** `ACME_MAIL_SMTP_ADDR` empty means every message from this
+   service is discarded — deliberately, so an unconfigured deployment still serves DNS. The boot
+   log says `no mail relay configured`. In a container stack the value is the mail service's own
+   name and SMTP port, not the hostname its web interface is served on.
+2. **Does the identity match?** `mail identity is incomplete` in the boot log names what is
+   missing. Then compare `ACME_MAIL_FROM` and `ACME_MAIL_SENDER` against the identity provider's
+   own sender configuration, character for character: `no-reply@` and `noreply@`, `acmealias` and
+   `AcmeAlias`, are two correspondents to a mail client, and a customer searching for "that
+   invitation" finds the wrong thread.
+3. **Get a real message and read its headers.** Send to a mailbox at a large receiver, open the
+   original, and look at `Authentication-Results`. `spf=pass` and `dkim=pass` are *not* enough —
+   read the domain each one passed *for*. If it is the sending host's domain rather than the domain
+   in `From`, the message passed both checks and is still going to the spam folder. This costs ten
+   minutes and is the only way to find out what actually happens.
+4. **Check the DMARC reports.** They are the only feedback channel that exists for this, which is
+   the reason to publish the record in a reporting mode before tightening it.
+
+Fixing this is DNS work — the domain's SPF record must list every sending host, each sender must
+sign with a published DKIM key, and the DKIM key must propagate before it can be relied on. Budget
+for that lead time, and fix it before the first stranger receives mail rather than after: receivers
+weight sender reputation historically, so a domain that starts out in spam folders stays there for
+months after the records are corrected.
 
 ### Service refuses to start
 

@@ -63,7 +63,7 @@ func CheckTenantIsolation(ctx context.Context, db *gorm.DB) error {
 // and the acceptance suite: a schema migrated by an older binary would otherwise
 // serve happily with no isolation at all.
 func PoliciesInstalled(ctx context.Context, db *gorm.DB) error {
-	tables := []string{"projects", "load_balancers", "lb_nodes", "aliases", "domains", "api_keys"}
+	tables := []string{"projects", "lb_nodes", "aliases", "domains", "api_keys"}
 	for _, t := range tables {
 		var row struct {
 			Relrowsecurity      bool

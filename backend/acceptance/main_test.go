@@ -478,36 +478,25 @@ type projectRef struct {
 	Slug string `json:"slug"`
 }
 
-type lbRef struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"projectId"`
-	Slug      string `json:"slug"`
-}
-
-// demoProd resolves the seeded project `demo` and its load balancer `prod` to
-// the ids the management API addresses them by.
-func demoProd(t *testing.T, s *session) (project, lb string) {
+// demoProject resolves the seeded project `demo` to the id the management API
+// addresses it by.
+//
+// It used to be demoProd and return two identifiers, because the seed created a
+// project and then a load balancer inside it and everything hung off the second.
+// There is one object now, and one identifier.
+func demoProject(t *testing.T, s *session) string {
 	t.Helper()
 	var projects []projectRef
 	if err := s.getJSON(s.acct("/projects"), &projects); err != nil {
 		t.Fatalf("listing projects: %v", err)
 	}
 	for _, p := range projects {
-		if p.Slug != "demo" {
-			continue
-		}
-		var lbs []lbRef
-		if err := s.getJSON(s.acct("/projects/"+p.ID+"/loadbalancers"), &lbs); err != nil {
-			t.Fatalf("listing load balancers: %v", err)
-		}
-		for _, l := range lbs {
-			if l.Slug == "prod" {
-				return p.ID, l.ID
-			}
+		if p.Slug == "demo" {
+			return p.ID
 		}
 	}
-	t.Fatalf("the seeded project demo / load balancer prod is missing — did ./scripts/dev.sh seed run?")
-	return "", ""
+	t.Fatalf("the seeded project demo is missing — did ./scripts/dev.sh seed run?")
+	return ""
 }
 
 // mustSignIn is signIn with the failure reported against the test.

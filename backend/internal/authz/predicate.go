@@ -30,10 +30,9 @@ type Predicate struct {
 	// subject holds a wildcard identifier, or is unrestricted.
 	All bool
 	// Columns maps a column on the target table to the identifiers permitted
-	// through it. "id" is the object itself; "project_id" and
-	// "load_balancer_id" are the materialized ancestors of design P3, which
-	// exist precisely so that an inherited grant reduces to a single-column
-	// predicate instead of a subquery.
+	// through it. "id" is the object itself; "project_id" is the materialized
+	// ancestor of design P3, which exists precisely so that an inherited grant
+	// reduces to a single-column predicate instead of a subquery.
 	Columns map[string][]model.ID
 }
 
@@ -46,12 +45,15 @@ func (p Predicate) Empty() bool { return !p.All && len(p.Columns) == 0 }
 
 // ancestorColumn names the column on a target table that holds the identifier of
 // an ancestor of the given type.
+//
+// There is exactly one ancestor a grant can name from below, now that a project
+// IS the load balancer, so there is exactly one column. It stays a function
+// returning (column, ok) rather than a constant because the "ok" is what stops
+// an inherited grant of an unmapped type from silently becoming no filter at
+// all.
 func ancestorColumn(t ObjectType) (string, bool) {
-	switch t {
-	case TypeProject:
+	if t == TypeProject {
 		return "project_id", true
-	case TypeLoadBalancer:
-		return "load_balancer_id", true
 	}
 	return "", false
 }

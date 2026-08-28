@@ -85,6 +85,16 @@ type Config struct {
 	// ProjectsPerPersonalAccount is how many projects a personal account may
 	// hold (ACME_PROJECT_QUOTA, default 5; design C13).
 	//
+	// WHAT IT COUNTS CHANGED WHILE ITS NAME AND VALUE DID NOT. Before
+	// collapse-project-and-loadbalancer a project was a folder holding
+	// unlimited load balancers, and everything a customer configured hung off
+	// the load balancer — so five projects bounded almost nothing and the real
+	// limits were per-domain billing and the activation gate. A project IS the
+	// load balancer now, so this bounds the thing that actually costs
+	// something: somebody who wants staging and production has two of their
+	// five. The number is unchanged here because what it should be is a pricing
+	// question, not an engineering one (design L3).
+	//
 	// A number rather than a constant because it is a pricing decision wearing
 	// an engineering hat: pricing changes on a different clock from deployments,
 	// and the first time one customer needs six is the day a constant becomes a
@@ -226,6 +236,30 @@ type Config struct {
 	// "letsencrypt.org" (ACME_CAA_ISSUER, comma-separated). Empty emits no
 	// CAA rows at all (design D6).
 	CAAIssuers []string
+
+	// Mail* is who this deployment is when it sends, and where it sends
+	// through. Both this service and the identity provider are configured with
+	// the SAME sender identity, and that is not presentation
+	// (transactional-email T1).
+	//
+	// Mail clients thread by sender, so two spellings of us arrive as two
+	// correspondents. And every host that sends for the domain must be
+	// authorised by its published sender policy, must sign with a published
+	// key, and the result must ALIGN with the address a reader sees — a message
+	// that authenticates as the host that sent it but not as the domain in its
+	// own From is filed as spam rather than bounced. None of that produces an
+	// error to notice; the first report is a customer saying they never
+	// received something we can see we sent.
+	//
+	// MailReplyTo is deliberately not a no-reply address (T3): everything sent
+	// here is something a recipient may reasonably want to answer.
+	MailFrom     string // ACME_MAIL_FROM
+	MailSender   string // ACME_MAIL_SENDER — the display name
+	MailReplyTo  string // ACME_MAIL_REPLY_TO
+	MailFooter   string // ACME_MAIL_FOOTER
+	MailSMTPAddr string // ACME_MAIL_SMTP_ADDR — host:port
+	MailSMTPUser string // ACME_MAIL_SMTP_USER
+	MailSMTPPass string // ACME_MAIL_SMTP_PASSWORD
 
 	// LogLevel is one of debug, info, warn, error (ACME_LOG_LEVEL).
 	LogLevel string

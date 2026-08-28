@@ -116,15 +116,15 @@ func TestCompilePredicate(t *testing.T) {
 			column:  "id",
 		},
 		{
-			name:    "an inheritable project grant compiles to project_id on a load balancer",
+			name:    "an inheritable project grant compiles to project_id on a domain",
 			subject: authz.Subject{AccountID: account, Grants: []authz.Grant{grant(authz.TypeProject, &project, "inventory.view", true)}},
-			target:  authz.TypeLoadBalancer,
+			target:  authz.TypeDomain,
 			column:  "project_id",
 		},
 		{
-			name:    "a NON-inheritable project grant reaches no load balancer",
+			name:    "a NON-inheritable project grant reaches no domain",
 			subject: authz.Subject{AccountID: account, Grants: []authz.Grant{grant(authz.TypeProject, &project, "inventory.view", false)}},
-			target:  authz.TypeLoadBalancer,
+			target:  authz.TypeDomain,
 			wantNil: true,
 		},
 		{
@@ -134,8 +134,8 @@ func TestCompilePredicate(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:    "a load balancer grant does not reach upward to its project",
-			subject: authz.Subject{AccountID: account, Grants: []authz.Grant{grant(authz.TypeLoadBalancer, &lb, "inventory.view", true)}},
+			name:    "a domain grant does not reach upward to its project",
+			subject: authz.Subject{AccountID: account, Grants: []authz.Grant{grant(authz.TypeDomain, &lb, "inventory.view", true)}},
 			target:  authz.TypeProject,
 			wantNil: true,
 		},

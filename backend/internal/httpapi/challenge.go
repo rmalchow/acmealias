@@ -579,16 +579,15 @@ func (h *challenge) openInteraction(c echo.Context, r *resolved) {
 
 	ip := c.RealIP()
 	in := &model.ChallengeInteraction{
-		ProjectID:      projectID,
-		LoadBalancerID: &r.alias.LoadBalancerID,
-		AliasID:        &r.alias.ID,
-		AliasLabel:     r.alias.Label,
-		ChallengeFQDN:  r.alias.ChallengeFQDN,
-		DomainNames:    names,
-		KeyID:          &r.key.Identifier,
-		FQDNForm:       r.form,
-		ValueDigest:    store.ValueDigest(r.value),
-		PublishedAt:    time.Now(),
+		ProjectID:     projectID,
+		AliasID:       &r.alias.ID,
+		AliasLabel:    r.alias.Label,
+		ChallengeFQDN: r.alias.ChallengeFQDN,
+		DomainNames:   names,
+		KeyID:         &r.key.Identifier,
+		FQDNForm:      r.form,
+		ValueDigest:   store.ValueDigest(r.value),
+		PublishedAt:   time.Now(),
 	}
 	if ip != "" {
 		in.ClientIP = &ip

@@ -12,21 +12,17 @@ import (
 // no query and no join: the chain is at most three long and it is already in
 // memory. That is what keeps the challenge path's promise of adding no query.
 type Object struct {
-	Type           ObjectType
-	ID             model.ID
-	AccountID      model.ID
-	ProjectID      model.ID
-	LoadBalancerID model.ID
+	Type      ObjectType
+	ID        model.ID
+	AccountID model.ID
+	ProjectID model.ID
 }
 
 // ancestor returns this object's identifier of the given type, and whether it
 // has one.
 func (o Object) ancestor(t ObjectType) (model.ID, bool) {
-	switch t {
-	case TypeProject:
+	if t == TypeProject {
 		return o.ProjectID, o.ProjectID != model.NilID
-	case TypeLoadBalancer:
-		return o.LoadBalancerID, o.LoadBalancerID != model.NilID
 	}
 	return model.NilID, false
 }
@@ -136,12 +132,13 @@ func Permitted(s Subject, actions []string, o Object) []string {
 // asked about a different set per screen would render different buttons for the
 // same object depending on where you were looking at it from.
 var actionsByType = map[ObjectType][]Action{
-	TypeProject:      {ActionViewInventory, ActionInventoryWrite, ActionProjectAdmin},
-	TypeLoadBalancer: {ActionViewInventory, ActionInventoryWrite, ActionDNSPlan, ActionKeyWrite},
-	TypeNode:         {ActionViewInventory, ActionInventoryWrite},
-	TypeDomain:       {ActionViewInventory, ActionInventoryWrite},
-	TypeAlias:        {ActionViewInventory, ActionInventoryWrite},
-	TypeAPIKey:       {ActionViewInventory, ActionKeyWrite, ActionKeySecretView},
+	// A project answers for everything the load balancer used to answer for as
+	// well as its own administration: it is one object now, so one row here.
+	TypeProject: {ActionViewInventory, ActionInventoryWrite, ActionDNSPlan, ActionKeyWrite, ActionProjectAdmin},
+	TypeNode:    {ActionViewInventory, ActionInventoryWrite},
+	TypeDomain:  {ActionViewInventory, ActionInventoryWrite},
+	TypeAlias:   {ActionViewInventory, ActionInventoryWrite},
+	TypeAPIKey:  {ActionViewInventory, ActionKeyWrite, ActionKeySecretView},
 }
 
 // ActionsFor reports the actions that can be asked about one kind of object.

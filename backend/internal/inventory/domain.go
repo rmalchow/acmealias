@@ -32,7 +32,7 @@ type DomainCreation struct {
 	Warnings     []dnsname.Warning
 }
 
-// CreateDomain adds a domain to a load balancer (design D4), optionally
+// CreateDomain adds a domain to a project (design D4), optionally
 // together with its counterpart (design B1).
 //
 // It validates the name, derives its challenge name — the leading `*.` label
@@ -56,28 +56,28 @@ type DomainCreation struct {
 // already has, because renaming it would break a CNAME the customer already
 // published (design A3).
 //
-// The alias belongs to exactly one load balancer: if the challenge name is already
-// claimed by a different load balancer, the creation is refused and the error names
-// that load balancer.
-func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, loadBalancerID model.ID, name string, useDomainLabel bool, includeCounterpart bool) (*DomainCreation, error) {
-	parent, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
+// The alias belongs to exactly one project: if the challenge name is already
+// claimed by a different project, the creation is refused and the error names
+// that project.
+func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, projectID model.ID, name string, useDomainLabel bool, includeCounterpart bool) (*DomainCreation, error) {
+	parent, err := store.GetProject(ctx, db, sc, projectID)
 	if err != nil {
 		return nil, err
 	}
 	// Authorized on the parent, like every creation: there is no domain yet to
-	// hold a grant, and the authority to add one to this load balancer is what
-	// is being asked about.
+	// hold a grant, and the authority to add one to this project is what is
+	// being asked about.
 	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(parent)); err != nil {
 		return nil, err
 	}
 
-	// Task 7.3: a specific host that an existing wildcard on this load balancer already
-	// covers is accepted, and warned about. dnsname cannot see the load balancer's other
+	// Task 7.3: a specific host that an existing wildcard in this project already
+	// covers is accepted, and warned about. dnsname cannot see the project's other
 	// domains, so this check lives here rather than in ValidateDomain. The list is the
-	// load balancer's domains as they are *before* this request, which is also why a pair
+	// project's domains as they are *before* this request, which is also why a pair
 	// never warns about itself: a member is not in the list, and in any case a counterpart
 	// differs only by the `*.` prefix, which coverageWarnings never treats as coverage.
-	siblings, err := store.ListDomainsForLoadBalancer(ctx, db, sc, loadBalancerID)
+	siblings, err := store.ListDomainsForProject(ctx, db, sc, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 	// one target.
 	//
 	// What is NOT allowed is telling the second asker who the first was. Reading
-	// the alias cross-account and naming its load balancer in the refusal
+	// the alias cross-account and naming its project in the refusal
 	// disclosed to account B both that account A exists and that A holds
 	// example.com — an isolation break that was simply unreachable while a
 	// deployment had one account, and became reachable the moment every user got
@@ -123,12 +123,12 @@ func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 	alias, err := store.ScopedAlias(ctx, db, sc, challenge)
 	switch {
 	case err == nil:
-		if alias.LoadBalancerID != loadBalancerID {
-			// Inside the caller's own account, naming the load balancer is the
-			// whole value of the message: it is where they go to fix it.
-			owner := describeLoadBalancer(ctx, db, sc, alias.LoadBalancerID)
+		if alias.ProjectID != projectID {
+			// Inside the caller's own account, naming the project is the whole
+			// value of the message: it is where they go to fix it.
+			owner := describeProject(ctx, db, sc, alias.ProjectID)
 			return nil, fmt.Errorf("%w: the challenge name %q for %q is already owned by %s; "+
-				"an alias belongs to exactly one load balancer", ErrConflict, challenge, primary, owner)
+				"an alias belongs to exactly one project", ErrConflict, challenge, primary, owner)
 		}
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		// Nobody in this account holds it. Somebody elsewhere might, and the
@@ -154,11 +154,11 @@ func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 		if err != nil {
 			return nil, err
 		}
-		alias = &model.Alias{LoadBalancerID: loadBalancerID, ChallengeFQDN: challenge, Label: label}
+		alias = &model.Alias{ProjectID: projectID, ChallengeFQDN: challenge, Label: label}
 	}
 	domains := make([]*model.Domain, 0, len(names))
 	for _, n := range names {
-		domains = append(domains, &model.Domain{LoadBalancerID: loadBalancerID, Name: n})
+		domains = append(domains, &model.Domain{ProjectID: projectID, Name: n})
 	}
 
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -184,7 +184,7 @@ func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 
 // checkDomainName runs every pre-write check for one name — the wildcard
 // rules, the inventory-wide duplicate check, and the coverage warnings against
-// the load balancer's existing domains — and returns the normalized name. It
+// the project's existing domains — and returns the normalized name. It
 // writes nothing, so it can be run for both names of a pair before either row
 // exists (design B3).
 func checkDomainName(ctx context.Context, db *gorm.DB, sc store.Scope, name string, siblings []model.Domain) (string, []dnsname.Warning, error) {
@@ -195,7 +195,7 @@ func checkDomainName(ctx context.Context, db *gorm.DB, sc store.Scope, name stri
 	domainName := normalized.String()
 
 	if existing, err := store.FindDomainByName(ctx, db, sc, domainName); err == nil {
-		owner := describeLoadBalancer(ctx, db, sc, existing.LoadBalancerID)
+		owner := describeProject(ctx, db, sc, existing.ProjectID)
 		return "", nil, fmt.Errorf("%w: domain %q already exists on %s", ErrConflict, domainName, owner)
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil, err
@@ -204,7 +204,7 @@ func checkDomainName(ctx context.Context, db *gorm.DB, sc store.Scope, name stri
 	return domainName, append(warnings, coverageWarnings(domainName, siblings)...), nil
 }
 
-// coverageWarnings reports each existing wildcard on the load balancer that already
+// coverageWarnings reports each existing wildcard in the project that already
 // covers the new name. A wildcard matches exactly one label, so `*.example.com`
 // covers `shop.example.com` but neither `example.com` nor `a.b.example.com`.
 func coverageWarnings(name string, siblings []model.Domain) []dnsname.Warning {
@@ -219,7 +219,7 @@ func coverageWarnings(name string, siblings []model.Domain) []dnsname.Warning {
 	for _, s := range siblings {
 		if strings.TrimPrefix(s.Name, "*.") == parent && strings.HasPrefix(s.Name, "*.") {
 			out = append(out, dnsname.Warning(fmt.Sprintf(
-				"%q is already covered by the wildcard %q on this load balancer; a separate certificate for it is legal but usually a mistake",
+				"%q is already covered by the wildcard %q in this project; a separate certificate for it is legal but usually a mistake",
 				name, s.Name)))
 		}
 	}
@@ -307,17 +307,18 @@ func DeleteDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 	return aliasRemoved, nil
 }
 
-// describeLoadBalancer renders "project-slug/loadbalancer-slug" for an error message, falling
-// back to the bare id if the load balancer cannot be loaded — an error about a
-// conflict must never be replaced by an error about rendering the conflict.
-func describeLoadBalancer(ctx context.Context, db *gorm.DB, sc store.Scope, loadBalancerID model.ID) string {
-	lb, err := store.GetLoadBalancer(ctx, db, sc, loadBalancerID)
+// describeProject renders a project for an error message, falling back to the
+// bare id if it cannot be loaded — an error about a conflict must never be
+// replaced by an error about rendering the conflict.
+//
+// The fallback is reachable for a legitimate reason and not only through a
+// failure: the project holding the conflicting name may be one the caller has
+// no grant over, in which case the read returns not-found and the message
+// carries an identifier they can quote to somebody who can see it.
+func describeProject(ctx context.Context, db *gorm.DB, sc store.Scope, projectID model.ID) string {
+	p, err := store.GetProject(ctx, db, sc, projectID)
 	if err != nil {
-		return fmt.Sprintf("load balancer %d", loadBalancerID)
+		return fmt.Sprintf("project %s", projectID)
 	}
-	project, err := store.GetProject(ctx, db, sc, lb.ProjectID)
-	if err != nil {
-		return fmt.Sprintf("load balancer %q", lb.Slug)
-	}
-	return fmt.Sprintf("load balancer %q of project %q", lb.Slug, project.Slug)
+	return fmt.Sprintf("project %q", p.Slug)
 }

@@ -9,7 +9,7 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
 import { ApiKeyCreated, ApiService, LBNode, apiErrorMessage } from '@acme/shared';
 export interface ApiKeyCreateData {
-  loadBalancerId: string;
+  projectId: string;
   /** The load balancer's nodes, offered as one-click source-address restrictions. */
   nodes: LBNode[];
 }
@@ -189,7 +189,7 @@ export class ApiKeyCreateModalComponent {
     this.saving.set(true);
     this.error.set(null);
     this.api
-      .post<ApiKeyCreated>(`/loadbalancers/${this.data.loadBalancerId}/keys`, {
+      .post<ApiKeyCreated>(`/projects/${this.data.projectId}/keys`, {
         note: this.note,
         expiresIn: this.expiresIn,
         networks: this.networks(),

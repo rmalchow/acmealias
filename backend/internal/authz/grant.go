@@ -29,29 +29,42 @@ const Wildcard = "*"
 type ObjectType string
 
 const (
-	TypeProject      ObjectType = "project"
-	TypeLoadBalancer ObjectType = "load_balancer"
-	TypeNode         ObjectType = "lb_node"
-	TypeDomain       ObjectType = "domain"
-	TypeAlias        ObjectType = "alias"
-	TypeAPIKey       ObjectType = "api_key"
-	TypeAny          ObjectType = Wildcard
+	TypeProject ObjectType = "project"
+	TypeNode    ObjectType = "lb_node"
+	TypeDomain  ObjectType = "domain"
+	TypeAlias   ObjectType = "alias"
+	TypeAPIKey  ObjectType = "api_key"
+	TypeAny     ObjectType = Wildcard
 )
+
+// There was a TypeLoadBalancer between TypeProject and the rest. It went when
+// the level did (change collapse-project-and-loadbalancer, design L4), and it
+// went rather than becoming an alias for TypeProject: a grammar with two words
+// for one object type is what migration 000003 was written to remove, and the
+// check constraint added by 000004 refuses a stored grant that still uses it.
 
 // containedBy is the containment hierarchy, as a child-to-parent map. It is
 // fixed rather than configurable: inheritance is only comprehensible if there is
 // exactly one answer to "what contains this".
 //
-// An account contains projects; a project contains load balancers; a load
-// balancer contains its nodes, domains, aliases and keys. Nothing contains an
-// account, which is why an account is not an object a grant can name at all
-// (design P14) — operations on it are governed by membership.
+// An account contains projects; a project contains its nodes, domains and
+// aliases. Nothing contains an account, which is why an account is not an object
+// a grant can name at all (design P14) — operations on it are governed by
+// membership.
+//
+// The chain is one link shorter than it was, and that is the shape of the whole
+// collapse: a grant on a project used to reach a load balancer which reached a
+// domain, so "may I grant this?" had a level to reason through that no longer
+// exists.
+//
+// An API key is deliberately absent. It is a SUBJECT anchored to the account,
+// not a thing sitting in a project — see ObjectOf — so key.write can only be
+// anchored at the account, and it was already wrong to have it inherit from a
+// level below one.
 var containedBy = map[ObjectType]ObjectType{
-	TypeLoadBalancer: TypeProject,
-	TypeNode:         TypeLoadBalancer,
-	TypeDomain:       TypeLoadBalancer,
-	TypeAlias:        TypeLoadBalancer,
-	TypeAPIKey:       TypeLoadBalancer,
+	TypeNode:   TypeProject,
+	TypeDomain: TypeProject,
+	TypeAlias:  TypeProject,
 }
 
 // Contains reports whether parent contains child, directly or indirectly.
@@ -125,7 +138,38 @@ func (g Grant) Validate() error {
 		return fmt.Errorf("%w: a wildcard object type cannot name one object — "+
 			"an identifier only means something within a type", ErrInvalidGrant)
 	}
+	if !KnownType(g.Type) {
+		// The old word gets its own sentence. Somebody writing `load_balancer`
+		// is not making a typo, they are using a grammar that was real until
+		// recently, and "unknown object type" would send them looking for a
+		// spelling mistake that is not there.
+		if g.Type == "load_balancer" {
+			return fmt.Errorf("%w: there is no load_balancer object type — a project IS the "+
+				"load balancer now, so name the project", ErrInvalidGrant)
+		}
+		return fmt.Errorf("%w: %q is not an object type a grant can name", ErrInvalidGrant, g.Type)
+	}
 	return nil
+}
+
+// KnownTypes is every type a grant may name, in a stable order — the wildcard
+// included, since it is a legal type slot rather than the absence of one.
+var KnownTypes = []ObjectType{TypeAny, TypeProject, TypeNode, TypeDomain, TypeAlias, TypeAPIKey}
+
+// KnownType reports whether t is one of them.
+//
+// Validate consults it so that an object type nothing can mean is refused where
+// the grant is WRITTEN rather than ignored where it is evaluated. A grant naming
+// a type no evaluator matches is not harmless: it sits in a role reading as
+// authority somebody was given, and the first person to notice is the one who
+// could not do the thing the role says they can.
+func KnownType(t ObjectType) bool {
+	for _, k := range KnownTypes {
+		if k == t {
+			return true
+		}
+	}
+	return false
 }
 
 // String renders a grant the way the design writes them, which is also what the

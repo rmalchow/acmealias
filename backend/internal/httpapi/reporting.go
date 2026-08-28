@@ -18,7 +18,7 @@ import (
 //
 // There is no per-domain route and none is planned (scope decided 2026-08-21):
 // reporting is per project and per load balancer. "Which domains never got
-// queried" is answered by GET /loadbalancers/:id/interactions?unqueried=true,
+// queried" is answered by GET /projects/:id/interactions?unqueried=true,
 // which names the alias and the domains it served.
 //
 // Every response says, in the payload, what it is counting. That is not
@@ -122,10 +122,9 @@ func (a *admin) getProjectUsage(c echo.Context) error {
 }
 
 type inventoryPointView struct {
-	Day               string `json:"day"` // YYYY-MM-DD: a date, not an instant in some zone
-	AliasCount        int    `json:"aliasCount"`
-	DomainCount       int    `json:"domainCount"`
-	LoadBalancerCount int    `json:"loadBalancerCount"`
+	Day         string `json:"day"` // YYYY-MM-DD: a date, not an instant in some zone
+	AliasCount  int    `json:"aliasCount"`
+	DomainCount int    `json:"domainCount"`
 }
 
 type inventoryHistoryResponse struct {
@@ -176,8 +175,7 @@ func (a *admin) getProjectInventoryHistory(c echo.Context) error {
 	days := make([]inventoryPointView, 0, len(hist.Points))
 	for _, p := range hist.Points {
 		days = append(days, inventoryPointView{
-			Day: p.Day.Format("2006-01-02"), AliasCount: p.AliasCount,
-			DomainCount: p.DomainCount, LoadBalancerCount: p.LoadBalancerCount,
+			Day: p.Day.Format("2006-01-02"), AliasCount: p.AliasCount, DomainCount: p.DomainCount,
 		})
 	}
 
@@ -193,8 +191,8 @@ func (a *admin) getProjectInventoryHistory(c echo.Context) error {
 		From:      from.UTC().Format("2006-01-02"), To: to.UTC().Format("2006-01-02"),
 		Recorded: hist.Recorded, Days: days,
 		Current: inventoryPointView{
-			Day: time.Now().UTC().Format("2006-01-02"), AliasCount: cur.AliasCount,
-			DomainCount: cur.DomainCount, LoadBalancerCount: cur.LoadBalancerCount,
+			Day:        time.Now().UTC().Format("2006-01-02"),
+			AliasCount: cur.AliasCount, DomainCount: cur.DomainCount,
 		},
 		Measures: map[string]string{
 			"aliasCount":  "Challenge names this project owns — one per group of domains sharing a certificate.",

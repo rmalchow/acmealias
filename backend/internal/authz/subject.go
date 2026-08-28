@@ -85,17 +85,14 @@ func ObjectOf(v any) Object {
 	switch o := v.(type) {
 	case *model.Project:
 		return Object{Type: TypeProject, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ID}
-	case *model.LoadBalancer:
-		return Object{Type: TypeLoadBalancer, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID, LoadBalancerID: o.ID}
 	case *model.LBNode:
-		return Object{Type: TypeNode, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID, LoadBalancerID: o.LoadBalancerID}
+		return Object{Type: TypeNode, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID}
 	case *model.Domain:
-		return Object{Type: TypeDomain, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID, LoadBalancerID: o.LoadBalancerID}
+		return Object{Type: TypeDomain, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID}
 	case *model.Alias:
-		return Object{Type: TypeAlias, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID, LoadBalancerID: o.LoadBalancerID}
+		return Object{Type: TypeAlias, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID}
 	case *model.APIKey:
-		// A key has no project or load balancer ancestor: it is a
-		// subject anchored to the account, and what it may reach is its grants
+		// A key has no project ancestor: it is a subject anchored to the account, and what it may reach is its grants
 		// rather than its position in the tree. So a grant OVER a key — the
 		// key.write permission — can only be anchored at the account.
 		return Object{Type: TypeAPIKey, ID: o.ID, AccountID: o.AccountID}
@@ -114,9 +111,6 @@ func Ancestors(o Object) map[ObjectType]model.ID {
 	out := map[ObjectType]model.ID{}
 	if o.ProjectID != model.NilID {
 		out[TypeProject] = o.ProjectID
-	}
-	if o.LoadBalancerID != model.NilID {
-		out[TypeLoadBalancer] = o.LoadBalancerID
 	}
 	return out
 }

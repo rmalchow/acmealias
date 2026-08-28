@@ -27,17 +27,13 @@ func challengeFixture(t *testing.T, db *gorm.DB, sc Scope, n int) []model.ID {
 	if err := CreateProject(ctx, db, sc, &p); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	lb := model.LoadBalancer{ProjectID: p.ID, Slug: "lb", Name: "LoadBalancer"}
-	if err := CreateLoadBalancer(ctx, db, sc, &lb); err != nil {
-		t.Fatalf("create load balancer: %v", err)
-	}
 
 	ids := make([]model.ID, n)
 	for i := range ids {
 		a := model.Alias{
-			LoadBalancerID: lb.ID,
-			Label:          fmt.Sprintf("a%d", i),
-			ChallengeFQDN:  fmt.Sprintf("a%d.acme.example.net", i),
+			ProjectID:     p.ID,
+			Label:         fmt.Sprintf("a%d", i),
+			ChallengeFQDN: fmt.Sprintf("a%d.acme.example.net", i),
 		}
 		if err := CreateAlias(ctx, db, sc, &a); err != nil {
 			t.Fatalf("create alias %d: %v", i, err)

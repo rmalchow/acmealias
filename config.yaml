@@ -200,10 +200,17 @@ challenge:
   alias_use_domain: '${ACME_ALIAS_USE_DOMAIN:false}'
 
 limits:
-  # A personal account may hold this many projects. It is configuration and
-  # not a constant because it is a pricing decision, and pricing changes on a
-  # different clock from deployments. Team accounts have no project quota at
-  # all — credit is their limit — so this does not apply to them.
+  # A personal account may hold this many projects — and a project is now the
+  # whole of somebody's setup: its nodes, its domains, its keys. It used to be a
+  # FOLDER holding as many load balancers as you liked, so this number bounded
+  # almost nothing; it bounds the real thing now, and 5 has not been revisited
+  # against that meaning. Somebody comparing the two deployments would see the
+  # same number and conclude nothing had happened.
+  #
+  # It is configuration and not a constant because it is a pricing decision, and
+  # pricing changes on a different clock from deployments. Team accounts have no
+  # project quota at all — credit is their limit — so this does not apply to
+  # them.
   #
   # Enforced when a project is created, in the service layer the API and the
   # CLI share, so neither can drift from the other. Over-quota is refused as a
@@ -218,6 +225,52 @@ limits:
   # tenant, and a deployment authenticating a whole organisation does not want
   # every member of it able to do that.
   allow_account_creation: '${ACME_ALLOW_ACCOUNT_CREATION:false}'
+
+# Who this deployment IS when it sends mail, and where it sends through.
+#
+# These settings look like presentation and are not. Two programs send mail to
+# the same person about the same account — the identity provider about signing
+# in, this service about the product — and they cannot share a line of code, so
+# what they share is these values. Point authentik at the same ones.
+#
+# The half that fails SILENTLY is the sender. Mail clients thread by it, so two
+# spellings of us arrive as two correspondents. And every host that sends for
+# this domain must be authorised by its published sender policy, must sign with
+# a published key, and the result must ALIGN with the address a reader sees — a
+# message that authenticates as the host that sent it but not as the domain in
+# its own `from` is filed as spam rather than bounced. Nothing errors. The first
+# report is a customer saying they never received something you can see you
+# sent, and by then the domain's reputation has already been spent.
+mail:
+  from: '${ACME_MAIL_FROM:no-reply@acmealias.com}'
+  sender: '${ACME_MAIL_SENDER:AcmeAlias}'
+
+  # NOT a no-reply address, deliberately.
+  #
+  # Everything sent here — an invitation, a warning that an account is about to
+  # stop working, a notice that a delegation never appeared — is something a
+  # recipient may reasonably want to answer. An address that discards mail
+  # teaches them that answering you does not work, and they remember that later,
+  # when you need them to answer.
+  reply_to: '${ACME_MAIL_REPLY_TO:support@acmealias.com}'
+
+  # A transactional message says who sent it, and the jurisdiction requires
+  # particular details. Settled once, for both senders, so the fifth template
+  # cannot quietly disagree with the first four.
+  #
+  # SINGLE-quoted, like every other placeholder here. Double quotes make YAML
+  # process backslash escapes in whatever gets substituted, so an operator whose
+  # footer contains a Windows path or a literal backslash would find it eaten —
+  # and the substitution happens before the parse, so the damage is done to a
+  # value nobody wrote a backslash into on purpose. A multi-line footer is set
+  # through the environment variable, where no YAML quoting applies.
+  footer: '${ACME_MAIL_FOOTER:AcmeAlias — support@acmealias.com}'
+
+  # host:port. In a container stack this is the mail service's own name — NOT
+  # the hostname its web interface is served on, which does not speak SMTP.
+  smtp_addr: '${ACME_MAIL_SMTP_ADDR:}'
+  smtp_user: '${ACME_MAIL_SMTP_USER:}'
+  smtp_password: '${ACME_MAIL_SMTP_PASSWORD:}'
 
 log:
   level: '${ACME_LOG_LEVEL:info}'  # debug, info, warn or error

@@ -2,6 +2,7 @@ package authz
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
@@ -12,7 +13,7 @@ func TestCoversSingleGrant(t *testing.T) {
 	p1, lb1, lb2 := model.NewID(), model.NewID(), model.NewID()
 
 	g := func(mod func(*Grant)) Grant {
-		out := Grant{AccountID: a, Type: TypeLoadBalancer, Action: "inventory.write"}
+		out := Grant{AccountID: a, Type: TypeProject, Action: "inventory.write"}
 		mod(&out)
 		return out
 	}
@@ -35,7 +36,7 @@ func TestCoversSingleGrant(t *testing.T) {
 			want:     false,
 		},
 		{
-			name:     "an inheritable project grant covers a load balancer grant beneath it",
+			name:     "an inheritable project grant covers a project grant beneath it",
 			held:     Grant{AccountID: a, Type: TypeProject, Action: Wildcard, Inheritable: true},
 			proposed: g(func(x *Grant) { x.ObjectID = id(lb1) }),
 			want:     true,
@@ -94,8 +95,8 @@ func TestUnionCoverageIsRefused(t *testing.T) {
 	p, lb1, lb2 := model.NewID(), model.NewID(), model.NewID()
 
 	writer := Subject{AccountID: a, Grants: []Grant{
-		{AccountID: a, Type: TypeLoadBalancer, ObjectID: id(lb1), Action: Wildcard, Inheritable: true},
-		{AccountID: a, Type: TypeLoadBalancer, ObjectID: id(lb2), Action: Wildcard, Inheritable: true},
+		{AccountID: a, Type: TypeProject, ObjectID: id(lb1), Action: Wildcard, Inheritable: true},
+		{AccountID: a, Type: TypeProject, ObjectID: id(lb2), Action: Wildcard, Inheritable: true},
 	}}
 	proposed := Grant{AccountID: a, Type: TypeProject, ObjectID: id(p), Action: Wildcard, Inheritable: true}
 
@@ -124,7 +125,7 @@ func TestUnrestrictedWriterCoversItsOwnAccountOnly(t *testing.T) {
 func TestUnrestrictedGrantCannotBeSelfIssued(t *testing.T) {
 	a := model.NewID()
 	writer := Subject{AccountID: a, Grants: []Grant{
-		{AccountID: a, Type: TypeLoadBalancer, ObjectID: id(model.NewID()), Action: "inventory.write"},
+		{AccountID: a, Type: TypeProject, ObjectID: id(model.NewID()), Action: "inventory.write"},
 	}}
 	if err := CheckSubset(writer, Grant{AccountID: a, Type: TypeAny, Action: Wildcard}); err == nil {
 		t.Fatal("a writer issued itself an unrestricted grant")
@@ -139,12 +140,18 @@ func TestGrantValidation(t *testing.T) {
 		g    Grant
 		ok   bool
 	}{
-		{"a plain grant", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x"}, true},
-		{"no account", Grant{Type: TypeLoadBalancer, Action: "x"}, false},
-		{"no action", Grant{AccountID: a, Type: TypeLoadBalancer}, false},
+		{"a plain grant", Grant{AccountID: a, Type: TypeProject, Action: "x"}, true},
+		{"no account", Grant{Type: TypeProject, Action: "x"}, false},
+		{"no action", Grant{AccountID: a, Type: TypeProject}, false},
 		{"no type", Grant{AccountID: a, Action: "x"}, false},
-		{"one named object", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x", ObjectID: &oid}, true},
+		{"one named object", Grant{AccountID: a, Type: TypeProject, Action: "x", ObjectID: &oid}, true},
 		{"a wildcard type naming one object", Grant{AccountID: a, Type: TypeAny, Action: "x", ObjectID: &oid}, false},
+		// The object type that went with the level. It is refused rather than
+		// ignored: a grant nothing can evaluate still READS as authority
+		// somebody was given, and the first person to notice is the one who
+		// could not do what their role says they can.
+		{"the removed load balancer type", Grant{AccountID: a, Type: "load_balancer", Action: "x", ObjectID: &oid}, false},
+		{"a type that never existed", Grant{AccountID: a, Type: "widget", Action: "x"}, false},
 	} {
 		err := tc.g.Validate()
 		if tc.ok && err != nil {
@@ -153,5 +160,13 @@ func TestGrantValidation(t *testing.T) {
 		if !tc.ok && err == nil {
 			t.Errorf("%s: nil, want a refusal", tc.name)
 		}
+	}
+
+	// The refusal of the old word says what to do instead, because somebody
+	// writing it is using a grammar that was real until recently rather than
+	// misspelling one that is.
+	err := Grant{AccountID: a, Type: "load_balancer", Action: "x"}.Validate()
+	if err == nil || !strings.Contains(err.Error(), "name the project") {
+		t.Errorf("refusal of load_balancer = %v, want one that says to name the project instead", err)
 	}
 }

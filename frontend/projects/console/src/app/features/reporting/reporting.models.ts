@@ -36,11 +36,16 @@ export interface UsageResponse {
   buckets: UsageBucket[];
 }
 
+/**
+ * There was a `loadBalancerCount` here and nothing replaced it. The series stopped when the
+ * object did, and a node count would be a NEW series starting today — a third line beginning
+ * mid-range reads as "the customer built something" rather than "we started measuring", which
+ * is the misreading this whole table exists to prevent.
+ */
 export interface InventoryPoint {
   day: string;
   aliasCount: number;
   domainCount: number;
-  loadBalancerCount: number;
 }
 
 export interface InventoryHistoryResponse {

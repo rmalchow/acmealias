@@ -61,7 +61,7 @@ func RunSnapshots(ctx context.Context, db *gorm.DB, interval time.Duration, log 
 // It reads across every account by definition — one pass covers the deployment,
 // not a tenant — which is why it is one of the four readers CrossAccount's own
 // doc comment enumerates. Saying so is not optional: `projects`, `aliases`,
-// `domains` and `load_balancers` all carry the tenant_isolation policy, and
+// `domains` and `lb_nodes` all carry the tenant_isolation policy, and
 // this runs on a ticker with no session and therefore no
 // `app.account_id`, so as a bare statement it selects from an empty view of every
 // one of them and writes nothing at all, for ever, without erroring.
@@ -71,21 +71,15 @@ func Snapshot(ctx context.Context, db *gorm.DB, at time.Time) (int64, error) {
 	err := store.CrossAccount(ctx, db, func(tx *gorm.DB) error {
 		res := tx.Exec(`
 		insert into project_daily_stats
-		       (project_id, project_slug, day, alias_count, domain_count, load_balancer_count)
+		       (project_id, project_slug, day, alias_count, domain_count)
 		select p.id, p.slug, ?::date,
-		       (select count(*) from aliases a
-		          join load_balancers l on l.id = a.load_balancer_id
-		         where l.project_id = p.id),
-		       (select count(*) from domains d
-		          join load_balancers l on l.id = d.load_balancer_id
-		         where l.project_id = p.id),
-		       (select count(*) from load_balancers l where l.project_id = p.id)
+		       (select count(*) from aliases a where a.project_id = p.id),
+		       (select count(*) from domains d where d.project_id = p.id)
 		  from projects p
 		    on conflict (project_id, day) do update
-		   set project_slug        = excluded.project_slug,
-		       alias_count         = excluded.alias_count,
-		       domain_count        = excluded.domain_count,
-		       load_balancer_count = excluded.load_balancer_count`, day)
+		   set project_slug = excluded.project_slug,
+		       alias_count  = excluded.alias_count,
+		       domain_count = excluded.domain_count`, day)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -99,11 +93,17 @@ func Snapshot(ctx context.Context, db *gorm.DB, at time.Time) (int64, error) {
 }
 
 // InventoryPoint is one project's inventory size on one day.
+//
+// It counted load balancers as well until they stopped existing. Nothing took
+// that series' place: a node count would be a new series starting today, and a
+// graph whose third line begins mid-range reads as "the customer built
+// something" rather than "we started measuring". If node history is wanted it is
+// a column and a backfill nobody can write, which is the same argument this
+// table exists to make.
 type InventoryPoint struct {
-	Day               time.Time
-	AliasCount        int
-	DomainCount       int
-	LoadBalancerCount int
+	Day         time.Time
+	AliasCount  int
+	DomainCount int
 }
 
 // CurrentInventory counts a project's inventory as it is right now, live from
@@ -112,23 +112,17 @@ type InventoryPoint struct {
 // snapshot has not seen yet.
 func CurrentInventory(ctx context.Context, db *gorm.DB, sc store.Scope, projectID model.ID) (InventoryPoint, error) {
 	var row struct {
-		AliasCount, DomainCount, LoadBalancerCount int
+		AliasCount, DomainCount int
 	}
 	err := db.WithContext(ctx).Raw(`
-		select (select count(*) from aliases a
-		          join load_balancers l on l.id = a.load_balancer_id
-		         where l.project_id = ?) as alias_count,
-		       (select count(*) from domains d
-		          join load_balancers l on l.id = d.load_balancer_id
-		         where l.project_id = ?) as domain_count,
-		       (select count(*) from load_balancers l where l.project_id = ?) as load_balancer_count`,
-		projectID, projectID, projectID).Scan(&row).Error
+		select (select count(*) from aliases a where a.project_id = ?) as alias_count,
+		       (select count(*) from domains d where d.project_id = ?) as domain_count`,
+		projectID, projectID).Scan(&row).Error
 	if err != nil {
 		return InventoryPoint{}, fmt.Errorf("reporting: count inventory for project %d: %w", projectID, err)
 	}
 	return InventoryPoint{
-		Day: time.Now().UTC(), AliasCount: row.AliasCount,
-		DomainCount: row.DomainCount, LoadBalancerCount: row.LoadBalancerCount,
+		Day: time.Now().UTC(), AliasCount: row.AliasCount, DomainCount: row.DomainCount,
 	}, nil
 }
 
@@ -170,8 +164,7 @@ func ProjectInventoryHistory(ctx context.Context, db *gorm.DB, sc store.Scope, p
 	out := make([]InventoryPoint, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, InventoryPoint{
-			Day: r.Day.UTC(), AliasCount: r.AliasCount,
-			DomainCount: r.DomainCount, LoadBalancerCount: r.LoadBalancerCount,
+			Day: r.Day.UTC(), AliasCount: r.AliasCount, DomainCount: r.DomainCount,
 		})
 	}
 	return InventoryHistory{Points: out, Recorded: ever > 0}, nil
