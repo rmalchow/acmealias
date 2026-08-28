@@ -53,7 +53,15 @@
           site ships no icon font and no CDN link, and one icon is not a dependency. Inline
           also means it inherits `currentColor`, so the hover state needs no second rule.
         -->
-        <a class="button" href="http://console.localhost">
+        <!--
+          STRAIGHT AT THE LOGIN ROUTE, not at the console root. Both land the same
+          person in the same place, but the root loads the Angular application
+          first, which discovers there is no session and only then redirects — so
+          the visitor pays a bundle download to be sent somewhere else. The Sign
+          Up Now button further down this page already links here; this makes the
+          header agree with it.
+        -->
+        <a class="button" href="http://console.localhost/api/v1/auth/login">
           <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path
               fill-rule="evenodd"
@@ -336,12 +344,17 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
       </script>
 
       <!--
-        The mechanism, shown rather than described.
+        The mechanism, as the sequence somebody actually walks.
 
-        This is the section a technical reader trusts, because it is the only one they can check
-        without us: both commands run against the public internet and neither needs an account. A
-        claim about DNS that a reader can verify in ten seconds is worth more than three paragraphs
-        of the same claim in prose.
+        This was two dig commands and a claim. The commands were the best part of the page —
+        checkable against the public internet, needing no account — but they showed the MIDDLE of
+        the integration and left the reader to guess the rest: where the alias comes from, what
+        their ACME client needs, what they type into their DNS provider.
+
+        So it is a numbered sequence now, and the numbering is a structural claim rather than
+        decoration: these steps genuinely have an order, and the one that trips people is step 3
+        happening before step 5. The two dig commands survive as the last step, because verifying
+        is part of the integration rather than an appendix to it.
 
         The values are real in SHAPE and fictional in CONTENT — example.com is reserved for exactly
         this (RFC 2606), and inventing a customer's domain here would be putting somebody else's
@@ -350,21 +363,94 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
       <section class="proof">
         <h2>The whole integration, and how to check it</h2>
         <p class="section-lede">
-          Two commands. The first is the record you publish once; the second is what we answer while a
-          certificate authority is asking, and nothing at all when one is not.
+          Six steps, once per domain. Everything after step&nbsp;4 is your ACME client doing what it
+          already does — and step&nbsp;3 is the only change anybody makes to their DNS, ever.
         </p>
 
-        <div class="term" role="img"
-             aria-label="A dig command showing the challenge name is a CNAME into the acmealias zone, and a second dig showing that alias answering a TXT record during validation.">
-          <pre><span class="p">$</span> dig +short _acme-challenge.shop.example.com CNAME
-<span class="o">shop-example-com.acmealias.com.</span>
+        <ol class="steps">
+          <li>
+            <h3>Add the domain</h3>
+            <p>
+              In the console, create a project and add the name you want certificates for —
+              <code>shop.example.com</code>, or <code>*.example.com</code> for a wildcard. A wildcard
+              and its apex share one record, so <code>example.com</code> and everything under it is
+              still a single <code>CNAME</code>.
+            </p>
+          </li>
+
+          <li>
+            <h3>We issue you an alias</h3>
+            <p>
+              One randomly generated label inside <em>our</em> zone —
+              <code>acme.acmealias.com</code>, which is delegated to us and holds nothing but these
+              — created with the domain and never re-labelled. The console shows it on the domain's
+              row.
+            </p>
+            <p class="note">
+              The label is random rather than derived from your domain, and that is deliberate: a
+              label anybody could compute from a name would turn our zone into a membership oracle,
+              answering "is this company a customer" to whoever asks.
+            </p>
+          </li>
+
+          <li>
+            <h3>In your DNS provider, add one record</h3>
+            <p>
+              Wherever your zone lives now — no account with us, no API token, no delegation of
+              anything else:
+            </p>
+            <div class="term" role="img"
+                 aria-label="A zone file line delegating the challenge name to the alias with a CNAME record.">
+              <pre>_acme-challenge.shop.example.com.  300  IN  CNAME  k7f2q.acme.acmealias.com.</pre>
+            </div>
+            <p class="note">
+              For a wildcard, the record is at <code>_acme-challenge.example.com</code> — the
+              <code>*</code> is not part of the challenge name. Publish it once; it never changes
+              again, including when you renew.
+            </p>
+          </li>
+
+          <li>
+            <h3>If you publish CAA, authorise your certificate authority</h3>
+            <p>
+              Most domains have no <code>CAA</code> record, and that is fine — an absent
+              <code>CAA</code> means any authority may issue. If you do have one, it must name the
+              authority you are using, and it needs both tags: a present <code>issuewild</code>
+              governs wildcard issuance <em>instead of</em> <code>issue</code>, so authorising only
+              the first leaves wildcards blocked.
+            </p>
+          </li>
+
+          <li>
+            <h3>Point your ACME client at us</h3>
+            <p>
+              We speak the <code>acme-dns</code> protocol, so the clients you already run work
+              unchanged — cert-manager, Caddy, acme.sh, lego, Traefik, Posh-ACME, Certify The Web.
+              The console hands you a credentials file for the domain; your client publishes the
+              challenge value through it instead of through your DNS provider's API.
+            </p>
+          </li>
+
+          <li>
+            <h3>Request the certificate</h3>
+            <p>
+              Your client and your certificate authority do the rest, exactly as they do today. You
+              can watch it happen: both commands below query the public internet, need no account
+              and involve us only as the server answering them.
+            </p>
+            <div class="term" role="img"
+                 aria-label="A dig command showing the challenge name is a CNAME into the acmealias zone, and a second dig showing that alias answering a TXT record during validation.">
+              <pre><span class="p">$</span> dig +short _acme-challenge.shop.example.com CNAME
+<span class="o">k7f2q.acme.acmealias.com.</span>
 <span class="c"># published once, by you. Never changes again.</span>
 
-<span class="p">$</span> dig +short shop-example-com.acmealias.com TXT
+<span class="p">$</span> dig +short k7f2q.acme.acmealias.com TXT
 <span class="o">"3sT4kQ9x_LbW2vPd8nZmR1cYhE0aJfKu6iGtOs5A"</span>
 <span class="c"># answered only while a validation is in flight,
 # then withdrawn. Ask again tomorrow and it is empty.</span></pre>
-        </div>
+            </div>
+          </li>
+        </ol>
 
         <p class="note">
           Your DNS provider keeps every other record. That <code>CNAME</code> delegates exactly one

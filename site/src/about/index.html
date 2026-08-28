@@ -39,7 +39,15 @@
           site ships no icon font and no CDN link, and one icon is not a dependency. Inline
           also means it inherits `currentColor`, so the hover state needs no second rule.
         -->
-        <a class="button" href="http://console.localhost">
+        <!--
+          STRAIGHT AT THE LOGIN ROUTE, not at the console root. Both land the same
+          person in the same place, but the root loads the Angular application
+          first, which discovers there is no session and only then redirects — so
+          the visitor pays a bundle download to be sent somewhere else. The Sign
+          Up Now button further down this page already links here; this makes the
+          header agree with it.
+        -->
+        <a class="button" href="http://console.localhost/api/v1/auth/login">
           <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path
               fill-rule="evenodd"

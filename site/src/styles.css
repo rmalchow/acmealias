@@ -497,6 +497,93 @@ h1 {
   max-inline-size: 62ch;
 }
 
+/* -- The integration, as a numbered sequence ------------------------------
+ *
+ * NUMBERED, unlike .reasons above, and for the opposite reason: those are
+ * reasons and have no order, these are steps and have one. The marker is a
+ * structural claim about the content in both cases — it is absent there because
+ * it would be false, and present here because it is true. The failure this page
+ * exists to prevent is somebody publishing the CNAME before the alias exists,
+ * which is exactly a claim about order.
+ *
+ * A real <ol> with its marker suppressed and redrawn, rather than a <div> stack
+ * with numbers typed in: a screen reader should announce "list, 6 items" and
+ * each item's position, and hand-typed numerals go stale the first time a step
+ * is inserted.
+ */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+  display: grid;
+  gap: 1rem;
+}
+
+.steps > li {
+  counter-increment: step;
+  position: relative;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.25rem 1.25rem 1.25rem 4rem;
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 6%) inset,
+    0 18px 40px rgb(0 0 0 / 45%);
+}
+
+/* The numeral sits in the padding reserved for it, so a step's prose starts on
+ * one vertical line whether the marker is 1 or 6. */
+.steps > li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  inset-block-start: 1.25rem;
+  inset-inline-start: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.steps h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.steps p {
+  margin: 0;
+  color: var(--ink-dim);
+  max-inline-size: 68ch;
+}
+
+/* A step that carries a terminal block needs air above it; one that does not
+ * must not gain a trailing gap. */
+.steps .term {
+  margin-block-start: 1rem;
+}
+
+.steps p + p,
+.steps .term + p {
+  margin-block-start: 0.75rem;
+}
+
+/* The note inside a step is subordinate to that step, not to the section, so it
+ * loses the section note's top margin and keeps its smaller type. */
+.steps .note {
+  margin-block-start: 0.75rem;
+}
+
+/* On a narrow screen the reserved gutter costs more than the alignment buys:
+ * put the numeral on its own line above the heading instead. */
+@media (max-width: 34rem) {
+  .steps > li {
+    padding-inline-start: 1.25rem;
+    padding-block-start: 2.75rem;
+  }
+}
+
 /* -- The about page ------------------------------------------------------- */
 .about {
   padding-block: 1rem 3rem;
