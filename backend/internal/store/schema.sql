@@ -15,8 +15,13 @@ table account_members
   index account_members_account_id_user_id_role_id_key CREATE UNIQUE INDEX account_members_account_id_user_id_role_id_key ON account_members USING btree (account_id, user_id, role_id)
   index account_members_pkey CREATE UNIQUE INDEX account_members_pkey ON account_members USING btree (id)
   index account_members_user_idx CREATE INDEX account_members_user_idx ON account_members USING btree (user_id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table accounts
+  check accounts_credits_non_negative CHECK ((credits >= 0))
+  check accounts_kind_check CHECK ((kind = ANY (ARRAY['personal'::text, 'team'::text])))
+  check accounts_personal_has_no_balance CHECK (((kind = 'team'::text) OR (credits = 0)))
   column created_at timestamp with time zone not null default now()
   column credits bigint not null default 0
   column id uuid not null default uuidv7()
@@ -35,6 +40,8 @@ table accounts
   index accounts_owner_user_id_idx CREATE INDEX accounts_owner_user_id_idx ON accounts USING btree (owner_user_id)
   index accounts_pkey CREATE UNIQUE INDEX accounts_pkey ON accounts USING btree (id)
   index accounts_slug_key CREATE UNIQUE INDEX accounts_slug_key ON accounts USING btree (slug)
+  rls enabled=false forced=false
+  trigger accounts_kind_is_immutable CREATE TRIGGER accounts_kind_is_immutable BEFORE UPDATE ON accounts FOR EACH ROW EXECUTE FUNCTION accounts_refuse_reclassification()
 
 table aliases
   column account_id uuid not null
@@ -58,8 +65,11 @@ table aliases
   index aliases_load_balancer_id_idx CREATE INDEX aliases_load_balancer_id_idx ON aliases USING btree (load_balancer_id)
   index aliases_pkey CREATE UNIQUE INDEX aliases_pkey ON aliases USING btree (id)
   index aliases_project_id_idx CREATE INDEX aliases_project_id_idx ON aliases USING btree (project_id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table api_key_grants
+  check api_key_grants_identifier_form CHECK ((((object_id IS NULL) AND (selector IS NULL)) OR ((object_id IS NOT NULL) AND (selector IS NULL)) OR ((object_id IS NULL) AND (selector IS NOT NULL))))
   column account_id uuid not null
   column action text not null
   column api_key_id uuid not null
@@ -75,6 +85,8 @@ table api_key_grants
   constraint api_key_grants_pkey primary key (id)
   index api_key_grants_key_idx CREATE INDEX api_key_grants_key_idx ON api_key_grants USING btree (api_key_id)
   index api_key_grants_pkey CREATE UNIQUE INDEX api_key_grants_pkey ON api_key_grants USING btree (id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table api_key_networks
   column api_key_id uuid not null
@@ -85,6 +97,7 @@ table api_key_networks
   constraint api_key_networks_pkey primary key (id)
   index api_key_networks_api_key_id_cidr_key CREATE UNIQUE INDEX api_key_networks_api_key_id_cidr_key ON api_key_networks USING btree (api_key_id, cidr)
   index api_key_networks_pkey CREATE UNIQUE INDEX api_key_networks_pkey ON api_key_networks USING btree (id)
+  rls enabled=false forced=false
 
 table api_keys
   column account_id uuid not null
@@ -102,6 +115,8 @@ table api_keys
   index api_keys_account_id_idx CREATE INDEX api_keys_account_id_idx ON api_keys USING btree (account_id)
   index api_keys_identifier_key CREATE UNIQUE INDEX api_keys_identifier_key ON api_keys USING btree (identifier)
   index api_keys_pkey CREATE UNIQUE INDEX api_keys_pkey ON api_keys USING btree (id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table audit_entries
   column account_id uuid null
@@ -127,6 +142,8 @@ table audit_entries
   index audit_entries_occurred_at_idx CREATE INDEX audit_entries_occurred_at_idx ON audit_entries USING btree (occurred_at DESC)
   index audit_entries_pkey CREATE UNIQUE INDEX audit_entries_pkey ON audit_entries USING btree (id)
   index audit_entries_project_id_occurred_at_idx CREATE INDEX audit_entries_project_id_occurred_at_idx ON audit_entries USING btree (project_id, occurred_at DESC)
+  rls enabled=false forced=false
+  trigger audit_entries_no_rewrite CREATE TRIGGER audit_entries_no_rewrite BEFORE DELETE OR UPDATE OR TRUNCATE ON audit_entries FOR EACH STATEMENT EXECUTE FUNCTION audit_entries_append_only()
 
 table challenge_interactions
   column abandoned boolean not null default false
@@ -151,6 +168,7 @@ table challenge_interactions
   index challenge_interactions_pair_published_idx CREATE INDEX challenge_interactions_pair_published_idx ON challenge_interactions USING btree (load_balancer_id, published_at DESC)
   index challenge_interactions_pkey CREATE UNIQUE INDEX challenge_interactions_pkey ON challenge_interactions USING btree (id)
   index challenge_interactions_project_published_idx CREATE INDEX challenge_interactions_project_published_idx ON challenge_interactions USING btree (project_id, published_at DESC)
+  rls enabled=false forced=false
 
 table challenges
   column alias_id uuid not null
@@ -165,6 +183,12 @@ table challenges
   index challenges_alias_id_value_key CREATE UNIQUE INDEX challenges_alias_id_value_key ON challenges USING btree (alias_id, value)
   index challenges_expires_at_idx CREATE INDEX challenges_expires_at_idx ON challenges USING btree (expires_at)
   index challenges_pkey CREATE UNIQUE INDEX challenges_pkey ON challenges USING btree (id)
+  policy tenant_isolation for all using ((cross_account_read() OR (EXISTS ( SELECT 1
+   FROM aliases a
+  WHERE (a.id = challenges.alias_id))))) with check ((cross_account_read() OR (EXISTS ( SELECT 1
+   FROM aliases a
+  WHERE (a.id = challenges.alias_id)))))
+  rls enabled=true forced=true
 
 table domains
   column account_id uuid not null
@@ -186,6 +210,8 @@ table domains
   index domains_alias_id_idx CREATE INDEX domains_alias_id_idx ON domains USING btree (alias_id)
   index domains_pkey CREATE UNIQUE INDEX domains_pkey ON domains USING btree (id)
   index domains_project_id_idx CREATE INDEX domains_project_id_idx ON domains USING btree (project_id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table lb_nodes
   column account_id uuid not null
@@ -204,6 +230,8 @@ table lb_nodes
   index lb_nodes_load_balancer_id_label_key CREATE UNIQUE INDEX lb_nodes_load_balancer_id_label_key ON lb_nodes USING btree (load_balancer_id, label)
   index lb_nodes_pkey CREATE UNIQUE INDEX lb_nodes_pkey ON lb_nodes USING btree (id)
   index lb_nodes_project_id_idx CREATE INDEX lb_nodes_project_id_idx ON lb_nodes USING btree (project_id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table load_balancers
   column account_id uuid not null
@@ -223,6 +251,8 @@ table load_balancers
   index load_balancers_id_project_id_key CREATE UNIQUE INDEX load_balancers_id_project_id_key ON load_balancers USING btree (id, project_id)
   index load_balancers_pkey CREATE UNIQUE INDEX load_balancers_pkey ON load_balancers USING btree (id)
   index load_balancers_project_id_slug_key CREATE UNIQUE INDEX load_balancers_project_id_slug_key ON load_balancers USING btree (project_id, slug)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table project_daily_stats
   column alias_count integer not null
@@ -234,6 +264,7 @@ table project_daily_stats
   constraint project_daily_stats_pkey primary key (project_id,day)
   index project_daily_stats_day_idx CREATE INDEX project_daily_stats_day_idx ON project_daily_stats USING btree (day)
   index project_daily_stats_pkey CREATE UNIQUE INDEX project_daily_stats_pkey ON project_daily_stats USING btree (project_id, day)
+  rls enabled=false forced=false
 
 table projects
   column account_id uuid not null
@@ -249,8 +280,11 @@ table projects
   index projects_id_account_id_key CREATE UNIQUE INDEX projects_id_account_id_key ON projects USING btree (id, account_id)
   index projects_pkey CREATE UNIQUE INDEX projects_pkey ON projects USING btree (id)
   index projects_slug_key CREATE UNIQUE INDEX projects_slug_key ON projects USING btree (slug)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table role_grants
+  check role_grants_identifier_form CHECK ((((object_id IS NULL) AND (selector IS NULL)) OR ((object_id IS NOT NULL) AND (selector IS NULL)) OR ((object_id IS NULL) AND (selector IS NOT NULL))))
   column account_id uuid not null
   column action text not null
   column created_at timestamp with time zone not null default now()
@@ -266,6 +300,8 @@ table role_grants
   constraint role_grants_role_id_fkey foreign key (role_id)
   index role_grants_pkey CREATE UNIQUE INDEX role_grants_pkey ON role_grants USING btree (id)
   index role_grants_role_idx CREATE INDEX role_grants_role_idx ON role_grants USING btree (role_id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table roles
   column account_id uuid not null
@@ -282,6 +318,8 @@ table roles
   index roles_id_account_id_key CREATE UNIQUE INDEX roles_id_account_id_key ON roles USING btree (id, account_id)
   index roles_one_unrestricted_per_account CREATE UNIQUE INDEX roles_one_unrestricted_per_account ON roles USING btree (account_id) WHERE unrestricted
   index roles_pkey CREATE UNIQUE INDEX roles_pkey ON roles USING btree (id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
 
 table sessions
   column created_at timestamp with time zone not null default now()
@@ -299,6 +337,7 @@ table sessions
   index sessions_pkey CREATE UNIQUE INDEX sessions_pkey ON sessions USING btree (id)
   index sessions_selected_account_idx CREATE INDEX sessions_selected_account_idx ON sessions USING btree (selected_account_id)
   index sessions_subject_idx CREATE INDEX sessions_subject_idx ON sessions USING btree (subject)
+  rls enabled=false forced=false
 
 table users
   column created_at timestamp with time zone not null default now()
@@ -310,3 +349,77 @@ table users
   constraint users_subject_key unique (subject)
   index users_pkey CREATE UNIQUE INDEX users_pkey ON users USING btree (id)
   index users_subject_key CREATE UNIQUE INDEX users_subject_key ON users USING btree (subject)
+  rls enabled=false forced=false
+
+function accounts_refuse_reclassification
+  CREATE OR REPLACE FUNCTION accounts_refuse_reclassification()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  begin
+    if new.kind is distinct from old.kind then
+      raise exception 'an account is created personal or team and stays that way (design C1)'
+        using errcode = 'check_violation';
+    end if;
+    if old.kind = 'personal' and new.owner_user_id is distinct from old.owner_user_id then
+      raise exception 'a personal account belongs to its user and cannot be transferred (design C1, C2)'
+        using errcode = 'check_violation';
+    end if;
+    return new;
+  end;
+  $function$
+
+function audit_entries_append_only
+  CREATE OR REPLACE FUNCTION audit_entries_append_only()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  begin
+    raise exception 'audit_entries is append-only: % is not permitted', tg_op
+      using errcode = 'insufficient_privilege';
+  end
+  $function$
+
+function cross_account_read
+  CREATE OR REPLACE FUNCTION cross_account_read()
+   RETURNS boolean
+   LANGUAGE sql
+   STABLE
+  AS $function$
+    select coalesce(current_setting('app.cross_account', true), '') = 'on';
+  $function$
+
+function current_account
+  CREATE OR REPLACE FUNCTION current_account()
+   RETURNS uuid
+   LANGUAGE sql
+   STABLE
+  AS $function$
+    select nullif(current_setting('app.account_id', true), '')::uuid;
+  $function$
+
+function legacy_uuid
+  CREATE OR REPLACE FUNCTION legacy_uuid(n bigint)
+   RETURNS uuid
+   LANGUAGE sql
+   IMMUTABLE
+  AS $function$
+    select case when n is null then null
+      else ('00000000-0000-7000-8000-' || lpad(to_hex(n), 12, '0'))::uuid end;
+  $function$
+
+function uuidv7
+  CREATE OR REPLACE FUNCTION uuidv7()
+   RETURNS uuid
+   LANGUAGE sql
+  AS $function$
+    select encode(
+      set_bit(
+        set_bit(
+          overlay(uuid_send(gen_random_uuid()) placing
+            substring(int8send((extract(epoch from clock_timestamp()) * 1000)::bigint) from 3)
+            from 1 for 6),
+          52, 1),
+        53, 1),
+      'hex')::uuid;
+  $function$
