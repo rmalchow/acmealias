@@ -1,0 +1,233 @@
+---
+# AcmeAlias — production stack on vps-euc.
+#
+#   docker compose pull && docker compose up -d
+#
+# THE SHAPE, and why it differs from every other stack in /docker:
+#
+#   * DNS IS PUBLISHED ON ALL INTERFACES. Everything else here binds 127.0.0.1
+#     and is reached through traefik. This cannot be: we are an authoritative
+#     nameserver, and the resolvers that must reach us are the entire internet.
+#     Note that ufw does NOT govern this — docker's chains run before ufw's in
+#     FORWARD and DOCKER-USER is empty on this host — so publishing the port IS
+#     the decision to be reachable. There is no firewall rule to add and none to
+#     forget.
+#
+#   * HTTP is 127.0.0.1 only, like everything else, and traefik terminates TLS
+#     in front of it (/docker/traefik/config/config/acme.yml).
+#
+#   * One postgres, two databases. authentik's schema and ours share a server
+#     and never a database; the service connects as a non-superuser role so
+#     row-level security actually applies to it.
+
+networks:
+  default:
+    ipam:
+      driver: default
+      config:
+        # Recorded in /docker/networks.txt. Was listed free there before this.
+        - subnet: 192.168.235.96/28
+
+x-authentik: &authentik
+  image: ghcr.io/goauthentik/server:2026.8.0
+  restart: unless-stopped
+  environment:
+    AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+    AUTHENTIK_POSTGRESQL__HOST: postgres
+    AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_DB_NAME}
+    AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_DB_ROLE}
+    AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD}
+    AUTHENTIK_REDIS__HOST: redis
+    # Behind traefik on plain HTTP. Without this authentik builds its redirect
+    # and issuer URLs from its own :9000 and every sign-in bounces somewhere the
+    # browser cannot reach.
+    AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: 192.168.235.96/28
+    AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
+    AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    AUTHENTIK_LOG_LEVEL: warning
+    AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
+    AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
+    AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
+    AUTHENTIK_EMAIL__HOST: ${AUTHENTIK_EMAIL__HOST}
+    AUTHENTIK_EMAIL__PORT: ${AUTHENTIK_EMAIL__PORT}
+    AUTHENTIK_EMAIL__USERNAME: ${AUTHENTIK_EMAIL__USERNAME}
+    AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL__PASSWORD}
+    AUTHENTIK_EMAIL__USE_TLS: ${AUTHENTIK_EMAIL__USE_TLS}
+    AUTHENTIK_EMAIL__USE_SSL: ${AUTHENTIK_EMAIL__USE_SSL}
+    AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_EMAIL__FROM}
+    # Read by the blueprint's !Env tags, so the providers it creates carry the
+    # same client credentials the service authenticates with.
+    ACME_OIDC_CLIENT_ID: ${ACME_OIDC_CLIENT_ID}
+    ACME_OIDC_CLIENT_SECRET: ${ACME_OIDC_CLIENT_SECRET}
+    ACME_ADMIN_OIDC_CLIENT_ID: ${ACME_ADMIN_OIDC_CLIENT_ID}
+    ACME_ADMIN_OIDC_CLIENT_SECRET: ${ACME_ADMIN_OIDC_CLIENT_SECRET}
+  volumes:
+    - ./authentik/blueprints:/blueprints/custom:ro
+    - ./authentik/media:/media
+    # The brand names these by URL, so the files must exist where the server
+    # publishes /static/dist from. Bind-mounts rather than uploads: an uploaded
+    # logo lives in ./authentik/media and a blueprint naming a file nobody can
+    # serve is a page with a broken image.
+    - ./authentik/branding/logo.png:/web/dist/brand/logo.png:ro
+    - ./authentik/branding/flow_background.jpg:/web/dist/assets/images/flow_background.jpg:ro
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      ACME_DB_ROLE: ${ACME_DB_ROLE}
+      ACME_DB_PASSWORD: ${ACME_DB_PASSWORD}
+      AUTHENTIK_DB_NAME: ${AUTHENTIK_DB_NAME}
+      AUTHENTIK_DB_ROLE: ${AUTHENTIK_DB_ROLE}
+      AUTHENTIK_DB_PASSWORD: ${AUTHENTIK_DB_PASSWORD}
+    volumes:
+      - ./database:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - ./redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+
+  # --- the identity provider -------------------------------------------------
+  #
+  # Two containers from one definition. THE SHARED BLOCK CARRIES NO `ports`, and
+  # that is the fix for a fault worth recording because its symptom pointed
+  # three steps away from its cause.
+  #
+  # It used to be an anchor on the SERVER — `authentik-server: &authentik` —
+  # with the worker saying `ports: !reset []` to drop the inherited publish.
+  # This Compose does not honour `!reset` there, so the worker inherited
+  # 127.0.0.1:18000, tried to bind a port the server already held, and had its
+  # networking torn down when the bind failed. A container whose network setup
+  # failed has no embedded DNS, so what it logged, forever, was
+  # `failed to resolve host 'postgres'` — which reads as a DNS or depends_on
+  # problem and is neither.
+  #
+  # Hoisting the shared part into an extension field that never had a port in it
+  # removes the class of mistake rather than the instance.
+  authentik-server:
+    <<: *authentik
+    command: server
+    ports:
+      - 127.0.0.1:18000:9000
+
+  # The worker is what APPLIES BLUEPRINTS. Without it the providers, flows and
+  # brand under authentik/blueprints/ are files nobody reads, and the symptom is
+  # a 404 on OIDC discovery that looks like our service is misconfigured.
+  authentik-worker:
+    <<: *authentik
+    command: worker
+
+  # --- the service -----------------------------------------------------------
+  acmealias:
+    image: harbor.rand0m.me/public/acmealias:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      ACME_DATABASE_URL: "postgres://${ACME_DB_ROLE}:${ACME_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      ACME_DB_ROLE: ${ACME_DB_ROLE}
+      ACME_DB_PASSWORD: ${ACME_DB_PASSWORD}
+
+      # THE WHOLE DOMAIN, not a subzone of acmealias.com, and that is what made
+      # this work at all. Delegating `acme.acmealias.com` failed for a reason no
+      # amount of retrying would fix: IONOS accepted the NS records into its UI
+      # and never emitted them into the zone — confirmed by three public
+      # resolvers and by the authoritative servers themselves returning no NS
+      # and no SOA for the name, while records added in the same sitting served
+      # fine. `edgedns.cloud` is delegated at the TLD instead, so the registrar
+      # hands the whole domain to our nameservers and no managed-DNS product
+      # sits in between.
+      #
+      # The nameserver NAMES stay under acmealias.com deliberately: they are
+      # out-of-zone, so they need no glue records and resolve normally.
+      ACME_ZONE: edgedns.cloud.
+      ACME_SOA_PRIMARY_NS: ns1.acmealias.com.
+      ACME_SOA_HOSTMASTER: hostmaster@acmealias.com
+      ACME_NS_NAMES: ns1.acmealias.com.,ns2.acmealias.com.
+      ACME_CAA_ISSUER: letsencrypt.org
+
+      ACME_DNS_LISTEN: ":53"
+      ACME_LISTEN: ":8080"
+
+      ACME_OIDC_ISSUER: https://auth.acmealias.com/application/o/acmeservice-console/
+      ACME_OIDC_CLIENT_ID: ${ACME_OIDC_CLIENT_ID}
+      ACME_OIDC_CLIENT_SECRET: ${ACME_OIDC_CLIENT_SECRET}
+      ACME_OIDC_REDIRECT_URL: https://console.acmealias.com/api/v1/auth/callback
+      ACME_POST_LOGOUT_REDIRECT_URL: https://www.acmealias.com
+
+      # traefik reaches us from the compose network, so its address is what
+      # X-Forwarded-For must be believed from — and only from.
+      ACME_TRUSTED_PROXY_CIDRS: 192.168.235.96/28
+
+      # A public resolver, for checking customers' delegations. It must NOT be
+      # our own server: asking ourselves whether a customer published a CNAME
+      # into our zone answers a different question.
+      ACME_VERIFY_RESOLVER: 1.1.1.1:53
+
+      # support@, NOT no-reply@, and it must stay identical to
+      # AUTHENTIK_EMAIL__FROM in .env — the two are different programs sending
+      # about the same account, and the only artefact they can share is the
+      # identity. `no-reply@` was also wrong twice over here: the relay
+      # authenticates as support@ and IONOS will not send as another address,
+      # and design T3 rejects a sender that discards replies for a product whose
+      # every message is something a recipient may reasonably answer.
+      ACME_MAIL_FROM: support@acmealias.com
+      ACME_MAIL_SENDER: AcmeAlias
+      ACME_MAIL_REPLY_TO: support@acmealias.com
+      ACME_MAIL_SMTP_ADDR: ${ACME_MAIL_SMTP_ADDR}
+      ACME_MAIL_SMTP_USER: ${ACME_MAIL_SMTP_USER}
+      ACME_MAIL_SMTP_PASSWORD: ${ACME_MAIL_SMTP_PASSWORD}
+    ports:
+      # THE PUBLIC ADDRESSES, NAMED EXPLICITLY, and not `53:53`. Two reasons and
+      # both are load-bearing:
+      #
+      #   * A wildcard bind COLLIDES WITH systemd-resolved. `0.0.0.0:53` includes
+      #     127.0.0.53, which resolved already holds, so docker fails with
+      #     "address already in use" while `ss` shows nothing on 0.0.0.0 — the
+      #     conflict is with a loopback address the wildcard would have covered.
+      #     Naming the public address sidesteps it without touching resolved,
+      #     which the host still needs for its own name resolution.
+      #
+      #   * A wildcard bind is IPv4 ONLY. `53:53` publishes on 0.0.0.0 and
+      #     nothing else, so a nameserver whose NS records carry AAAA would be
+      #     unreachable over v6 — invisible to v6-only resolvers, including some
+      #     of what validates ACME challenges, and failing intermittently
+      #     depending on which resolver a CA happens to use. The v6 address has
+      #     to be published by name for it to be served at all.
+      #
+      # Both transports, per family. TCP is not optional for DNS: it is the
+      # fallback for responses that do not fit a UDP packet, and a nameserver
+      # answering only UDP fails confusingly rather than cleanly.
+      - "${HOST_IPV4}:53:53/udp"
+      - "${HOST_IPV4}:53:53/tcp"
+      - "[${HOST_IPV6}]:53:53/udp"
+      - "[${HOST_IPV6}]:53:53/tcp"
+      - 127.0.0.1:18080:8080
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # --- the marketing site ----------------------------------------------------
+  acmesite:
+    image: harbor.rand0m.me/public/acmesite:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:18081:8080

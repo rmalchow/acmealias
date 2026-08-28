@@ -1,0 +1,79 @@
+# AcmeAlias — five hostnames, three backends.
+#
+# The stack is /docker/acme. Everything below reaches it on 127.0.0.1, which is
+# where the compose file publishes it; the one port that is NOT here is 53, which
+# the service publishes on all interfaces because an authoritative nameserver has
+# to be reachable by every resolver on the internet, and traefik has no part in
+# it.
+#
+# ONE CERTIFICATE FOR ALL OF THEM, requested as a wildcard the way auth.yml does
+# it. The resolver is DNS-01 against IONOS (see traefik.yml), so acmealias.com
+# must be reachable with the IONOS_API_KEY this traefik already carries — if that
+# key is scoped to rand0m.me alone, every router below fails to get a
+# certificate, and the symptom is a TLS handshake error rather than a 404.
+http:
+  routers:
+    # The marketing site, and where signing out lands.
+    acme-www:
+      rule: Host(`www.acmealias.com`) || Host(`acmealias.com`)
+      entrypoints: https
+      tls: &acme-tls
+        certResolver: letsEncrypt
+        domains:
+          - main: "acmealias.com"
+            sans:
+              - "*.acmealias.com"
+      service: acme-site
+
+    # The customer console.
+    acme-console:
+      rule: Host(`console.acmealias.com`)
+      entrypoints: https
+      tls: *acme-tls
+      service: acme-app
+
+    # The challenge API. THIS IS THE NAME IN EVERY CUSTOMER'S ACME CLIENT
+    # CONFIG — acme-dns `/update` and lego's httpreq both point at it — so it is
+    # the most expensive hostname here to ever rename.
+    acme-api:
+      rule: Host(`api.acmealias.com`)
+      entrypoints: https
+      tls: *acme-tls
+      service: acme-app
+
+    # The staff console. The service serves it under /api/admin and the
+    # identity provider only advertises it to the acme-admin group; restricting
+    # it further at the ingress is `public-edition` U7 and is not done here yet.
+    acme-admin:
+      rule: Host(`admin.acmealias.com`)
+      entrypoints: https
+      tls: *acme-tls
+      service: acme-app
+
+    # The identity provider.
+    acme-auth:
+      rule: Host(`auth.acmealias.com`)
+      entrypoints: https
+      tls: *acme-tls
+      service: acme-authentik
+
+  services:
+    # One backend for three hostnames: the service serves the console, the
+    # challenge API and the staff tree from a single HTTP listener, separated by
+    # path prefix (design P16). What is exposed is traefik's decision, not the
+    # binary's — which is why the same service appears three times above rather
+    # than three ports appearing here.
+    acme-app:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:18080"
+
+    acme-site:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:18081"
+
+    acme-authentik:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:18000"
