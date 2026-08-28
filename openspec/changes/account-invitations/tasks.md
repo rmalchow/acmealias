@@ -80,50 +80,35 @@
 - [x] 6.3 Add both to the published OpenAPI document, since they are part of the public API
 - [x] 6.4 Test that the accept routes work for a session holding no membership at all
 
-## 7. Identity
+## 7. Identity — RESOLVED: invitations never touch the identity provider
 
-> **Group 7 is BLOCKED on `self-service-signup`, and blocked in a way that is
-> worth stating precisely, because half of it turns out to be already done and
-> the other half cannot be started.**
+> **The entry point is the CONSOLE, not the enrolment flow**, and that decision
+> deletes most of this group rather than unblocking it.
 >
-> ALREADY DONE, by this change rather than by that one: the service now reads
-> the identity provider's `email` claim at sign-in and records it on the user —
-> and ONLY when `email_verified` is true. That is what an invitation binds to,
-> and until this change every caller of `store.FindOrCreateUser` passed an empty
-> string, so the binding had nothing to bind to. A partial unique index on
-> `lower(email)` makes one address identify at most one person, which the
-> binding silently assumed and nothing enforced.
+> This group assumed an invited person needed a special way IN — an invitation
+> carried into authentik's enrolment flow, so the identity provider knew an
+> invitation existed. Two mechanisms were possible and both were bad: authentik's
+> invitation stage means our backend holds an authentik admin credential and
+> gains a new failure mode at invitation-issue time, and a server-imposed email
+> prompt means skipping the verification stage by policy. Either way the identity
+> provider learns about a product concept it has no business knowing.
 >
-> UNBLOCKED, AND NOT STARTED. This group used to read "cannot be started: there
-> is no registration flow to add an entry point TO". There is one now —
-> `self-service-signup` added `acmeservice-enrollment` to
-> `development/authentik/blueprints/acmeservice.yaml`, and it is reachable from
-> the sign-in form. So 7.1 and 7.4 have something to edit.
+> It is not needed. An invited person signs up and is approved like anybody else;
+> the invitation is waiting for them on the account picker when they arrive,
+> matched by the verified address the provider already gave us. That is design
+> V11 — the dashboard list — which this change already specifies and already
+> built. The token in the mail is the other route to the same screen, not a
+> different door into the product.
 >
-> **READ V13 BEFORE WRITING ANY OF IT, because the shape changed.** An earlier
-> plan built this as a SECOND enrolment flow whose `user_write` created users
-> active — the exemption's whole mechanism. That is reversed: there is ONE
-> enrolment flow and everybody who walks it waits for approval, invited or not
-> (`self-service-signup` design S7, and task 3.2 there forbids the second flow
-> explicitly). What an invited person skips is the confirmation mail, and only
-> that. Confirmed is not admitted.
->
-> So 7.1 is an entry point INTO the existing flow carrying the invitation, not a
-> flow of its own. Two mechanisms are available and neither has been chosen:
-> authentik's `invitation` stage on the same flow, or a server-imposed `email`
-> prompt value with the email stage skipped under a policy. What must hold is
-> that the address is recorded confirmed, no second message is sent, and
-> `create_users_as_inactive` still applies.
->
-> **And carry the cost forward rather than discovering it.** The fourteen-day
-> invitation clock runs while the invitee waits for approval (V13), so 11a.4 and
-> `self-service-signup` 7.5 are the same test seen from two sides — whichever
-> group writes it should delete the other's copy rather than write two.
+> **The accepted cost:** the fourteen-day clock runs while somebody waits for
+> approval, so a slow review can expire an invitation belonging to a person doing
+> everything right. Accepted deliberately — the account can see the expiry in its
+> pending list and re-send, which is the recovery V18 exists to preserve.
 
-- [ ] 7.1 Add the registration entry point reached from an invitation, creating a user with the invited address already confirmed and sending no confirmation message
-- [ ] 7.2 Assert that only the invited address is confirmed by this path
-- [ ] 7.3 Add the return-to-invitation redirect on the sign-in path
-- [ ] 7.4 Test that registration reached any other way still requires confirmation
+- [x] 7.1 The invitation's entry point is the account picker, not the enrolment flow. Nothing is added to `development/authentik/blueprints/acmeservice.yaml`, and that is the decision rather than an omission
+- [x] 7.2 Match invitations to the arriving person by the VERIFIED address the provider supplied — which this change made available by reading the `email` claim only when `email_verified` is true
+- [x] 7.3 Keep the token route working alongside it. A link in a mail and a row on the picker reach the same accept, so somebody who kept the message and somebody who deleted it both get there
+- [x] 7.4 Add NO authentik admin credential to the service. It would couple invitation issue to the provider being up, to do something the console already does without it
 
 ## 8. Mail
 

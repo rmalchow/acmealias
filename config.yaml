@@ -305,7 +305,13 @@ mail:
   # and the substitution happens before the parse, so the damage is done to a
   # value nobody wrote a backslash into on purpose. A multi-line footer is set
   # through the environment variable, where no YAML quoting applies.
-  footer: '${ACME_MAIL_FOOTER:AcmeAlias — support@acmealias.com}'
+  #
+  # The name below is a NAMED PLACEHOLDER rather than a plausible one. "AcmeAlias
+  # Inc" is obviously a stand-in — nobody reads it and believes the company has
+  # been registered — where an invented street address and a made-up register
+  # number would look finished and pass review. The rest of §5 is missing on
+  # purpose, and its absence is what has to stay visible.
+  footer: '${ACME_MAIL_FOOTER:AcmeAlias Inc — support@acmealias.com}'
 
   # host:port. In a container stack this is the mail service's own name — NOT
   # the hostname its web interface is served on, which does not speak SMTP.

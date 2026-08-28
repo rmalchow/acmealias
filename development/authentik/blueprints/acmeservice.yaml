@@ -399,12 +399,34 @@ entries:
   # The second write. It creates nothing — it exists to move a person from
   # users/pending-verification to users/pending-approval once, and only once, the
   # link in their mail has actually been clicked.
+  # `create_users_as_inactive: false` — the gate moves OFF `is_active` here, and
+  # this is the line that does it. Measured, not reasoned about:
+  #
+  #   is_active FALSE   Django's ModelBackend refuses inside the identification
+  #                     stage (which carries `password_stage`, and must, because
+  #                     that is what closes the enumeration oracle). Nothing
+  #                     after it ever runs, so the person is told "Failed to
+  #                     authenticate." — byte-identical to a wrong password, and
+  #                     no later stage or policy can change that.
+  #
+  #   is_active TRUE    identification and the password succeed, and the deny
+  #   + path            stage bound after them fires with a sentence that says
+  #                     what is actually happening. Verified against this stack:
+  #                     a wrong password and an unknown identifier still return
+  #                     identical bodies, so the oracle stays shut.
+  #
+  # THE COST, because it is real and belongs next to the setting: `is_active` was
+  # a flag Django enforces on every authentication path there is. The path is a
+  # policy that guards the flows it is bound to and nothing else. So ANY flow
+  # that ends in a user_login stage must carry the same deny — a recovery flow is
+  # the one that will be added next and the one that would let an unapproved
+  # person in through "forgot password".
   - model: authentik_stages_user_write.userwritestage
     id: enrollment-stage-user-write-verified
     identifiers: { name: acmeservice-enrollment-user-write-verified }
     attrs:
       name: acmeservice-enrollment-user-write-verified
-      create_users_as_inactive: true
+      create_users_as_inactive: false
       user_creation_mode: never_create
 
   # `activate_user_on_success` IS DELIBERATELY FALSE, AND THE SHIPPED EXAMPLE
@@ -793,6 +815,46 @@ entries:
   # which is the correct name of the wrong product as far as anyone signing in is
   # concerned: they came to us, and the identity provider being a separate piece
   # of software is our business rather than theirs.
+  # --- the sentence an unapproved person actually reads --------------------------
+  #
+  # A DenyStage bound AFTER the password, so it can say something specific without
+  # telling a stranger whether an address is registered. The ordering is the whole
+  # trick: everything before order 20 runs on an identifier alone, and anything
+  # that refuses there is an oracle.
+  - model: authentik_policies_expression.expressionpolicy
+    identifiers: { name: acmeservice-is-pending-approval }
+    attrs:
+      name: acmeservice-is-pending-approval
+      expression: |
+        return request.user.path.startswith("users/pending-approval")
+
+  - model: authentik_stages_deny.denystage
+    identifiers: { name: acmeservice-pending-approval-deny }
+    attrs:
+      name: acmeservice-pending-approval-deny
+      # Says what is happening, what happens next, and asks for nothing. A person
+      # who has just proved they know the password and is still refused needs to
+      # know it is not them.
+      deny_message: >-
+        Your registration is still being reviewed. We will email you as soon as
+        it is approved.
+
+  # Order 25: after the password stage (20) and before MFA (30). Bound to the
+  # AUTHENTICATION flow, not the enrolment one — enrolment ends without a session
+  # and has nothing to deny.
+  - model: authentik_flows.flowstagebinding
+    id: binding-pending-approval-deny
+    identifiers:
+      target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      stage: !Find [authentik_stages_deny.denystage, [name, acmeservice-pending-approval-deny]]
+      order: 25
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf binding-pending-approval-deny
+      policy: !Find [authentik_policies_expression.expressionpolicy, [name, acmeservice-is-pending-approval]]
+      order: 0
+
   - model: authentik_flows.flow
     identifiers: { slug: default-authentication-flow }
     attrs:

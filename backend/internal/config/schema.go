@@ -322,7 +322,7 @@ func (mailBlock) Defaults() map[string]any {
 		"from":     "no-reply@acmealias.com",
 		"sender":   "AcmeAlias",
 		"reply_to": "support@acmealias.com",
-		"footer":   "AcmeAlias — support@acmealias.com",
+		"footer":   "AcmeAlias Inc — support@acmealias.com",
 	}
 }
 
