@@ -116,14 +116,34 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	// Logout is reachable by GET as well as POST: the console offers it as a
 	// link, and a forged sign-out is a nuisance rather than a vulnerability —
 	// it destroys a credential, it cannot use one.
-	logout := func(c echo.Context) error {
-		if err := o.Auth.Logout(c.Request().Context(), c.Response(), c.Request()); err != nil {
-			return err
+	//
+	// THE TWO VERBS ANSWER DIFFERENTLY, AND THEY HAVE TO.
+	//
+	// The GET is followed by a browser, so it must MOVE the browser: a link that
+	// answers 204 leaves the page exactly where it was, with no navigation and no
+	// repaint. The session is destroyed and the cookie is cleared, so the person
+	// really is signed out — they simply do not go anywhere, the console keeps
+	// showing the screen it last rendered, and every subsequent click answers 401.
+	// Which is indistinguishable, from the outside, from sign-out being broken.
+	//
+	// The POST keeps its 204, because its caller is a program that has no browser
+	// to move and would have to ignore a redirect anyway.
+	logout := func(redirect bool) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if err := o.Auth.Logout(c.Request().Context(), c.Response(), c.Request()); err != nil {
+				return err
+			}
+			if redirect {
+				return c.Redirect(http.StatusSeeOther, "/")
+			}
+			return c.NoContent(http.StatusNoContent)
 		}
-		return c.NoContent(http.StatusNoContent)
 	}
-	api.GET("/auth/logout", logout)
-	api.POST("/auth/logout", logout)
+	// 303, not 302: the browser arrived by GET and must continue by GET. 302 is
+	// permitted to preserve the method, which for a link is merely academic and
+	// for anything else is a trap.
+	api.GET("/auth/logout", logout(true))
+	api.POST("/auth/logout", logout(false))
 
 	// CSRF first, so even a 401 carries a fresh XSRF-TOKEN cookie for the
 	// console to send back after signing in. Echo validates the token on
