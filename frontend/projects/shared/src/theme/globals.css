@@ -19,10 +19,13 @@
  * the brand face — material/word.svg is set in it — and the marketing site
  * serves copies of these same .woff2 files, so the three surfaces render in the
  * same metal. Barlow Condensed is the wordmark's cut and is used only where the
- * product name is set, never for running text. */
+ * product name is set, never for running text — in TWO weights, because the
+ * wordmark is set in two: `Acme` at 300 and `Alias` at 400, which is what makes
+ * one word read as two parts without a separator or a second colour. */
 @import "@fontsource/barlow/300.css";
 @import "@fontsource/barlow/400.css";
 @import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow-condensed/300.css";
 @import "@fontsource/barlow-condensed/400.css";
 @import "@fontsource/barlow-condensed/700.css";
 

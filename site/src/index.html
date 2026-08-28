@@ -8,7 +8,7 @@
       name="description"
       content="Let's Encrypt certificates over the DNS-01 challenge, without handing anyone your DNS credentials. One CNAME, once."
     />
-    <link rel="icon" href="./brand/logo.svg" type="image/svg+xml" />
+    <link rel="icon" href="./brand/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -29,18 +29,23 @@
     <header class="bar">
       <!--
         The wordmark is TEXT, not the artwork in brand/wordmark.svg. Set in the same
-        face the artwork is drawn in (Barlow Condensed 700, already served from
-        fonts/), so the two are the same shapes — and in white, because the mark
-        beside it is the only green thing the bar is allowed. Text also selects,
-        scales with the browser's font size and reads out to a screen reader as a
-        name rather than as alt text standing in for one.
+        face the artwork is drawn in (Barlow Condensed, served from fonts/), so the
+        two are the same shapes — and in white, because the mark beside it is the
+        only green thing the bar is allowed. Text also selects, scales with the
+        browser's font size and reads out to a screen reader as a name rather than
+        as alt text standing in for one.
+
+        `Acme` is set light and `Alias` regular. The <b> carries no emphasis and is
+        purely the weight boundary; it sits INSIDE the one span so the word is a
+        single string — selecting it, or reading it out, gives "AcmeAlias" and not
+        "Acme Alias".
 
         brand/wordmark.svg stays in the repository: it is what a printed or emailed
         surface uses, where no font is being served.
       -->
       <a class="mark" href="/" aria-label="AcmeAlias — home">
         <img class="mark-logo" src="./brand/logo.svg" alt="" />
-        <span class="mark-word">AcmeAlias</span>
+        <span class="mark-word"><b>Acme</b>Alias</span>
       </a>
       <nav>
         <!--

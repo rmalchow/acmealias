@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 
 /** One destination in the navigation. `path` is a router link; `label` is what the person reads. */
@@ -68,7 +68,7 @@ export interface NavItem {
     <header class="bar" [class.staff]="tone() === 'staff'">
       <a class="brand" [routerLink]="home()" [attr.aria-label]="product() + ' — home'">
         <span class="brand-box"><img src="brand/logo.svg" alt="" /></span>
-        <span class="brand-word">{{ product() }}</span>
+        <span class="brand-word">@if (wordLight(); as l) {<b>{{ l }}</b>}{{ wordRest() }}</span>
         @if (badge(); as text) {
           <span class="brand-badge">{{ text }}</span>
         }
@@ -146,10 +146,24 @@ export interface NavItem {
          for the same reason: the mark is what the eye should land on. */
       .brand-word {
         font-family: 'Barlow Condensed', Barlow, sans-serif;
-        font-weight: 700;
-        font-size: 1.15rem;
+        /* Two weights in one word — 'Acme' light, 'Alias' regular — the same treatment the
+           marketing bar uses (site/src/styles.css '.mark-word'). The pairing does the work a
+           separator or a second colour would otherwise do: the name reads as two parts while
+           staying one object.
+
+           It was 700 across the whole word, and condensed bold at this size out-weighed the mark
+           beside it — the eye landed on the word rather than on the glyph, which is backwards for
+           a bar whose only accent-coloured thing is the mark. */
+        font-weight: 400;
+        font-size: 1.35rem;
         letter-spacing: 0.01em;
         color: var(--ac-ink);
+      }
+
+      /* The light half. Inside the one span, so the word stays a single selectable,
+         screen-reader-readable string: 'AcmeAlias', not 'Acme Alias'. */
+      .brand-word b {
+        font-weight: 300;
       }
 
       /* The mark sits in a box of its own rather than floating against the bar. The logo is a
@@ -235,8 +249,27 @@ export interface NavItem {
 export class ShellComponent {
   /** Where the mark leads. The customer console's front screen is `/projects`; staff has one. */
   readonly home = input<string>('/');
-  /** The product name, set as the wordmark. */
-  readonly product = input<string>('acmeservice');
+  /**
+   * The product name, set as the wordmark.
+   *
+   * `light` is the part set in the lighter weight, and it must be a PREFIX of `product` — the
+   * wordmark renders it as one string with a weight boundary inside, not as two words. The
+   * default splits `AcmeAlias` after `Acme`, which is the marketing site's treatment.
+   *
+   * It defaulted to `acmeservice`, which is the repository's name and not the product's.
+   */
+  readonly product = input<string>('AcmeAlias');
+  /** The prefix of `product` set in the lighter weight. Empty renders the word at one weight. */
+  readonly light = input<string>('Acme');
+
+  /** The wordmark's two halves. Computed rather than sliced in the template so a `light` that is
+   *  not a prefix degrades to the whole word at one weight instead of rendering nonsense. */
+  protected readonly wordLight = computed(() =>
+    this.product().startsWith(this.light()) ? this.light() : '',
+  );
+  protected readonly wordRest = computed(() =>
+    this.product().startsWith(this.light()) ? this.product().slice(this.light().length) : this.product(),
+  );
   /** A word beside the mark naming this surface — `staff`. Null on the customer console. */
   readonly badge = input<string | null>(null);
   /** The bar's ground. Only `staff` differs, and only in the ground; see the class comment. */
