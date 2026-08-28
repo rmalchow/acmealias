@@ -328,3 +328,65 @@ basis, so that the outcome is reported to the account rather than silently withh
 
 - **WHEN** an invitation is issued to a blocked address
 - **THEN** issuing succeeds and the refusal happens at acceptance
+
+### Requirement: An invitation expires fourteen days after it is issued
+
+An invitation SHALL expire fourteen days after it is issued.
+
+#### Scenario: An invitation outlives a fortnight's absence
+
+- **WHEN** a person opens an invitation thirteen days after it was issued
+- **THEN** it is outstanding and may be accepted
+
+#### Scenario: An invitation does not outlive the fortnight
+
+- **WHEN** a person opens an invitation fifteen days after it was issued
+- **THEN** it is reported as expired
+
+### Requirement: A signed-in person sees the invitations issued to their address
+
+The service SHALL show a person, on authenticating, every outstanding invitation issued to their
+address, whichever account issued it, without requiring the invitation's token.
+
+Accepting an invitation by this route SHALL be governed by the same rule as accepting it by its token:
+the person SHALL be authenticated as the invited address.
+
+#### Scenario: The mail never arrived
+
+- **WHEN** a person authenticates as an address that holds an outstanding invitation and has not opened
+  the message
+- **THEN** the invitation is presented to them, and may be accepted
+
+#### Scenario: Someone else's invitation is not presented
+
+- **WHEN** a person authenticates as an address that holds no outstanding invitation
+- **THEN** no invitation is presented, whatever invitations exist for other addresses
+
+#### Scenario: The two routes reach the same invitation
+
+- **WHEN** an invitation is accepted without its token by the invited address
+- **THEN** the membership created is the one the invitation offered, and the token no longer resolves
+
+### Requirement: An invitation may be declined, and declining is an answer
+
+The service SHALL let the invited address decline an invitation.
+
+Declining SHALL consume the invitation, remove it from the account's outstanding list, and be
+distinguishable from an invitation that expired unanswered.
+
+Declining SHALL NOT prevent the account from issuing a further invitation to the same address.
+
+#### Scenario: A decline is visible as a decline
+
+- **WHEN** an invited person declines
+- **THEN** the account sees that the invitation was declined, rather than seeing it expire
+
+#### Scenario: A declined invitation is not resurrectable
+
+- **WHEN** the token of a declined invitation is resolved
+- **THEN** it does not offer a membership
+
+#### Scenario: Declining is not a block
+
+- **WHEN** an account invites an address that previously declined
+- **THEN** the invitation is issued

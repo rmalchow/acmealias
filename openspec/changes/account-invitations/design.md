@@ -63,13 +63,26 @@ CREATE TABLE invitations (
   created_at    timestamptz NOT NULL DEFAULT now(),
   expires_at    timestamptz NOT NULL,
   revoked_at    timestamptz NULL,
+  declined_at   timestamptz NULL,
   accepted_at   timestamptz NULL,
   accepted_by   uuid        NULL REFERENCES users (id)
 );
 CREATE UNIQUE INDEX invitations_pending_idx
     ON invitations (account_id, email)
- WHERE accepted_at IS NULL AND revoked_at IS NULL;
+ WHERE accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL;
+
+CREATE INDEX invitations_by_email_idx
+    ON invitations (email)
+ WHERE accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL;
 ```
+
+The state is carried as three nullable timestamps rather than a status column, because each of them
+records *when* as well as *which*, and the audit trail wants both. Outstanding is the absence of all
+three plus an `expires_at` in the future — expiry is evaluated at read time (V8), so it is not a
+fourth column that some job has to write.
+
+`invitations_by_email_idx` is what makes V11's second path a lookup rather than a scan: signing in
+asks "what is outstanding for this address" across every account, which no other index answers.
 
 `role_id` references `roles` without `ON DELETE CASCADE`, deliberately — see V6.
 
@@ -80,7 +93,9 @@ random, so a memory-hard hash buys nothing over SHA-256 — the same argument th
 already makes.
 
 The partial unique index is what makes V7 (one outstanding invitation per address per account)
-structural rather than a check somebody has to remember.
+structural rather than a check somebody has to remember. `declined_at` sits in its predicate for the
+reason V12 gives: a decline is an answer, not a block, so the account may invite the same person
+again — and the index must let it.
 
 `email` is stored normalized — lower-cased, whitespace trimmed — and compared in that form. Local-part
 case sensitivity is technically permitted by RFC 5321 and observed by essentially no mail system; treating
@@ -221,10 +236,15 @@ leaves the roster's pending list and is retained for the audit trail.
 wastes a mail and produces a confusing dead end for the recipient. This is not a disclosure problem:
 membership of *this* account is already visible to the inviter through the roster.
 
-### V8. Expiry is seven days, and an expired link says so
+### V8. Expiry is fourteen days, and an expired link says so
 
-Seven days. Long enough to survive a weekend, a holiday Monday and a full inbox; short enough that a
-message sitting in an archive is not a live credential months later.
+Fourteen days. Long enough to survive a holiday, a conference week and a full inbox, which is the
+realistic failure — the person invited is usually the person with the least free attention. Short
+enough that a message sitting in an archive is not a live credential months later.
+
+Seven was the first proposal and was rejected as too short for exactly the case that matters: an
+invitation that arrives the day somebody goes away comes back to a dead link, and the recovery
+costs an administrator's time as well as the invitee's.
 
 An expired link renders a page that says the invitation has expired and to ask the account for a new one.
 It does **not** offer self-service renewal — renewal is the account's decision, since the account is what
@@ -269,18 +289,70 @@ ObjectInvitation = "invitation"
 ActionInvitationCreate = "invitation.create"
 ActionInvitationRevoke = "invitation.revoke"
 ActionInvitationResend = "invitation.resend"
-ActionInvitationAccept = "invitation.accept"
-ActionInvitationExpire = "invitation.expire"
+ActionInvitationAccept  = "invitation.accept"
+ActionInvitationDecline = "invitation.decline"
+ActionInvitationExpire  = "invitation.expire"
 ```
 
 Each entry names the invited address and the role offered. `invitation.accept` names both the accepting
 user and the address, which is what makes a bound-acceptance audit trail meaningful — it is the evidence
-that the person who joined is the person who was invited. `invitation.expire` is written by the system
-actor, matching `apikey.expire`.
+that the person who joined is the person who was invited. `invitation.decline` names the same pair, and
+is what lets an administrator tell a refusal from a message that never arrived (V12).
+`invitation.expire` is written by the system actor, matching `apikey.expire`.
 
 The token never appears in an entry, in either the before or after state. `authz.Record` already scrubs
 secret-looking fields; `token_hash` is excluded explicitly rather than relying on the field name
 matching a heuristic.
+
+### V11. The link is a convenience, not the only way in — an invitee sees their invitations on arrival
+
+Everything above is written around the token in the mail, and a flow that depends on a link is a flow
+that depends on mail delivery being perfect. It is not. The message lands in spam, the corporate
+gateway rewrites the URL and breaks it, the recipient reads it on a phone and signs in on a laptop,
+or somebody deletes it and asks to be invited again — which produces a second invitation and a
+support conversation instead of a click.
+
+So the invited address is what an invitation is bound to (V2), and that binding works in **both**
+directions:
+
+- **From the link.** The token resolves the invitation, and the person authenticates as the invited
+  address to accept it. This is the path the mail takes.
+- **From the session.** A person who signs in as `alice@corp.com` is shown every outstanding
+  invitation issued to `alice@corp.com`, on their dashboard, whether or not they ever opened a mail.
+
+The second path grants nothing the first does not. Both require authenticating as the invited
+address, which is the whole of V2's binding; the token only ever addressed the row, and a session
+already addressed by the same address addresses it just as well. **Being signed in as the invited
+address is strictly stronger evidence than holding a link sent to it**, so a flow that accepts the
+link must accept the session.
+
+This is also what makes the empty state useful rather than a wall. V5 already has a person arriving
+with no account selected and nothing to select. Without this they see an empty product and are told
+to go find an email; with it, the thing they came for is the first thing on the screen.
+
+### V12. Accept and DECLINE, and declining is not the same as ignoring
+
+The invitation is offered with two answers, not one and a silence.
+
+Declining marks the invitation declined, removes it from the account's pending list, and is written
+to the audit trail like any other resolution. It does **not** block the address: the account may
+invite the same person again, because "not now" and "never" are different answers and we are not in
+a position to tell which one was meant.
+
+**Why bother, when ignoring an invitation already expires it.** Because the two outcomes look
+identical to the account and mean opposite things. An administrator watching a pending invitation sit
+for fourteen days cannot tell whether the person never saw it — the spam folder, the rewritten URL,
+the wrong address — or saw it and does not want to join. The first calls for re-sending or a phone
+call; the second makes re-sending a nuisance aimed at somebody who already said no. Fourteen days of
+silence answers neither question, and the administrator's most likely reaction to silence is to
+invite again.
+
+Declining does not reveal anything the account does not already have: the account chose the address
+and can already see whether the invitation was accepted.
+
+**A declined invitation is not resurrectable by its own link.** The token is consumed by the decline
+exactly as it is by the acceptance (V4) — otherwise "declined" would be a state a stray click could
+undo, and the person who declined would find themselves a member of an account they refused.
 
 ## Risks / Trade-offs
 

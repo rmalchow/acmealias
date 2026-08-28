@@ -63,11 +63,27 @@ response *"does not differ from one for an address that does not"* have a user.
 
 ```
 inviter enters email + role
-   └─> [mail] ──> accept link (token)
-                     └─> authenticated?  ── no ──> login or signup
-                                          └─ yes ─┐
-                                                  └─> "Join <account> as <role>?" ── accept
+   └─> [mail] ──> accept link (token) ─┐
+   └─> (signs in as the invited address, mail never opened) ─┐
+                                                            ├─> authenticated? ─ no ─> login or signup
+                                                            │                   └ yes ┐
+                                                            └──> "Join <account> as <role>?" ─ accept
+                                                                                              └ decline
 ```
+
+**There are two ways in, and the second is not a fallback.** The mail's link is the path we advertise,
+and it is the path that fails when the message lands in spam, when a corporate gateway rewrites the URL
+and breaks it, or when somebody reads it on a phone and signs in on a laptop. So a person who signs in
+as `alice@corp.com` is shown every invitation issued to `alice@corp.com` whether or not they ever
+opened one. This grants nothing extra: both routes require authenticating as the invited address, and
+being signed in as that address is strictly stronger evidence than holding a link sent to it.
+
+**And there are two answers, not one and a silence.** Declining resolves the invitation and is visible
+to the account as a decline. Ignoring it expires it after fourteen days — and to the administrator
+watching, those look identical while meaning opposite things: never saw it (re-send, or call them) or
+saw it and said no (re-sending is then a nuisance aimed at somebody who already answered). A decline is
+not a block; the account may invite the same person again, because "not now" and "never" are different
+answers and we cannot tell which was meant.
 
 Worked through with real values. Cloudpowered Ltd holds an account named `cloudpowered`, in which
 `bob@cloudpowered.example` is an unrestricted member. He invites `alice@corp.com` as `Platform
@@ -171,7 +187,7 @@ that will be refused unless the attempter can authenticate as the invited addres
 
 ### Everything else the flow needs
 
-Invitations expire, are revocable, are re-sendable (which invalidates the previous token), fail closed
+Invitations expire after fourteen days, are revocable, are re-sendable (which invalidates the previous token), fail closed
 if the role they name has been deleted, and are rate limited per account and per invited address. Each
 of those is specified, and the reasoning is in the design document rather than here.
 
