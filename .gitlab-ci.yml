@@ -137,6 +137,26 @@ test-go:
     - cp "${CONFIG_JSON}" ~/.docker/config.json
     - docker buildx create --name acme-builder --driver docker-container --bootstrap || true
     - docker buildx use acme-builder
+  # PUSHED, NOT LOADED, and the difference is the whole point of this edit.
+  #
+  # `--load` puts the image in the LOCAL docker daemon of whichever machine ran
+  # the job. That worked for as long as there was one runner and it happened to
+  # be the production host: `docker compose up` found the image already there
+  # and never pulled. It was never written down, and it stopped being true the
+  # moment a second runner existed — a green build then left the artefact on the
+  # wrong machine, invisible to the server that needed it, with no error
+  # anywhere.
+  #
+  # So the build stage publishes. `latest` is what the production compose file
+  # resolves ${IMAGE_TAG:-latest} to, and the SHA tag rides along beside it so a
+  # deployment can be pinned to a commit and rolled back to one.
+  #
+  # THIS MAKES EVERY MAIN BUILD A PUBLISH, which the tag-only publish stage below
+  # was written to avoid. That rule is not being overturned by accident: it drew
+  # the line between "compiles" and "deployable", and the line has moved, because
+  # main is now the only branch that builds at all. Nothing DEPLOYS on its own —
+  # a server still has to pull and recreate — so what changes is where the
+  # artefact lives, not who decides to run it.
   script: |
     IMAGE=$REGISTRY/$IMAGE_NAME
     CACHE=$CACHE_DIR/$IMAGE_NAME
@@ -148,7 +168,8 @@ test-go:
       --build-arg  BUILDKIT_INLINE_CACHE=1 \
       -f "$DOCKERFILE" \
       -t "$IMAGE:$CI_COMMIT_SHA" \
-      --load \
+      -t "$IMAGE:latest" \
+      --push \
       .
 
 build-acmealias:
@@ -180,10 +201,14 @@ build-acmesite:
 # fix. If merges should one day block on end-to-end issuance, this is a
 # one-block edit — the script the job would call is exactly the same one.
 
-# PUBLISH IS STILL TAG-ONLY. The build stage above proves both images compile on
-# every push to a branch CI runs on; pushing them to a registry that a server
-# pulls `latest` from is a deployment, and a deployment on every green commit is
-# a different decision from a build on every green commit. Tag to release.
+# PUBLISH IS TAG-ONLY, and now overlaps the build stage on purpose.
+#
+# It used to be the only thing that pushed anything; the build stage above now
+# pushes `latest` and a SHA tag on every main build, because a build whose
+# artefact exists only in one runner's local daemon is not an artefact. What
+# this stage still does that the other does not is mint a NAMED, IMMUTABLE
+# release: `$CI_COMMIT_TAG` is a human decision about a version, and it is the
+# tag a rollback names when nobody remembers which commit was good.
 
 .publish-image: &publish-image
   stage: publish
