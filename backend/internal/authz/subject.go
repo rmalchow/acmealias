@@ -105,7 +105,7 @@ func ObjectOf(v any) Object {
 	case *model.Alias:
 		return Object{Type: TypeAlias, ID: o.ID, AccountID: o.AccountID, ProjectID: o.ProjectID, LoadBalancerID: o.LoadBalancerID}
 	case *model.APIKey:
-		// A key has no project or load balancer ancestor since 000009: it is a
+		// A key has no project or load balancer ancestor: it is a
 		// subject anchored to the account, and what it may reach is its grants
 		// rather than its position in the tree. So a grant OVER a key — the
 		// key.write permission — can only be anchored at the account.

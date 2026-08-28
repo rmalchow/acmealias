@@ -227,7 +227,7 @@ func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string,
 			return fmt.Errorf("create account: %w", err)
 		}
 		// The default role set (design C10, task 2.5). It used to be seeded by
-		// migration 000008 across every account that existed at migration time,
+		// a migration across every account that existed at migration time,
 		// which is what made the four names a global vocabulary; it is written
 		// per account here instead, which is what makes them this account's own.
 		//
@@ -284,9 +284,10 @@ var ErrSecondPersonalAccount = errors.New("store: a user may own only one person
 //
 // The row is locked for the length of the check, so two concurrent transfers
 // serialize rather than both reading the same owner and both writing over it.
-// The database refuses both of the refusals below on its own (migration 000013's
-// trigger and partial unique index); this is where they become a sentence the
-// caller can read instead of a constraint name.
+// The database refuses both of the refusals below on its own (the
+// accounts_kind_is_immutable trigger and the accounts_one_personal_per_owner
+// index); this is where they become a sentence the caller can read instead of a
+// constraint name.
 //
 // Establishing the recipient's membership is the CALLER's job, in this same
 // transaction — pass the transaction handle. An owner who is not a member is an

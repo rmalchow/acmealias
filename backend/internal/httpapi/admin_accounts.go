@@ -332,8 +332,9 @@ func (a *admin) checkout(c echo.Context) error {
 // where "who has this now" is the entire question.
 //
 // The refusals — a personal account is never transferred, and nobody ends up
-// with two — live in store.TransferOwnership and, under it, in migration
-// 000013's trigger and partial unique index (design C1, C2).
+// with two — live in store.TransferOwnership and, under it, in the schema's
+// accounts_kind_is_immutable trigger and accounts_one_personal_per_owner index
+// (design C1, C2).
 func (a *admin) transferAccount(c echo.Context) error {
 	sc, err := a.scope(c)
 	if err != nil {

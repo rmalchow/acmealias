@@ -137,8 +137,8 @@ func TestIntegrationConfigAdminAndKeyRotationDifferByOneAction(t *testing.T) {
 
 // A role that may mint an API key must hold what the key is minted with, or the
 // subset rule (P10) lets it create only useless ones. That omission shipped
-// once — migration 000012 is the repair — so it is asserted about the successor
-// seed rather than trusted to the transcription.
+// once and had to be repaired in a follow-up migration, so it is asserted about
+// the seed rather than trusted to the transcription.
 func TestIntegrationKeyMintingRolesHoldWhatAKeyIsMintedWith(t *testing.T) {
 	db, sc := scopedDB(t)
 	ctx := context.Background()

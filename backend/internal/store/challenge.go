@@ -51,7 +51,7 @@ type ChallengeValue struct {
 // publishedBy is the API key identifier (e.g. "k_7f3a91c4") as plain text, not a
 // foreign key: revoking or deleting the key must not delete or invalidate the
 // records it published (design D6). An empty string stores NULL.
-// Scoped, since migration 000010: challenges inherits a policy from aliases
+// Scoped: challenges inherits its row-level security policy from aliases
 // rather than carrying account_id of its own. The scope is what sets the tenant
 // the policy reads, so the insert must run inside it — without one the policy
 // finds no visible alias and refuses the row, which is the failure direction to

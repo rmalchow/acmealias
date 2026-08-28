@@ -131,7 +131,7 @@ func ExpireKeys(ctx context.Context, db *gorm.DB, m *obs.Metrics) (int, error) {
 			if res.RowsAffected == 0 {
 				return nil
 			}
-			// A key has no project since 000009 — it is anchored to the
+			// A key has no project — it is anchored to the
 			// account and reaches whatever its grants name, which may be
 			// several projects or none. The audit entry therefore carries no
 			// project filter, which is honest: there is no single project this

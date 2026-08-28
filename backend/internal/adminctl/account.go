@@ -101,12 +101,12 @@ func AccountCreate(ctx context.Context, db *gorm.DB, out io.Writer, slug, name, 
 // The three repair verbs below exist because of what an UPGRADE leaves behind,
 // and they are the reason this file is not just AccountCreate.
 //
-// Migration 000013 turns the internal edition's shared account into a team
-// account. Its members were derived from an identity-provider group claim rather
-// than written down (P18's second branch, which design C10 removes), so
+// The internal edition's shared account survives an upgrade as a team account.
+// Its members were derived from an identity-provider group claim rather than
+// written down (P18's second branch, which design C10 removes), so
 // `account_members` is empty however many people were administering it the day
-// before; and it has no owner to find, so the migration invents a stand-in user
-// whose subject no identity provider issues. The account therefore holds the
+// before; and it has no owner to find, so the upgrade left it with a stand-in
+// user whose subject no identity provider issues. The account therefore holds the
 // deployment's entire inventory and nobody at all can reach it: not by selecting
 // it (mayAct reads account_members), not through the owner exception (the owner
 // cannot sign in), and not through checkout (same).
@@ -174,7 +174,7 @@ func AccountCredit(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writ
 // the caller's job, precisely so it lands in the caller's transaction.
 //
 // A personal account is refused, by store.TransferOwnership and, under it, by
-// migration 000013's trigger (design C1).
+// the schema's accounts_kind_is_immutable trigger (design C1).
 func AccountTransfer(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ownerSubject string) error {
 	if ownerSubject == "" {
 		return fmt.Errorf("--owner is required: the identity-provider subject of the person this account is to belong to")

@@ -229,9 +229,9 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 		fs.Parse(args)
 		return adminctl.AccountCreate(ctx, db, out, *slug, *name, *owner, *credits)
 
-	// The three repair verbs. They exist for what an UPGRADE leaves behind: the
-	// internal edition's account survives migration 000013 with an owner nobody
-	// can authenticate as and an empty roster, because its membership was
+	// The three repair verbs. They exist for an account nobody can get into: an
+	// empty roster and an owner nobody can authenticate as, which is the shape
+	// the internal edition's shared account was left in when its membership was
 	// derived from a group claim rather than written down (design C10). Nothing
 	// in the console can mend that — every route into an account requires being
 	// in it — so it lands here, with the rest of the break-glass path. See

@@ -65,8 +65,8 @@ func TestIntegrationPresentIssuesNoExtraDatastoreReads(t *testing.T) {
 	//   6. read the account, to decide whether it is funded
 	//   7-11. the transaction wrapper's set_config for each scoped statement
 	//
-	// Migration 000010 added one to this, and it is worth naming: challenges now
-	// inherits a policy from aliases, so the upsert runs inside a scope
+	// One of those set_configs is worth naming: challenges inherits a
+	// row-level security policy from aliases, so the upsert runs inside a scope
 	// transaction and pays one set_config. The POLICY itself costs no statement —
 	// it is a subquery inside the upsert, one index lookup on the aliases primary
 	// key — which is the whole reason a joined policy is affordable on this table

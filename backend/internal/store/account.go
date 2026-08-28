@@ -141,7 +141,7 @@ const PersonalAccountRole = "OWNER"
 // IDEMPOTENCE IS NOT THE READ — IT IS THE INDEX. Two concurrent first sign-ins
 // for the same person both find no row and both insert one; the check below
 // loses that race by construction. What actually enforces "at most one" is
-// migration 000013's `unique (owner_user_id) where kind = 'personal'`, so the
+// the schema's `unique (owner_user_id) where kind = 'personal'`, so the
 // insert's unique violation is caught and turned back into a second read rather
 // than reported (C2). The happy path is merely the common case.
 //
@@ -241,8 +241,8 @@ func createPersonalAccount(tx *gorm.DB, user *model.User) (*model.Account, error
 	// two people share a name.
 	//
 	// Making the column nullable was the alternative. It was rejected as a
-	// bigger change than the problem: `slug` is unique-not-null in migration
-	// 000006, three lookups treat it as the human handle for an account, and
+	// bigger change than the problem: `slug` is unique-not-null in the schema,
+	// three lookups treat it as the human handle for an account, and
 	// relaxing it would make "an account has a slug" something every one of them
 	// has to re-check.
 	acc.Slug = "personal-" + strings.ReplaceAll(acc.ID.String(), "-", "")

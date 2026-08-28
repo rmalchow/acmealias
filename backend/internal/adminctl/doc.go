@@ -31,10 +31,10 @@
 //
 // AccountCredit, AccountTransfer and AccountMemberAdd are the repair verbs. They
 // exist for the state an UPGRADE leaves behind rather than for day-to-day
-// administration: migration 000013 turns the internal edition's shared account
-// into a team account whose owner is a stand-in nobody can authenticate as and
-// whose roster is empty, because membership used to be derived from a group
-// claim rather than written down (design C10). The console cannot mend that by
+// administration: an upgrade leaves the internal edition's shared account as a
+// team account whose owner is a stand-in nobody can authenticate as and whose
+// roster is empty, because membership used to be derived from a group claim
+// rather than written down (design C10). The console cannot mend that by
 // construction — every route into an account requires already being in it — so
 // the repair belongs with the rest of the break-glass path. They are also what
 // restores a suspended account when nobody can reach checkout.
@@ -43,7 +43,8 @@
 // user has one because they are a user, materialized at their first sign-in
 // (design C1). Nothing here can create one, and neither the transfer nor the
 // credit will touch one — store.TransferOwnership and store.Credit both refuse
-// it, and migration 000013's trigger is the floor under the first.
+// it, and the schema's accounts_kind_is_immutable trigger is the floor under
+// the first.
 //
 // That confinement is real but it is not a security boundary against the person
 // running the CLI. The authority behind a CLI change is "had the connection

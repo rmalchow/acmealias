@@ -168,7 +168,7 @@ func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.O
 	// CrossAccount, because this runs on the zone-view flush ticker: a batch of
 	// observations covers whatever the nameserver was asked about, across every
 	// account, and there is no session and so no `app.account_id` to confine it
-	// to. `aliases` carries the tenant_isolation policy of migration 000007, so a
+	// to. `aliases` carries the tenant_isolation policy, so a
 	// bare read here resolves NO labels at all — and the failure is silent in the
 	// worst way, because every observation is then counted as "dropped" and the
 	// history reports that the CA never queried anything. That is exactly the
@@ -253,7 +253,7 @@ func ListInteractionsForLoadBalancer(
 	ctx context.Context, db *gorm.DB, sc Scope, loadBalancerID model.ID, query string, onlyUnqueried bool, limit, offset int,
 ) ([]model.ChallengeInteraction, int64, error) {
 	// The interaction history carries no account_id and no foreign keys, on
-	// purpose (000002): a history that disappears when its subject is deleted
+	// purpose: a history that disappears when its subject is deleted
 	// cannot answer the question it exists for. Confinement therefore happens one
 	// level up — the load balancer named here must belong to the scope, and the
 	// listing is refused as not-found when it does not.

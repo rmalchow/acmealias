@@ -61,8 +61,8 @@ func RunSnapshots(ctx context.Context, db *gorm.DB, interval time.Duration, log 
 // It reads across every account by definition — one pass covers the deployment,
 // not a tenant — which is why it is one of the four readers CrossAccount's own
 // doc comment enumerates. Saying so is not optional: `projects`, `aliases`,
-// `domains` and `load_balancers` all carry the tenant_isolation policy of
-// migration 000007, and this runs on a ticker with no session and therefore no
+// `domains` and `load_balancers` all carry the tenant_isolation policy, and
+// this runs on a ticker with no session and therefore no
 // `app.account_id`, so as a bare statement it selects from an empty view of every
 // one of them and writes nothing at all, for ever, without erroring.
 func Snapshot(ctx context.Context, db *gorm.DB, at time.Time) (int64, error) {

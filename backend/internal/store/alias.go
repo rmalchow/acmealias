@@ -44,7 +44,7 @@ func CreateAlias(ctx context.Context, db *gorm.DB, sc Scope, a *model.Alias) err
 // path must do that comparison; ScopedAlias is the wrapper that does it for them.
 //
 // Reading globally has to be SAID, not merely intended. The row-level security
-// policy of migration 000007 filters `aliases` by `current_setting('app.account_id')`,
+// policy on `aliases` filters it by `current_setting('app.account_id')`,
 // and this query runs before any account is known — so left as a bare read it
 // matches nothing at all, and every /present is refused 403 "not authorized for
 // that name" because the alias appears not to exist. CrossAccount is the

@@ -36,10 +36,10 @@ func TestIntegrationMigrationsAreIdempotent(t *testing.T) {
 func TestIntegrationMigrateDownReverses(t *testing.T) {
 	db, dsn := migratedDB(t)
 
-	// The row graph starts at an account, and the migration no longer seeds one:
-	// design C10 made 000006's seed conditional on there being something to
-	// backfill, so a fresh chain has none. The graph therefore begins by making
-	// the account and its owner, which is also what a real deployment does.
+	// The row graph starts at an account, and the migration seeds none: design
+	// C10 removed the edition that had exactly one, so every account is created
+	// by a person. The graph therefore begins by making the account and its
+	// owner, which is also what a real deployment does.
 	owner := model.User{Subject: "sub-owner", DisplayName: "Owner"}
 	if err := db.Create(&owner).Error; err != nil {
 		t.Fatalf("insert user: %v", err)

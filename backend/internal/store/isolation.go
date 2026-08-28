@@ -10,7 +10,7 @@ import (
 // CheckTenantIsolation verifies that the connection this process holds is one
 // the row-level security policies actually apply to.
 //
-// This exists because the policies of migration 000007 are silently inert under
+// This exists because the tenant_isolation policies are silently inert under
 // two very ordinary misconfigurations, and both of them look like a working
 // deployment:
 //
@@ -22,7 +22,7 @@ import (
 //     cross-account jobs and wrong for the process serving tenants.
 //
 // The owner of a table also bypasses its policies — unless the table is FORCEd,
-// which 000007 does, so ownership alone is safe. Superuser is not, and no amount
+// which the schema does, so ownership alone is safe. Superuser is not, and no amount
 // of FORCE changes that.
 //
 // It is called at startup and refuses to continue, rather than warning. A
@@ -58,8 +58,8 @@ func CheckTenantIsolation(ctx context.Context, db *gorm.DB) error {
 	return nil
 }
 
-// PoliciesInstalled reports whether the tenant tables carry the policy
-// migration 000007 creates, and that it is forced. It backs a readiness check
+// PoliciesInstalled reports whether the tenant tables carry the tenant_isolation
+// policy, and that it is forced. It backs a readiness check
 // and the acceptance suite: a schema migrated by an older binary would otherwise
 // serve happily with no isolation at all.
 func PoliciesInstalled(ctx context.Context, db *gorm.DB) error {

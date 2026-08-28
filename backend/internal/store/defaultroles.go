@@ -10,8 +10,8 @@ import "gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 // is this table — the same four names carrying the same authority, written as
 // rows into one account, where the account's owner can edit or delete them.
 //
-// The grants below are not a fresh design. They are transcribed from migrations
-// 000008 and 000009/000012, which reproduced the pre-grant matrix as data under
+// The grants below are not a fresh design. They are transcribed from the
+// migrations that first reproduced the pre-grant matrix as data, under
 // constraint 1 ("the internal edition's observable behaviour must not change").
 // That constraint is discharged rather than violated — see the note in
 // openspec/changes/tenancy-and-permissions — and this is what it bought: the
@@ -27,7 +27,8 @@ import "gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 //     even though no console screen asks for them. They mint API keys, the subset
 //     rule (P10) says a subject may grant only what it holds, and a role that can
 //     create keys but holds no challenge grant can create only useless ones. That
-//     omission shipped once, as migration 000012 records at length.
+//     omission shipped once, and cost a 403 on key creation for exactly the two
+//     roles whose purpose is creating keys.
 //
 // Every grant is [*, *, action] and inheritable: a role-wide permission means
 // "every object of this account", and a wildcard type with a wildcard identifier

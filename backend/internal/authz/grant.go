@@ -107,8 +107,8 @@ const (
 )
 
 // Form reports the identifier form, and is the single place that decides it —
-// the database constraint of migration 000008 enforces the same rule, so a row
-// that disagrees cannot be stored.
+// the role_grants_identifier_form check constraint enforces the same rule, so a
+// row that disagrees cannot be stored.
 func (g Grant) Form() IdentifierForm {
 	switch {
 	case g.Selector != nil:

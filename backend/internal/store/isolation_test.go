@@ -328,9 +328,8 @@ func TestIntegrationScopeDoesNotSurviveAPooledConnection(t *testing.T) {
 	}
 }
 
-// TestIntegrationChallengesInheritIsolationFromTheirAlias is the policy added in
-// migration 000010, which is the one your recursion question turned out to be
-// right about.
+// TestIntegrationChallengesInheritIsolationFromTheirAlias covers the one policy
+// in the schema that reaches through a join rather than reading a column.
 //
 // challenges carries no account_id and cannot: it is written on the certificate
 // hot path and its parent is what identifies the tenant. So its policy asks "is

@@ -360,8 +360,8 @@ type APIKey struct {
 	ID        ID `gorm:"primaryKey"`
 	AccountID ID `gorm:"column:account_id"`
 	// There is no LoadBalancerID. A key is a subject anchored to an account,
-	// and what it may reach is its grants — see migration 000009 for why the
-	// column could not stay alongside them.
+	// and what it may reach is its grants — see the api_keys section of the
+	// schema baseline for why the column could not stay alongside them.
 	Identifier    string // 'k_7f3a91c4', non-secret
 	SecretHash    []byte `gorm:"column:secret_hash"`
 	DisplayPrefix string

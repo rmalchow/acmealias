@@ -229,8 +229,8 @@ func accountOwner(t *testing.T, db *gorm.DB, sc Scope) model.ID {
 // the tests that assert one account cannot reach another's rows.
 func secondAccount(t *testing.T, db *gorm.DB, slug string) Scope {
 	t.Helper()
-	// Every account has an owner since migration 000013, so a test that wants
-	// an account wants a user first.
+	// accounts.owner_user_id is NOT NULL, so a test that wants an account wants
+	// a user first.
 	owner := seedUser(t, db, "second-account-owner:"+slug)
 	a := &model.Account{
 		ID: model.NewID(), Slug: slug, Name: slug,

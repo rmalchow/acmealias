@@ -28,7 +28,7 @@ import (
 //
 // It does NOT guarantee that a query which HAS a Scope actually used it. That is a
 // property of each query's WHERE clause, and it is why Scope sets a per-connection
-// account for the row-level security policies of migration 000008 — see Run. With
+// account for the tenant_isolation policies to read — see Run. With
 // the policy in place, a query that forgets its predicate returns nothing anyway.
 type Scope struct {
 	accountID model.ID
@@ -155,8 +155,7 @@ func (s Scope) Valid() bool { return s.accountID != model.NilID }
 var ErrNoScope = errors.New("store: query has no scope")
 
 // Where narrows a query to the scope's account. Callers use it on tables carrying
-// a materialized account_id, which since migration 000006 is every table a Scope
-// applies to.
+// a materialized account_id, which is every table a Scope applies to.
 func (s Scope) Where(db *gorm.DB) *gorm.DB {
 	return db.Where("account_id = ?", s.accountID)
 }
@@ -225,8 +224,8 @@ func (s Scope) Run(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error)
 // guards against is not a hostile caller but an ordinary one that quietly grew a
 // second meaning.
 //
-// Design P20 wants this to be a separate database role holding BYPASSRLS.
-// Migration 000007 records why it is a session setting instead, and what that
+// Design P20 wants this to be a separate database role holding BYPASSRLS. The
+// schema baseline records why it is a session setting instead, and what that
 // gives up.
 // Called INSIDE an already-open transaction, the lifting is undone again when fn
 // returns, and that is not tidiness. `SET LOCAL` is scoped to the transaction

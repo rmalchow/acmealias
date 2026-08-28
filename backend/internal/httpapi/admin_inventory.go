@@ -790,7 +790,7 @@ func (a *admin) domainsOf(c echo.Context, loadBalancerID model.ID) ([]model.Doma
 // node reads one node within the acting account.
 //
 // Scope.Run, not merely sc.Where, and the difference is the whole comment.
-// `lb_nodes` is policied (migration 000007), and this is the FIRST statement of
+// `lb_nodes` carries the tenant_isolation policy, and this is the FIRST statement of
 // a.mutate's transaction — which is opened from a plain handle, so nothing has
 // set app.account_id yet. Filtering in Go while the policy sees a NULL
 // current_account() matches no rows at all: PATCH /nodes/:id and DELETE
