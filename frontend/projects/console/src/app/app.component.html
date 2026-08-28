@@ -9,7 +9,16 @@
   — where a slot silently falling through to the default one would put the account switcher in
   the middle of the page.
 -->
-<app-shell home="/projects" [nav]="nav()">
+<!--
+  The mark leads to /accounts, the picker — NOT to /projects.
+
+  The picker is the console's front door: it is where a session with no selection is sent, and it
+  is the one screen that answers "which account am I about to work in" before showing anything that
+  belongs to one. Sending the mark to /projects made it a shortcut to the CURRENT account's work,
+  which is what the nav already is; the mark is the way OUT of wherever you are, and out of an
+  account is the picker.
+-->
+<app-shell home="/accounts" [nav]="nav()">
   <div shellIdentity class="identity">
     @if (session.me(); as me) {
       <!--

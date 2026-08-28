@@ -48,21 +48,22 @@ describe('AppComponent', () => {
     }).compileComponents();
   });
 
-  it('sends the mark to the screen that lists projects', () => {
-    // The logo is the way back. In this console that means the project list — the screen with the
-    // account switcher above it and the projects in it — and NOT '/', which is where the staff
-    // console's mark goes and where this one would land somebody on a bare redirect.
+  it('sends the mark to the account picker', () => {
+    // The mark is the way OUT of wherever you are, and out of an account is the picker — the one
+    // screen that answers "which account am I about to work in" before showing anything belonging
+    // to one. NOT /projects: that is a shortcut to the current account's work, which is what the
+    // navigation already is.
     //
     // Asserted on the rendered href rather than on the input, because what breaks this is somebody
     // changing the shell's default and the console forgetting to override it: the input would still
-    // read '/projects' in one file while the anchor pointed elsewhere.
+    // read the right value in one file while the anchor pointed elsewhere.
     signedIn();
     TestBed.inject(AccountsService).accounts.set([account({})]);
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     const brand: HTMLAnchorElement = fixture.nativeElement.querySelector('a.brand');
     expect(brand).withContext('the bar has no brand link at all').toBeTruthy();
-    expect(brand.getAttribute('href')).toBe('/projects');
+    expect(brand.getAttribute('href')).toBe('/accounts');
   });
 
   it('names the remedy once in a personal account', () => {

@@ -26,16 +26,30 @@ the bottom.
    It also removes the internal edition, which is why it comes before everything rather than
    alongside it: "every user has their own account" and "everybody shares the one account created
    at migration time" cannot both be true, so there is no order in which this is optional.
-4. **`transactional-email`** — one sender identity, one footer, one subject grammar across the
+4. **`collapse-project-and-loadbalancer`** — delete a level. The inventory is
+   `account → project → load balancer → everything`, and the middle object holds a slug, a name and a
+   list of children: every actual thing a customer configures hangs off the load balancer. A project
+   is a folder, and the ACCOUNT is what folders were for — grouping one customer's inventory was the
+   only job it had, and `personal-and-team-accounts` took it. The surviving name is `project`,
+   because we do not operate a load balancer: the nodes are the customer's, and the word is wrong for
+   anyone running a single host or a CDN origin.
+
+   It is here because it is cheap exactly now and never again. P2/P3 already materialized
+   `project_id` onto every descendant for the RLS predicate, so the parent link exists on every row
+   and the migration mostly drops a column. And there is no customer: the API path change is a rename
+   rather than a deprecation, and the grant-grammar change rewrites rows nobody depends on. Every
+   change after this one — a contract with readers, roles written in the grammar, billing against
+   this shape — makes it more expensive and none of them makes it less necessary.
+5. **`transactional-email`** — one sender identity, one footer, one subject grammar across the
    identity provider's mail and the service's own. It sits immediately before invitations because
    that is the first thing that sends mail to a stranger, and because the part of it that fails
    fails SILENTLY: a message that does not authenticate as the domain in its own `From` is filed as
    spam rather than bounced, and a domain that starts in spam folders stays there. The DNS records
    are the long-lead item. There is no version of this that is cheaper later.
-5. **`account-invitations`** — the entry path into a TEAM account. While self-registration is
+6. **`account-invitations`** — the entry path into a TEAM account. While self-registration is
    closed, an invitation is the only way a person joins one. It now depends on the change above,
    because team accounts do not exist without it.
-6. **`self-service-signup`** — the front door. Nothing currently refuses a stranger who wants to sign
+7. **`self-service-signup`** — the front door. Nothing currently refuses a stranger who wants to sign
    up; there is simply no enrolment flow in the blueprint, so the product is closed BY OMISSION rather
    than by any decision — which is why two changes above describe the closure wrongly. This adds the
    flow, linked from the sign-in form, and holds each new person inactive until somebody approves
@@ -45,19 +59,19 @@ the bottom.
    no `accounts` row is ever written for somebody we have not admitted, and nothing in our schema or
    in `store.Usable` changes. It sits after invitations because accepting one is a vouching that
    bypasses the gate.
-7. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
+8. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
    sits immediately before the first customers rather than after them, because the very first thing
    any customer does is publish one `CNAME`, and this is the only thing that tells them whether they
    did it right. Without it the failure is silent for weeks and then arrives as an expired
    certificate. It depends on nothing above it — the check is already built and merely hidden — so
    its position here is about when it is NEEDED, not what it needs.
-8. **`domain-activation`** — a domain is offline until we have seen its delegation, then stays
+9. **`domain-activation`** — a domain is offline until we have seen its delegation, then stays
    online. This is the third of the three controls that make the abuse model manageable, alongside
    five projects on a personal account and per-domain billing on a team one; it is the one that
    makes the other two mean anything, because without it a domain nobody controls is
    indistinguishable from one somebody does. It pairs with the change above — that one tells a
    customer what is wrong, this one decides whether we do any work for them at all.
-9. **`swagger-ui`** — a reader for the contract that is already published. `/api/v1/openapi.yaml`
+10. **`swagger-ui`** — a reader for the contract that is already published. `/api/v1/openapi.yaml`
    serves a hand-written document nobody can comfortably read: 657 lines of YAML in a browser tab is
    a published contract the way a filing cabinet is a published archive. It sits here because the
    audience is the first customer who wants to program against the service rather than click, and
@@ -65,16 +79,16 @@ the bottom.
    build against us, which is why it is styled like the product rather than left stock, and why the
    assets are vendored rather than fetched from a CDN that would blank the page on an air-gapped
    deployment.
-10. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+11. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-11. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+12. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-12. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+13. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-13. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
+14. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
     never spoken to: a self-service enrolment flow at the identity provider, a real payment provider
     behind the checkout that currently takes no money, protective limits that hold whether or not
     anybody has paid, the production identity provider and the rest of the staff/customer separation,
