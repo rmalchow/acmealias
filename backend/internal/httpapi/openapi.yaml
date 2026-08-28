@@ -202,6 +202,11 @@ components:
         # rather than as an error.
         roleId: { type: string, format: uuid }
         roleName: { type: string }
+        # True for the person the account is billed to. They are always a member
+        # of the unrestricted role and cannot be removed from it — the account
+        # has to be transferred first — so a client offering a "remove" control
+        # should not offer it on this row.
+        owner: { type: boolean }
     Invitation:
       type: object
       description: |

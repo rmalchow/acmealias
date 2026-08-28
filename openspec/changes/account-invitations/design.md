@@ -207,12 +207,13 @@ is being invented. What follows is only that the spec and the console must say "
 where they currently say "a member of the unrestricted role", because the second phrase is our word
 for it and the first is the customer's.
 
-**One gap this exposes, recorded rather than fixed.** Nothing guarantees the owner *stays* an `ADMIN`
-member. `store.CountUnrestrictedMembers` guards that the role keeps at least one member; it does not
-guard that the owner is one of them. A team could demote the person who pays the bill, who would then
-be unable to invite anybody into the account they are billed for. That is a property of
-`personal-and-team-accounts`, not of invitations, and it predates this change — see the open question
-at the end.
+**One gap this exposed, since closed.** Nothing guaranteed the owner *stayed* an `ADMIN` member.
+`store.CountUnrestrictedMembers` guards that the role keeps at least one member; it did not guard that
+the owner is one of them, so a team could demote the person who pays the bill, who would then be
+unable to invite anybody into the account they are billed for. That is a property of
+`personal-and-team-accounts` rather than of invitations, and it was fixed there: its design C16 and
+tasks 0.1–0.5 make the owner's unrestricted membership an invariant, refused on removal and
+established on transfer.
 
 Decision P19 puts every session in one of two states and names accepting an invitation among the four
 operations reachable with **no account selected**. That is not incidental — it is what makes the flow
@@ -578,12 +579,9 @@ failing on them, and the honest answer is that it refuses while any exist.
   retention question is itself open in `staff-plane`.
 - **Whether an account may cap its own membership.** Some customers will want "no more than N members"
   as a control of their own. Entirely additive; not needed to make the flow work.
-- **Whether the owner must remain an unrestricted member.** Raised by V5. The owner is one from the
-  account's first instant, and nothing keeps them one: `CountUnrestrictedMembers` guards that the role
-  keeps *a* member, not that it keeps *the owner*. A team that demotes the person who pays the bill
-  leaves them unable to invite anybody into the account they are billed for. This belongs to
-  `personal-and-team-accounts` rather than here — it is a question about what ownership means — and it
-  is recorded here because inviting is where it first bites.
+- ~~**Whether the owner must remain an unrestricted member.**~~ Raised by V5, answered in
+  `personal-and-team-accounts` C16: yes, always, and the only way out is to transfer the account.
+  Recorded here because inviting is where it first bit.
 - **How long a member may stay roleless.** V6 makes it a legal state with a legible screen, and puts no
   bound on it. A member who is never given a role sits in the roster indefinitely, seeing an account
   they cannot act in. Whether that wants a nudge, a reminder or nothing at all is a question for

@@ -37,6 +37,35 @@ MAY hold other members, and MAY be transferred to another user.
 - **WHEN** a request attempts to change an account's kind
 - **THEN** it is refused
 
+### Requirement: The account's owner administers it
+
+The owner of a team account SHALL be a member of the account's unrestricted role
+at all times. The service SHALL refuse to remove the owner from that role, and
+SHALL establish the recipient's unrestricted membership as part of every
+transfer.
+
+An account SHALL also keep at least one member of its unrestricted role. The two
+refusals SHALL be distinguishable to the caller, because their remedies differ:
+one is resolved by appointing another unrestricted member, the other only by
+transferring the account.
+
+#### Scenario: The owner cannot be removed from the unrestricted role
+
+- **WHEN** a removal of the owner's unrestricted membership is requested, whether
+  or not the account has other unrestricted members
+- **THEN** it is refused, and the refusal names ownership rather than the count
+
+#### Scenario: A transfer leaves the recipient able to administer the account
+
+- **WHEN** a team account is transferred to somebody who is already a member of it
+  holding a restricted role, or no role
+- **THEN** the recipient also holds the unrestricted role once the transfer completes
+
+#### Scenario: The last unrestricted member cannot be removed
+
+- **WHEN** a removal would leave the unrestricted role with no members
+- **THEN** it is refused, and the refusal names the count rather than ownership
+
 ### Requirement: A team account works only while it is funded
 
 A team account SHALL be usable only while its credit balance is greater than

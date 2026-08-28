@@ -84,7 +84,14 @@ func (a *admin) mapError(err error, c echo.Context) (int, any) {
 		// confer authority they do not hold. Hiding that as "not found" would
 		// leave them retrying a request that will never work.
 		return http.StatusForbidden, ErrorBody{Message: err.Error()}
-	case errors.Is(err, store.ErrUnrestrictedRole), errors.Is(err, store.ErrLastUnrestrictedMember):
+	case errors.Is(err, store.ErrUnrestrictedRole), errors.Is(err, store.ErrLastUnrestrictedMember),
+		errors.Is(err, store.ErrOwnerMustBeUnrestricted):
+		// 409 for all three: the request is refused by the shape of the account
+		// rather than by the caller's authority, and an unrestricted member has
+		// every permission there is — a 403 would send them looking for a grant
+		// that cannot exist. The MESSAGES stay distinct (task 0.4), which is
+		// where the difference between "keep an administrator" and "keep the
+		// owner as one" is carried; the status is only the class.
 		return http.StatusConflict, ErrorBody{Message: err.Error()}
 	case errors.Is(err, store.ErrAmountNotOffered):
 		// 400: the request named something this service does not sell. It is a

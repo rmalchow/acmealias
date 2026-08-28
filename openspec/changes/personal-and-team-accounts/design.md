@@ -416,3 +416,61 @@ reproduce the old permission matrix exactly, and why migration 000009 exists. Th
 work was not wasted — it is what kept the service running while the model was
 rebuilt underneath it — but the constraint has now been discharged and is being
 retired, not violated.
+
+## C16. The owner is always an administrator, and the only way out is a transfer
+
+Found while implementing `account-invitations`, which needed to know who may
+invite, and recorded here because it is a question about what ownership means.
+
+Two things were already true and did not add up. `accounts.owner_user_id` names
+exactly one person — the one whose card is charged, the one `RESTRICT` refuses to
+delete while the account exists, the one `adminctl transfer` moves. And
+`store.CountUnrestrictedMembers` guards that the account's unrestricted role
+keeps **a** member. Nothing said it keeps **that** member.
+
+So a team could remove its owner from `ADMIN`. The account carries on charging
+them; they can no longer invite anybody into it, assign anybody a role, read its
+roster or edit its roles, while the people who removed them carry on working. It
+is not a privilege-escalation — everyone involved already had every permission in
+the account — it is a **lockout of the payer**, and there is no repair inside the
+product, because every route that could put them back is a route only an
+unrestricted member can call. Support with a database connection is the remedy,
+which is the definition of a gap worth closing before there are customers.
+
+**The rule: the owner is a member of the unrestricted role at all times.** A
+removal that would demote them is refused. A transfer establishes the recipient's
+unrestricted membership in the same transaction.
+
+**Its price, accepted rather than overlooked.** An owner cannot leave their own
+account, not even at their own request — "I want out of this team" is answered by
+transferring it, never by removing yourself. That is the flow `account-invitations`
+and `adminctl transfer` already assume, and C15 already makes transfer the only
+way a departing owner becomes deletable at all, so the rule adds a refusal on a
+path that had nowhere else to go.
+
+**What was rejected.** *Allow the demotion and warn* — the warning is read by the
+people doing the demoting, and the person harmed is the one not in the room.
+*Re-promote the owner automatically on their next sign-in* — it makes the roster
+a suggestion, and two administrators would watch a row they deleted come back
+without an audit entry naming anybody. *Let the owner remove themselves but not be
+removed by others* — the same lockout, reached by one more click, and now with a
+confirm dialog nobody reads standing where a refusal should be.
+
+**Two refusals, two messages** — the part most likely to be lost in
+implementation. When the owner is also the only administrator, both constraints
+hold at once, and only one of them names an action that helps. "The account must
+keep an administrator" sends somebody to appoint a second one; they do, retry,
+and are refused again. So the owner rule is checked FIRST and says its own
+sentence: transfer the account. Both are `409` — the account is the wrong shape
+for the request, not the caller the wrong person; an unrestricted member holds
+every permission there is, and a `403` would send them hunting for a grant that
+cannot exist.
+
+**A consequence worth naming, because it looks like dead code.** With the owner
+permanently in the unrestricted role, the last-member guard can no longer fire
+through `RemoveMember`: the count cannot reach zero, because the removal that
+would take it there is refused earlier and for a different reason. The guard
+stays. It is one `SELECT ... FOR UPDATE` and it is the second line for any future
+path that writes `owner_user_id` without establishing membership —
+`store.TransferOwnership` deliberately leaves that to its caller, so such a path
+is one forgetful commit away.

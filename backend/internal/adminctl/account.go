@@ -191,18 +191,11 @@ func AccountTransfer(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Wr
 		if err := store.TransferOwnership(ctx, tx, sc, recipient.ID); err != nil {
 			return nil, err
 		}
-		unrestricted, err := store.UnrestrictedRole(ctx, tx, sc)
-		if err != nil {
+		// Unrestricted membership specifically — see the same call in
+		// httpapi.transferAccount. "Is a member" is not the question; "can
+		// administer what they now own" is.
+		if err := store.EnsureUnrestrictedMember(ctx, tx, sc, recipient.ID); err != nil {
 			return nil, err
-		}
-		member, err := store.IsMember(ctx, tx, sc.AccountID(), recipient.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !member {
-			if err := store.AddMember(ctx, tx, sc, recipient.ID, unrestricted.ID); err != nil {
-				return nil, err
-			}
 		}
 		id := acc.ID
 		return []authz.Event{{

@@ -372,18 +372,14 @@ func (a *admin) transferAccount(c echo.Context) error {
 		// The membership, in the same transaction — store.TransferOwnership
 		// says in its own doc comment that establishing it is the caller's job,
 		// precisely so that it lands here where the transaction is.
-		unrestricted, err := store.UnrestrictedRole(ctx, tx, sc)
-		if err != nil {
+		//
+		// UNRESTRICTED membership, not any membership. This used to ask
+		// IsMember, which answers "is in the account at all": handing the
+		// account to somebody already in it as READ_ONLY left an owner who
+		// could not administer it, and after task 0.3 that is not merely
+		// awkward but a violation of the invariant the store now enforces.
+		if err := store.EnsureUnrestrictedMember(ctx, tx, sc, recipient.ID); err != nil {
 			return nil, err
-		}
-		member, err := store.IsMember(ctx, tx, sc.AccountID(), recipient.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !member {
-			if err := store.AddMember(ctx, tx, sc, recipient.ID, unrestricted.ID); err != nil {
-				return nil, err
-			}
 		}
 		id := acc.ID
 		return []authz.Event{{
@@ -735,6 +731,14 @@ type memberView struct {
 	// as a state to act on rather than as a blank cell.
 	RoleID   *model.ID `json:"roleId,omitempty"`
 	RoleName string    `json:"roleName,omitempty"`
+	// Owner is true for the membership of the person the account is billed to.
+	//
+	// It is on the MEMBER and not only on the account because the two answer
+	// different questions: accountView.Owner says "are YOU the owner", which is
+	// what the navigation needs, and this says "is THIS row the owner", which is
+	// what the roster needs to stop offering a Remove button that the service
+	// refuses with ErrOwnerMustBeUnrestricted (task 0.3).
+	Owner bool `json:"owner"`
 }
 
 // listMembers is readable by any member of the account without a grant (task
@@ -749,13 +753,18 @@ func (a *admin) listMembers(c echo.Context) error {
 	if err := a.requireTeamAccount(c, sc, "listing members"); err != nil {
 		return err
 	}
-	ms, err := store.ListMembers(c.Request().Context(), a.db(), sc)
+	ctx := c.Request().Context()
+	ms, err := store.ListMembers(ctx, a.db(), sc)
+	if err != nil {
+		return err
+	}
+	acc, err := store.GetAccount(ctx, a.db(), sc)
 	if err != nil {
 		return err
 	}
 	out := make([]memberView, 0, len(ms))
 	for _, m := range ms {
-		v := memberView{ID: m.ID, UserID: m.UserID, RoleID: m.RoleID}
+		v := memberView{ID: m.ID, UserID: m.UserID, RoleID: m.RoleID, Owner: m.UserID == acc.OwnerUserID}
 		if m.User != nil {
 			v.Subject, v.DisplayName = m.User.Subject, m.User.DisplayName
 		}

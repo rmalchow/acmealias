@@ -9,11 +9,11 @@
 > Surfaced while implementing `account-invitations`, which needed to know who may invite. Recorded
 > here because it is this change's model, not that one's.
 
-- [ ] 0.1 `store.CountUnrestrictedMembers` guards that the unrestricted role keeps at least ONE member. It does not guard that the member it keeps is the OWNER — the person `Account.owner` names, who is the only one who may pay
-- [ ] 0.2 So a team can demote the person being billed. They then cannot invite anybody, cannot assign a role, and cannot reach the roster of an account that charges their card — while the people who removed them carry on
-- [ ] 0.3 Decide the rule. "The owner is always in the unrestricted role" is the obvious one and it has a cost: it means the owner cannot be removed even at their own request, so transferring ownership becomes the only way out — which `account-invitations` and the transfer flow already assume
-- [ ] 0.4 Whatever is decided, the refusal has to say WHICH constraint it hit. "The account must keep an administrator" and "the owner must stay an administrator" send somebody to two different actions
-
+- [x] 0.1 `store.CountUnrestrictedMembers` guards that the unrestricted role keeps at least ONE member. It does not guard that the member it keeps is the OWNER — the person `Account.owner` names, who is the only one who may pay
+- [x] 0.2 So a team can demote the person being billed. They then cannot invite anybody, cannot assign a role, and cannot reach the roster of an account that charges their card — while the people who removed them carry on
+- [x] 0.3 Decide the rule. "The owner is always in the unrestricted role" is the obvious one and it has a cost: it means the owner cannot be removed even at their own request, so transferring ownership becomes the only way out — which `account-invitations` and the transfer flow already assume. **Decided as written** (design C16): `store.RemoveMember` refuses the owner's unrestricted membership with `ErrOwnerMustBeUnrestricted`
+- [x] 0.4 Whatever is decided, the refusal has to say WHICH constraint it hit. "The account must keep an administrator" and "the owner must stay an administrator" send somebody to two different actions. Two errors, both 409, distinct sentences; the owner check runs FIRST because when the owner is the only administrator both hold and only one names an action that works. The console labels the row "account owner" or "last administrator" and carries the remedy
+- [x] 0.5 Found while implementing 0.3: both transfer paths asked `store.IsMember`, which answers "is in the account at all", so handing an account to somebody already in it as `READ_ONLY` produced an owner who could not administer it — and after 0.3 that is a violated invariant, not merely awkward. Replaced by `store.EnsureUnrestrictedMember`, called inside the transfer transaction by `httpapi.transferAccount` and `adminctl.AccountTransfer`
 
 ## 1. The two kinds of account
 

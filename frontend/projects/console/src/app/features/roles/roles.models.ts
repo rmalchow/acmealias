@@ -47,6 +47,13 @@ export interface Member {
    */
   roleId?: string | null;
   roleName?: string;
+  /**
+   * The person this account is billed to. Exactly one member is, always.
+   *
+   * They cannot be removed from the unrestricted role — the account has to be transferred first —
+   * so the roster labels them rather than offering a Remove button the service answers 409 to.
+   */
+  owner: boolean;
 }
 
 /** The wildcard, spelled once. */

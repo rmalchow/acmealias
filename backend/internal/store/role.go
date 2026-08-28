@@ -24,6 +24,30 @@ var ErrUnrestrictedRole = errors.New("store: the unrestricted role cannot be cha
 // unrestricted role.
 var ErrLastUnrestrictedMember = errors.New("store: an account must keep at least one unrestricted member")
 
+// ErrOwnerMustBeUnrestricted is the refusal to demote the account's owner
+// (`personal-and-team-accounts` task 0.3).
+//
+// The rule is "the owner is always a member of the unrestricted role", and it is
+// here because the guard above does not imply it: that one keeps A member, not
+// THE owner. Without this, a team could remove the person whose card is charged
+// from the role that administers the account — they would keep paying, and lose
+// the ability to invite anybody, assign a role, or read the roster of the
+// account they are billed for, while the people who removed them carried on.
+//
+// It has a price, and the price was accepted deliberately: an owner cannot leave
+// their own account, not even at their own request. The only way out is to
+// transfer ownership first, which is the flow that already exists and the one
+// `account-invitations` assumes. The alternative — allowing the demotion and
+// warning about it — was rejected because the state it produces has no repair
+// inside the product: every route that could put the owner back is a route only
+// an unrestricted member can call.
+//
+// It is deliberately a SEPARATE error from ErrLastUnrestrictedMember (task 0.4).
+// The two send somebody to two different actions: "make somebody else an
+// administrator first" versus "transfer the account first". One message for both
+// would be wrong for whichever case it was not written for.
+var ErrOwnerMustBeUnrestricted = errors.New("store: the account's owner must stay a member of the unrestricted role")
+
 // RolesByName loads roles by name within the scope's account, with their grants.
 func RolesByName(ctx context.Context, db *gorm.DB, sc Scope, names ...string) ([]model.Role, error) {
 	if len(names) == 0 {
@@ -165,6 +189,49 @@ func AddMember(ctx context.Context, db *gorm.DB, sc Scope, userID, roleID model.
 	})
 }
 
+// EnsureUnrestrictedMember makes a user a member of the account's unrestricted
+// role if they are not one already, and does nothing if they are.
+//
+// It exists because ErrOwnerMustBeUnrestricted turns "the owner administers the
+// account" from a habit into an invariant, and a transfer is the one place that
+// invariant can be broken by an omission rather than by a refused request. Both
+// transfer callers used to ask IsMember — which answers "holds ANY membership" —
+// and skip the write when it was true. Handing a team account to somebody who
+// was already in it as READ_ONLY, or as a member holding no role at all, would
+// therefore have produced an owner who could not administer their own account
+// and whom nothing could promote: assigning a role is itself an unrestricted
+// action.
+//
+// Idempotent by reading first rather than by relying on the unique key, because
+// the duplicate insert would abort the surrounding transaction — and the
+// surrounding transaction is the transfer, which must not fail because the
+// recipient happened to be an administrator already.
+//
+// Takes a transaction handle: the caller is mid-transfer, and a membership
+// written outside it is a membership that survives a rolled-back transfer.
+func EnsureUnrestrictedMember(ctx context.Context, tx *gorm.DB, sc Scope, userID model.ID) error {
+	role, err := UnrestrictedRole(ctx, tx, sc)
+	if err != nil {
+		return err
+	}
+	return sc.Run(ctx, tx, func(tx *gorm.DB) error {
+		var n int64
+		if err := sc.Where(tx.Model(&model.AccountMember{})).
+			Where("user_id = ? AND role_id = ?", userID, role.ID).
+			Count(&n).Error; err != nil {
+			return fmt.Errorf("store: unrestricted membership of %s: %w", userID, err)
+		}
+		if n > 0 {
+			return nil
+		}
+		m := &model.AccountMember{AccountID: sc.AccountID(), UserID: userID, RoleID: &role.ID}
+		if err := tx.Create(m).Error; err != nil {
+			return fmt.Errorf("store: make %s an unrestricted member: %w", userID, err)
+		}
+		return nil
+	})
+}
+
 // AddMemberWithoutRole is what accepting an invitation writes: the person is in
 // the account and holds nothing until somebody gives them a role
 // (account-invitations V6).
@@ -249,6 +316,19 @@ func RemoveMember(ctx context.Context, db *gorm.DB, sc Scope, userID model.ID, r
 			return fmt.Errorf("store: remove member: %w", err)
 		}
 		if role.Unrestricted {
+			// The owner first, because when the owner IS the last member both
+			// constraints are hit at once and only one of them names an action
+			// that would work. Telling them to appoint a second administrator
+			// is telling them to do something that will not let the removal
+			// through afterwards.
+			acc, err := GetAccount(ctx, tx, sc)
+			if err != nil {
+				return err
+			}
+			if acc.OwnerUserID == userID {
+				return fmt.Errorf("%w: %s is billed for %q and must be able to administer it; "+
+					"transfer the account first", ErrOwnerMustBeUnrestricted, userID, acc.Slug)
+			}
 			remaining, err := CountUnrestrictedMembers(ctx, tx, sc, true)
 			if err != nil {
 				return err
