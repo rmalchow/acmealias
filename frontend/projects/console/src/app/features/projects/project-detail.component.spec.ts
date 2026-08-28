@@ -107,12 +107,15 @@ describe('ProjectDetailComponent', () => {
     return fixture;
   }
 
-  /** The usage and inventory-history panels' own reads, answered with "nothing recorded". */
+  /**
+   * The usage panel's own read, answered with "nothing recorded".
+   *
+   * There used to be a second, for the inventory-history panel. That panel is gone: it plotted how
+   * many nodes and domains the project held over time, which is a chart of numbers this page states
+   * exactly a few centimetres above for the only moment that matters.
+   */
   function reporting() {
     http.expectOne((r) => r.url === `${BASE}/projects/7/usage`).flush({ recorded: false, buckets: [] });
-    http
-      .expectOne((r) => r.url === `${BASE}/projects/7/inventory-history`)
-      .flush({ recorded: false, days: [], current: { day: '2026-01-01', aliasCount: 0, domainCount: 0 }, measures: {} });
   }
 
   it('asks without being asked, and says nothing about the button while it does', () => {

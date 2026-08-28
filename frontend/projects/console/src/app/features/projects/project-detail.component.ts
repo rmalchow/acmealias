@@ -11,7 +11,6 @@ import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
 import { ApiService, CAAStatus, CAN_WRITE, CheckResult, DNSPlan, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
-import { ProjectInventoryPanelComponent } from '../reporting/project-inventory-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
 import { InteractionsPanelComponent } from './interactions-panel.component';
 import { openNodeCreateModal } from './node-create.modal';
@@ -22,7 +21,7 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
 /**
  * A project: its nodes, its domain table, the DNS plan panel (records, live verification, copy
  * and zone-snippet download), the API keys panel, and the reporting the project level always
- * had — usage and inventory history.
+ * had — usage over time.
  *
  * This is the merge of two screens (change collapse-project-and-loadbalancer, design L6), and
  * the asymmetry is worth naming because it decided the shape: the load balancer screen was the
@@ -38,7 +37,6 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
     PageHeaderComponent,
     ApiKeysPanelComponent,
     InteractionsPanelComponent,
-    ProjectInventoryPanelComponent,
     ProjectUsagePanelComponent,
     NzToolTipModule,
     NzAlertModule,
@@ -329,15 +327,17 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
       </section>
     }
 
-    <!-- Reporting, folded in from the screen this one absorbed. It was always
-         project-level — usage over time, and inventory size over time — and there is no
-         per-domain view of either; the never-queried signal is drilled into from the
-         interactions list above. -->
+    <!-- Reporting, folded in from the screen this one absorbed. Usage over time is
+         project-level and has no per-domain view; the never-queried signal is drilled
+         into from the interactions list above.
+
+         The inventory-size panel is GONE. It plotted how many nodes, domains and
+         aliases the project held over time — a chart of numbers the page already
+         states exactly, a few centimetres above, for the only moment that matters:
+         now. Growth in a count nobody sets a target for answers no question, and it
+         was the third chart on a screen whose job is the configuration. -->
     <section>
       <app-project-usage-panel [projectId]="id()" />
-    </section>
-    <section>
-      <app-project-inventory-panel [projectId]="id()" />
     </section>
   `,
   styles: [
