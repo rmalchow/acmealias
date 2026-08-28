@@ -126,7 +126,16 @@
       </section>
     </main>
 
+    <!--
+      Absolute paths, not relative ones. This block is duplicated into about/index.html, which sits
+      a directory down — `./about/` would resolve to /about/about/ there. Absolute links are the
+      only form that survives being copied to a page at another depth.
+    -->
     <footer>
+      <nav class="foot-nav">
+        <a href="/">Home</a>
+        <a href="/about/">About</a>
+      </nav>
       <p>
         <strong>Placeholder.</strong> This page exists so the hostname, its routing and its build are
         real. The published commitments this site is required to carry are listed in
