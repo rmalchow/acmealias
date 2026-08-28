@@ -377,6 +377,14 @@ exists instead is `adminctl`'s transfer verb — somebody decides, and the decis
 is recorded. This is the one place in the model where the answer is "a human
 handles it", and saying so is better than a default nobody would have chosen.
 
+**That settles a question the migration squash reopened.** `adminctl`'s transfer
+verb was originally justified by a state a migration produced, and when the chain
+was flattened that state stopped being reachable — which made the verb look as
+though it had lost its reason. It has not. Transfer is the ONLY way to make a
+departing owner deletable, because the database refuses both to delete a user who
+owns a team account and to reassign one on their behalf. The verb is load-bearing
+for the account lifecycle, not a repair tool left over from an upgrade.
+
 ## C10. Removing the internal edition is part of this change, not a follow-up
 
 It is tempting to split, because a deletion has a different risk profile from a
