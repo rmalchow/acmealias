@@ -9,6 +9,14 @@
 
 ## 1. Self-service enrolment, in development first
 
+> **Moved to `self-service-signup`.** This section and `authentik-and-self-signup` §5 specified
+> overlapping halves of the same enrolment work, and neither owned the approval gate a member of
+> staff now applies to each registration. Both are done there. What stays this change's: recovery,
+> the reputation policy in PRODUCTION (1.4 here is its development form), and the switches in §2 —
+> whose premise 9.3 there corrects, since `ACME_ALLOW_ACCOUNT_CREATION` gates buying a TEAM account
+> and has never been what stops a stranger registering.
+
+
 - [ ] 1.1 Add an enrolment flow to `development/authentik/blueprints/acmeservice.yaml`, reachable from the console sign-in page, with an **email-verification stage** — a session must not be issued before the address is proved (design U4, U9)
 - [ ] 1.2 Point authentik's outbound mail at the stack's sink — `mailpit:1025`, no credentials, no TLS. The SMTP host is the compose service name, NOT `mail.localhost`: that name is the web interface and is served through the HTTP overlay, which SMTP does not pass through
 - [ ] 1.3 Configure the recovery flow with email verification, and assert that enrolment, recovery and sign-in responses do not reveal whether an address has a user (design U4)

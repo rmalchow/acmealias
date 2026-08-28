@@ -51,6 +51,13 @@
 
 ## 5. Self-registration and branding — blocked on 11.4
 
+> **Enrolment moved to `self-service-signup`.** These tasks specified the enrolment flow, its mail
+> sink and its manual walk-through — and so did `public-edition` §1, in overlapping words. Neither
+> owned the approval gate, because neither knew one was wanted: a registration is now confirmed by a
+> member of staff before the person can work, and that gate is in OUR service rather than the
+> provider (design S3 there). The tasks below stay for the record and are done there. Branding (5.4)
+> and the provider swap remain this change's.
+
 - [ ] 5.1 Add an enrolment flow to the blueprint, reachable from the console sign-in page, collecting a username, an email and a password (design K6)
 - [ ] 5.2 Place enrolled users in **no group**, and add an acceptance test asserting that a self-registered user authenticates successfully at the identity provider and then holds their personal account and NOTHING ELSE — the P18 property, demonstrated rather than assumed. This task used to say "and is then refused by our service", which `personal-and-team-accounts` made false (design K6)
 - [ ] 5.3 Assert that a self-registered person is NOT refused: they hold their personal account and reach the product (design K6). This task previously asked for the refusal wording to be reviewed, on the premise that every self-registered person would see it — `personal-and-team-accounts` deleted that state by materializing a personal account on first sign-in. What is now user-facing is an empty personal account, and its wording belongs to `public-edition` task 1.6

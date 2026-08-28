@@ -35,28 +35,37 @@ the bottom.
 5. **`account-invitations`** — the entry path into a TEAM account. While self-registration is
    closed, an invitation is the only way a person joins one. It now depends on the change above,
    because team accounts do not exist without it.
-6. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
+6. **`self-service-signup`** — the front door, with a human at it. Nothing currently refuses a
+   stranger who wants to sign up; there is simply no enrolment flow in the blueprint, so the product
+   is closed BY OMISSION rather than by any decision — which is why two changes above describe the
+   closure wrongly. This adds the flow and, behind it, an approval gate: initially a member of staff
+   confirms each registration, later the gate is switched off and the door is simply open. The gate
+   is OURS, not the identity provider's, because "may this person use the product" is a decision
+   about our product rather than about who somebody is — and because an inactive user at the
+   provider cannot be TOLD anything, which turns a review into what looks to them like a broken
+   password. It sits after invitations because accepting one is a vouching that bypasses the queue.
+7. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
    sits immediately before the first customers rather than after them, because the very first thing
    any customer does is publish one `CNAME`, and this is the only thing that tells them whether they
    did it right. Without it the failure is silent for weeks and then arrives as an expired
    certificate. It depends on nothing above it — the check is already built and merely hidden — so
    its position here is about when it is NEEDED, not what it needs.
-7. **`domain-activation`** — a domain is offline until we have seen its delegation, then stays
+8. **`domain-activation`** — a domain is offline until we have seen its delegation, then stays
    online. This is the third of the three controls that make the abuse model manageable, alongside
    five projects on a personal account and per-domain billing on a team one; it is the one that
    makes the other two mean anything, because without it a domain nobody controls is
    indistinguishable from one somebody does. It pairs with the change above — that one tells a
    customer what is wrong, this one decides whether we do any work for them at all.
-8. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+9. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-9. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+10. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-10. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+11. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-11. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
+12. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
     never spoken to: a self-service enrolment flow at the identity provider, a real payment provider
     behind the checkout that currently takes no money, protective limits that hold whether or not
     anybody has paid, the production identity provider and the rest of the staff/customer separation,
