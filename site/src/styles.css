@@ -536,6 +536,34 @@ h1 {
   color: var(--ink-dim);
 }
 
+/* The imprint. A definition list because that is what it is — a set of labelled
+   facts — and a screen reader announces the pairing, where two columns of divs
+   would announce eight unrelated strings. */
+.imprint {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.5rem 1.5rem;
+  margin: 1rem 0 0;
+  color: var(--ink-dim);
+}
+
+.imprint dt {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.imprint dd {
+  margin: 0;
+}
+
+/* The pending fields are DIMMER, and they are also named. Colour alone would say
+   "less important" to a reader who registers it and nothing at all to one who
+   does not; the words say what is missing. */
+.imprint dd.missing {
+  opacity: 0.55;
+  font-style: italic;
+}
+
 /* The one paragraph on the page that admits to a hole. Marked, so it does not
    read as finished copy somebody approved. */
 .pending {

@@ -313,10 +313,18 @@ mail:
   # register number would look finished and survive a review, which is the
   # failure this avoids — the absence has to stay visible until it is filled.
   #
+  # THE ADDRESS HERE IS info@, AND reply_to ABOVE IS support@, DELIBERATELY.
+  # This line is the §5 identification — the address somebody writes to about the
+  # company — and reply_to is where an answer to THIS MESSAGE goes. They are
+  # different questions and a customer replying about an invitation should not
+  # land in the legal inbox. It matches the imprint on the site's about page
+  # exactly; two statements of who is sending, in two places, is a pair that
+  # drifts, and the one a recipient checks is whichever they saw last.
+  #
   # It supplies the NAME and the POSTAL ADDRESS. Still missing from §5 DDG: the
   # legal form, the register court and registration number, the person authorised
   # to represent the company, and the VAT identification number.
-  footer: '${ACME_MAIL_FOOTER:AcmeAlias Inc, Example Street 1234, Exampletown, Foobar Province — support@acmealias.com}'
+  footer: '${ACME_MAIL_FOOTER:AcmeAlias Inc, Example Street 1234, Exampletown, Foobar Province — info@acmealias.com}'
 
   # host:port. In a container stack this is the mail service's own name — NOT
   # the hostname its web interface is served on, which does not speak SMTP.

@@ -112,16 +112,56 @@
         </ul>
 
         <!--
-          NO CONTACT ADDRESS IS INVENTED HERE. The site carries no imprint, privacy statement or
-          abuse contact yet — public-edition tasks 8.5-8.8 — and putting a plausible-looking address
-          on the one page that asks people to get in touch would be the worst place to guess. This
-          paragraph is the placeholder, and it says so rather than looking finished.
+          THE IMPRINT, WITH PLACEHOLDER DATA THAT LOOKS LIKE PLACEHOLDER DATA.
+
+          §5 DDG makes these details compulsory on a commercial site — not decorative — and this
+          page is where they go until the site earns a page of its own for them. What is here is a
+          stand-in: "Example Street", "Exampletown" and "Foobar Province" are chosen so that nobody
+          reads them and believes a company was registered somewhere they could visit.
+
+          THE MISSING FIELDS ARE LISTED RATHER THAN OMITTED. A legal form, a register court and
+          number, an authorised representative and a VAT identification number are what §5 asks for
+          beyond a name and an address, and leaving them silently absent is how a page like this
+          ships looking complete. Each says what it is waiting for, so the gap is visible to whoever
+          fills it in and to anybody reviewing this before launch.
+
+          It matches the mail footer exactly (config.yaml, `mail.footer`). Two statements of who is
+          sending, in two places, is a pair that drifts — and the one a recipient checks against is
+          whichever they saw last.
         -->
+        <h2 id="imprint">Imprint</h2>
+        <p>
+          Required by §5 DDG. <strong>Every value below is a placeholder</strong> and is here so the
+          section exists, is styled, and is obviously unfinished.
+        </p>
+
+        <dl class="imprint">
+          <dt>Operator</dt>
+          <dd>AcmeAlias Inc</dd>
+
+          <dt>Address</dt>
+          <dd>Example Street 1234<br />Exampletown<br />Foobar Province</dd>
+
+          <dt>Email</dt>
+          <dd><a href="mailto:info@acmealias.com">info@acmealias.com</a></dd>
+
+          <dt>Legal form</dt>
+          <dd class="missing">Not yet decided</dd>
+
+          <dt>Register court and number</dt>
+          <dd class="missing">Not yet registered</dd>
+
+          <dt>Authorised representative</dt>
+          <dd class="missing">Not yet named</dd>
+
+          <dt>VAT identification number</dt>
+          <dd class="missing">Not yet issued</dd>
+        </dl>
+
         <p class="pending">
-          <strong>Getting in touch:</strong> this page needs a real address and does not have one
-          yet. It goes in with the imprint, privacy statement and abuse contact, none of which are
-          written. The operator is <strong>AcmeAlias Inc, Example Street 1234, Exampletown, Foobar
-          Province</strong> — every part of which is a placeholder chosen to look like one.
+          <strong>This is not a finished imprint.</strong> The four entries above marked as pending
+          are compulsory once this site takes money from anybody, and it does not yet — see
+          <a href="/">what is real and what is not</a>.
         </p>
       </section>
     </main>
