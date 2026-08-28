@@ -52,6 +52,10 @@ test-go:
   stage: test
   image: golang:1.26.3-bookworm
   extends: .go-cache
+  # No `rules:` here, deliberately: this is the job that runs EVERYWHERE, on
+  # every branch and every merge request. The image build below is the one
+  # confined to the default branch.
+  #
   # THE SAME `tags:` THE IMAGE JOBS GAINED, and for the same reason: the one
   # runner this project has declares the tag `shared` and `run_untagged=false`,
   # so an untagged job is never picked up. It does not fail — it sits pending
@@ -92,6 +96,26 @@ test-go:
   image: docker:27-cli
   tags:
     - shared
+  # BUILDS ARE MAIN-ONLY; TESTS RUN EVERYWHERE.
+  #
+  # The two stages answer different questions and deserve different triggers.
+  # `go test` answers "is this commit sound", which is worth knowing on every
+  # branch and every merge request, and costs seconds. The image build answers
+  # "can this be deployed", which is only a question about the branch anything
+  # is ever deployed from — and it costs an Angular build, a Go build and a
+  # BuildKit context on a single shared runner, every time anybody pushes
+  # anything.
+  #
+  # The concrete cost of not having this rule: a feature branch pushed four
+  # times in an hour queued four full image builds behind each other on the one
+  # runner, so the pipeline somebody was actually waiting on sat behind three
+  # they were not.
+  #
+  # Tags still build, because the publish stage below is tag-only and needs the
+  # layer cache the build stage warms.
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
   # The runners have the Docker socket mounted (design D13/D15), so a plain
   # `docker buildx` works here without docker:dind.
   before_script:
