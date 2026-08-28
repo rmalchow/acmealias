@@ -98,29 +98,24 @@
             <h2>It speaks to what you already run</h2>
             <p>
               The challenge API implements <a href="https://go-acme.github.io/lego/dns/httpreq/">lego's
-              <code>httpreq</code> protocol</a>, so anything built on lego works unchanged —
-              <strong>Traefik</strong> needs one provider line and no plugin. The
-              <a href="https://github.com/joohoi/acme-dns">acme-dns</a> protocol is next, which is what
-              <strong>cert-manager</strong>, <strong>acme.sh</strong>, <strong>certbot</strong>,
-              Posh-ACME and win-acme already speak.
+              <code>httpreq</code> protocol</a> — <strong>Traefik</strong> needs one provider line and
+              no plugin. <a href="https://github.com/joohoi/acme-dns">acme-dns</a> is next, the dialect
+              cert-manager, acme.sh and certbot already speak.
             </p>
           </li>
           <li>
             <h2>An API key reaches exactly one thing</h2>
             <p>
-              A key carries grants, not a role: this action, on this object, and nothing adjacent. Give
-              a staging host a key that can answer for staging and it cannot touch production — not
-              because it is asked not to, but because there is no grant that would let it. Add an
-              address range and an expiry and the key stops being a permanent secret.
+              A key carries grants, not a role. A staging key cannot touch production because no grant
+              would let it — and with an address range and an expiry it stops being a permanent secret.
             </p>
           </li>
           <li>
             <h2>Every challenge is on the record</h2>
             <p>
-              Who published a value, whether a certificate authority actually came and asked for it,
-              from which address, how many times, and whether the validation completed. DNS-01
-              normally fails silently and you find out when a certificate expires; here the answer to
-              <em>did it work</em> is a row you can read the same minute.
+              Who published a value, whether a certificate authority actually came for it, from where,
+              and whether validation completed. DNS-01 usually fails silently and you find out when a
+              certificate expires.
             </p>
           </li>
         </ul>
