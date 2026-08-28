@@ -62,14 +62,30 @@ response *"does not differ from one for an address that does not"* have a user.
 ### The flow
 
 ```
-inviter enters email + role
+inviter enters an email address
    └─> [mail] ──> accept link (token) ─┐
    └─> (signs in as the invited address, mail never opened) ─┐
                                                             ├─> authenticated? ─ no ─> login or signup
+                                                            │                   │      (and approval)
                                                             │                   └ yes ┐
-                                                            └──> "Join <account> as <role>?" ─ accept
-                                                                                              └ decline
+                                                            └──> "Join <account>?" ─── accept
+                                                                                    └─ decline
+
+then, separately and afterwards:
+
+an administrator assigns the new member a role
 ```
+
+**The role is not part of this picture, and that is the change from the first draft.** An invitation
+offers membership and nothing else. Alice joins, appears in the roster with no role, and somebody
+gives her one when they get to it. Bob does not have to decide on Monday what Alice should be allowed
+to do on the Friday of the week after — which is what putting a role on the invitation asked him to
+do, at the moment he knew least, against a role list he might edit in the meantime.
+
+The cost is a state the model did not have: **a member with no role, who is authorised for nothing.**
+That is legal, and it has to be legible — she can pick the account and every screen in it must say
+*you have no role here yet, ask an administrator* rather than showing her an account that appears to
+be empty. See design V6.
 
 **There are two ways in, and the second is not a fallback.** The mail's link is the path we advertise,
 and it is the path that fails when the message lands in spam, when a corporate gateway rewrites the URL
@@ -86,10 +102,9 @@ not a block; the account may invite the same person again, because "not now" and
 answers and we cannot tell which was meant.
 
 Worked through with real values. Cloudpowered Ltd holds an account named `cloudpowered`, in which
-`bob@cloudpowered.example` is an unrestricted member. He invites `alice@corp.com` as `Platform
-Operator`, a custom role in that account granting `[project, <staging>, *]` inheritable.
+`bob@cloudpowered.example` is an administrator. He invites `alice@corp.com`.
 
-1. Bob submits the address and the role. An invitation row is written and a mail is sent. Bob's
+1. Bob submits the address. An invitation row is written and a mail is sent. Bob's
    response says the invitation was sent, and says nothing else — it is identical whether or not
    `alice@corp.com` already has a user.
 2. The invitation appears in the account's roster immediately, as pending, visible to every member.
@@ -97,23 +112,46 @@ Operator`, a custom role in that account granting `[project, <staging>, *]` inhe
    the token**.
 4. If no user exists for `alice@corp.com`, she is offered sign-up. The user created is given
    `alice@corp.com` **already verified**, because holding a link sent to that address is the same proof
-   of control that an email confirmation token provides. No second confirmation mail.
+   of control that an email confirmation token provides. No second confirmation mail. She is
+   nonetheless created **inactive** and waits for approval like anybody else — see below.
 5. If a user exists for `alice@corp.com`, she must authenticate as that user.
-6. Either way she is then asked, explicitly: *"Join cloudpowered as Platform Operator?"* Accepting
-   creates the membership and consumes the token.
+6. Either way she is then asked, explicitly: *"Join cloudpowered?"* Accepting creates the membership
+   and consumes the token. She is now a member of `cloudpowered` **with no role**, and the account
+   sees her in its member list waiting for one.
+7. Bob, or any other administrator, gives her a role. That is an ordinary membership edit and not part
+   of the invitation at all.
 
-### Only an unrestricted member may invite
+### An invitation is not a way past the approval queue
+
+`self-service-signup` holds every newly registered person inactive until a member of staff approves
+them, while self-registration is closed. **An invited person is held too.** An earlier draft exempted
+them — a paying customer vouched for them, so why make them wait — and that is reversed here: an
+exemption anybody can reach by receiving an invitation is a hole in the queue whose width is set by
+whichever customer is least careful about who they invite. It also cost a second enrolment flow at the
+identity provider, kept in step by hand.
+
+Verifying an address and admitting a person are different gates, and only the first is skipped: the
+invitation link proved control of `alice@corp.com`, so no confirmation mail is sent, and Alice still
+waits for a human.
+
+**This has a cost that has to be said out loud.** The invitation expires fourteen days after Bob
+issued it, and that clock does not stop while Alice waits for us. If nobody approves her for a
+fortnight, she signs in for the first time to find the invitation she signed up in order to accept has
+expired — having done everything right, and having waited because of us. So approval latency is now
+partly a commitment about invitations working, not only about politeness. See design V13.
+
+### Only an administrator may invite
 
 Inviting a user, and changing or removing a membership, requires membership of the account's
-unrestricted role. This is not a new rule — it is decision P14 of `tenancy-and-permissions` applied:
+unrestricted role — which is to say, the account's **owner and its administrators**. Those are the
+same set of people and not two: a team account is created with an `ADMIN` role carrying the
+unrestricted flag, several people may hold it, and the owner (the one person who pays, recorded in
+`accounts.owner_user_id`) is written into it in the same transaction that creates the account. No new
+built-in role is being introduced. See design V5.
+
+This is not a new rule either — it is decision P14 of `tenancy-and-permissions` applied:
 the account is not an object grants can name, so operations on its membership are governed by
 membership.
-
-It has a consequence worth naming rather than discovering: **no subset check is needed on the role an
-invitation confers.** The rule that a subject may grant only what it holds exists to stop a partially
-privileged member from writing a grant they do not themselves hold. An unrestricted member holds
-everything in the account by definition, so there is nothing to check — the invitation can name any
-role in the account and it is necessarily within the inviter's authority.
 
 The trade, accepted deliberately: **administrators become a bottleneck as an account grows.** A team
 lead who runs a project cannot bring somebody onto it without an administrator. The alternative — a
@@ -163,13 +201,12 @@ The two halves of this change therefore sit on opposite sides of that line:
 | Operation | Selection | Route |
 | --- | --- | --- |
 | Accept an invitation | none required | outside the account-scoped tree |
-| Issue, revoke, re-send an invitation | account selected, unrestricted role | `/api/v1/accounts/{accountId}/…` |
+| Issue, revoke, re-send an invitation | account selected, owner or administrator | `/api/v1/accounts/{accountId}/…` |
 | Read the roster and its pending invitations | account selected, any member | `/api/v1/accounts/{accountId}/…` |
 
-Reading the invitation the link refers to — enough to render *"Join cloudpowered as Platform
-Operator?"* — is part of the accept flow and likewise needs no selection. It is a read of the account's
-name and the role's name, addressed by the token rather than by the account, and reveals nothing beyond
-what the mail already said.
+Reading the invitation the link refers to — enough to render *"Join cloudpowered?"* — is part of the
+accept flow and likewise needs no selection. It is a read of the account's name, addressed by the token
+rather than by the account, and reveals strictly less than the mail already said.
 
 **After acceptance the newly joined account becomes the session's selection.** Leaving somebody in the
 empty state immediately after they joined something is a dead end, and their next intent is obviously
@@ -187,9 +224,12 @@ that will be refused unless the attempter can authenticate as the invited addres
 
 ### Everything else the flow needs
 
-Invitations expire after fourteen days, are revocable, are re-sendable (which invalidates the previous token), fail closed
-if the role they name has been deleted, and are rate limited per account and per invited address. Each
-of those is specified, and the reasoning is in the design document rather than here.
+Invitations expire after fourteen days, are revocable, are re-sendable (which invalidates the previous
+token), and are rate limited per account and per invited address. Each of those is specified, and the
+reasoning is in the design document rather than here.
+
+An earlier draft also had them fail closed when the role they named had been deleted. That whole
+mechanism is gone, because there is no role on an invitation any more to delete.
 
 ### This is the entry path while self-registration is closed
 
@@ -259,18 +299,23 @@ yet.
 
 - `identity-and-roles`: an invitation link is added as a means of proving control of an email address,
   so sign-up reached through one produces a user whose address is already verified without a second
-  confirmation.
-- `audit-trail`: the vocabulary gains the invitation lifecycle — issued, revoked, accepted, expired —
-  recorded with the acting user and the invited address.
+  confirmation — but not an approved one. It also gains the roleless member: a membership may hold no
+  role, and confers nothing while it does.
+- `audit-trail`: the vocabulary gains the invitation lifecycle — issued, revoked, accepted, declined,
+  expired — recorded with the acting user and the invited address.
 - `admin-console`: the console gains the invitation flow, on both sides — issuing and managing
-  invitations within an account, and the accept screen the invited person reaches.
+  invitations within an account, and the accept screen the invited person reaches — plus the state
+  that follows it: a member with no role, and the screen that says so instead of showing an account
+  that looks empty.
 
 ## Impact
 
-- **Schema.** One new table, `invitations`, holding the account, the role offered, the invited address,
-  a hash of the token, the issuing user, and timestamps for issue, expiry, revocation and acceptance.
-  Identifiers are UUIDv7 like everything else. No existing table changes shape; a membership created by
-  acceptance is an ordinary `account_members` row.
+- **Schema.** One new table, `invitations`, holding the account, the invited address, a hash of the
+  token, the issuing user, and timestamps for issue, expiry, revocation, decline and acceptance.
+  Identifiers are UUIDv7 like everything else. **And one existing table changes shape**:
+  `account_members.role_id` becomes nullable, so that a member can exist with no role, with a partial
+  unique index over `(account_id, user_id) where role_id is null` to replace the uniqueness the
+  three-column constraint stops providing once nulls are allowed.
 - **Tokens.** The stored form is a hash, never the token, following the same reasoning as
   `api_keys.secret_hash` — a datastore read must not yield a usable credential.
 - **Email.** A new template and a new send path, on the delivery mechanism
@@ -281,5 +326,8 @@ yet.
   limit is part of this change rather than a later hardening pass.
 - **Console.** An invitation panel within the account, and an accept screen that must render for a user
   who may hold no membership at all — the empty state `tenancy-and-permissions` introduces is where
-  this screen lives.
-- **Nothing on the permission model, the DNS path or the challenge path.**
+  this screen lives. Plus a second empty state that is new: the account-scoped screens a member with no
+  role reaches, which must explain themselves rather than render nothing.
+- **Nothing on the permission model itself, the DNS path or the challenge path.** The permission model
+  is not changed; what changes is that a subject may now legitimately hold no role, and every path that
+  reads authority from a membership must treat that as *no grants* rather than as an impossible state.

@@ -2,8 +2,11 @@
 
 ### Requirement: An invitation offers a membership to an email address
 
-The service SHALL represent an invitation as an offer of membership in one account, naming one role of
-that account and one email address, issued by one user.
+The service SHALL represent an invitation as an offer of membership in one account, naming one email
+address, issued by one user.
+
+An invitation SHALL NOT name a role. A membership created by accepting one SHALL hold no role until one
+is assigned to it.
 
 An invitation SHALL NOT create a membership by itself. A membership SHALL exist only once the invitation
 has been accepted.
@@ -11,10 +14,15 @@ has been accepted.
 Email addresses SHALL be stored and compared in a normalized form, so that addresses differing only in
 case or surrounding whitespace are one address.
 
-#### Scenario: An invitation names an account, a role and an address
+#### Scenario: An invitation names an account and an address
 
 - **WHEN** an invitation is issued
-- **THEN** it records the account, the role offered, the invited address and the issuing user
+- **THEN** it records the account, the invited address and the issuing user, and no role
+
+#### Scenario: Accepting produces a member with no role
+
+- **WHEN** an invitation is accepted
+- **THEN** the membership created holds no role, and the person is authorised for nothing in that account until one is assigned
 
 #### Scenario: Issuing an invitation creates no membership
 
@@ -28,11 +36,9 @@ case or surrounding whitespace are one address.
 
 ### Requirement: Only a member of the account's unrestricted role may issue, revoke or re-send an invitation
 
-The service SHALL require membership of the account's unrestricted role to issue, revoke or re-send an
-invitation, and SHALL refuse the operation to any other member whatever grants they hold.
-
-Because that role confers every authority within its account, the service SHALL NOT additionally check
-the role an invitation offers against the issuer's own authority.
+The service SHALL require membership of the account's unrestricted role — the account's owner and its
+administrators — to issue, revoke or re-send an invitation, and SHALL refuse the operation to any other
+member whatever grants they hold.
 
 #### Scenario: An unrestricted member issues an invitation
 
@@ -43,11 +49,6 @@ the role an invitation offers against the issuer's own authority.
 
 - **WHEN** a member who is not in the unrestricted role issues, revokes or re-sends an invitation
 - **THEN** the request is refused, whatever grants that member holds
-
-#### Scenario: Any role of the account may be offered
-
-- **WHEN** a member of the unrestricted role issues an invitation naming any role of that account
-- **THEN** it is issued, and no further comparison against the issuer's authority is made
 
 ### Requirement: An invitation carries a token that expires, is usable once and is not guessable
 
@@ -146,8 +147,7 @@ Resolving a token SHALL NOT consume it, alter the invitation, or create anything
 The service SHALL permit an authenticated session with no account selected to resolve an invitation token
 and to accept the invitation, and SHALL NOT require the session to name an account for either.
 
-Resolving a token SHALL report the name of the account and the name of the role offered, and nothing
-further about the account.
+Resolving a token SHALL report the name of the account, and nothing further about it.
 
 #### Scenario: A user belonging to nothing can accept
 
@@ -157,7 +157,7 @@ further about the account.
 #### Scenario: Resolution reports what the offer is
 
 - **WHEN** a token is resolved
-- **THEN** the response names the account and the role offered
+- **THEN** the response names the account
 
 #### Scenario: Resolution discloses nothing else about the account
 
@@ -174,35 +174,11 @@ evaluating the membership as it would for any other selection.
 - **WHEN** a session with no account selected accepts an invitation
 - **THEN** the joined account becomes its selected account and account-scoped operations are available
 
-### Requirement: An invitation naming a role that no longer exists fails closed
-
-The service SHALL refuse acceptance of an invitation whose role no longer exists, and SHALL NOT
-substitute another role or recreate the named one.
-
-The service SHALL make such an invitation distinguishable in the account's roster so that a member can
-see why it failed and issue a replacement.
-
-#### Scenario: Acceptance is refused
-
-- **WHEN** the role an outstanding invitation names has been deleted and the invitation is accepted
-- **THEN** the request is refused and no membership is created
-
-#### Scenario: No role is substituted
-
-- **WHEN** acceptance fails because the role no longer exists
-- **THEN** no membership is created with any other role
-
-#### Scenario: The account can see the failure
-
-- **WHEN** a member of the account reads its outstanding invitations
-- **THEN** an invitation whose role no longer exists is distinguishable from one that is still valid
-
 ### Requirement: One invitation is outstanding per address per account
 
 The service SHALL permit at most one outstanding invitation for a given address in a given account.
 
 Re-sending an invitation SHALL issue a new token and SHALL immediately invalidate the previous one.
-Re-sending MAY change the role offered.
 
 #### Scenario: A second invitation is not issued alongside the first
 
@@ -213,11 +189,6 @@ Re-sending MAY change the role offered.
 
 - **WHEN** an invitation is re-sent
 - **THEN** the previously issued token no longer resolves and the newly issued one does
-
-#### Scenario: Re-sending may amend the offer
-
-- **WHEN** an invitation is re-sent naming a different role of the same account
-- **THEN** acceptance of the new token creates a membership with the newly named role
 
 ### Requirement: An invitation may be revoked, and stops working immediately
 
@@ -333,6 +304,10 @@ basis, so that the outcome is reported to the account rather than silently withh
 
 An invitation SHALL expire fourteen days after it is issued.
 
+The service SHALL NOT pause or extend that period while the invited person awaits approval of their
+registration. An invitation whose invitee has not been approved within it SHALL expire, and the account
+SHALL be able to issue a replacement.
+
 #### Scenario: An invitation outlives a fortnight's absence
 
 - **WHEN** a person opens an invitation thirteen days after it was issued
@@ -342,6 +317,11 @@ An invitation SHALL expire fourteen days after it is issued.
 
 - **WHEN** a person opens an invitation fifteen days after it was issued
 - **THEN** it is reported as expired
+
+#### Scenario: Waiting for approval does not stop the clock
+
+- **WHEN** an invited person registers and is not approved until after the invitation's fourteen days have passed
+- **THEN** the invitation is expired, and a replacement must be issued by the account
 
 ### Requirement: A signed-in person sees the invitations issued to their address
 

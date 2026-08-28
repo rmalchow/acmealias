@@ -29,11 +29,17 @@
 - [ ] 2.3 Set an expectation of when they will hear. See the open question — it should probably match `staff-plane`'s existing twelve-hour commitment rather than invent a second number
 - [ ] 2.4 Check the sentence does not become an enumeration oracle: what an unapproved person is told must not let a stranger test an address list and learn which addresses are registered. This is the same property the `password_stage` on the identification stage was set to protect
 
-## 3. An invitation is a vouching
+## 3. An invitation is not a way past the queue
 
-- [ ] 3.1 Create users who arrive by invitation ACTIVE, whatever the enrolment flow's setting (design S7)
-- [ ] 3.2 Keep it a property of which flow created them rather than a rule somebody applies — two flows, two `user_write` stages, one differing key
-- [ ] 3.3 Assert it: a person who accepts an invitation while approval is required can authenticate
+> **This group was reversed.** It used to say the opposite — create invited users
+> ACTIVE, in a second enrolment flow whose `user_write` differed by one key. See
+> design S7 for why, and `account-invitations` V13 for the argument.
+
+- [ ] 3.1 Create users who arrive by invitation INACTIVE, exactly like everybody else. There is one enrolment flow (design S7)
+- [ ] 3.2 Do NOT add a second enrolment flow. The one that used to exist was the exemption's whole mechanism, and deleting it is what makes the exemption unreachable rather than merely unused
+- [ ] 3.3 Record the invited address as CONFIRMED without sending a confirmation message — the invitation link already proved control of it (`account-invitations` V3). Confirmed is not admitted, and this is the only thing an invited person skips
+- [ ] 3.4 Assert it: a person who follows an invitation link and registers while approval is required cannot authenticate until approved
+- [ ] 3.5 Assert the other half: they receive no confirmation message and the address is confirmed anyway
 
 ## 4. Abuse, which is one new surface and not the general question
 
@@ -59,7 +65,8 @@
 - [ ] 7.1 Register through the provider, verify the address, and assert the sign-in is refused while unapproved
 - [ ] 7.2 Assert the service holds NO account for them at that point — the property S5 keeps, and the one the earlier design gave away
 - [ ] 7.3 Approve, sign in, and assert they hold their personal account and membership of no other (`tenancy-and-permissions` P18)
-- [ ] 7.4 Assert an invited person authenticates without approval (design S7)
+- [ ] 7.4 Assert an invited person does NOT authenticate without approval, and that their address is confirmed regardless (design S7, reversed)
+- [ ] 7.5 Assert the interaction `account-invitations` V13 creates: an invitation issued more than fourteen days before its invitee is approved is expired when they finally sign in, and the account can issue a replacement
 
 ## 8. Taking enrolment over from two other changes
 
@@ -67,3 +74,4 @@
 - [ ] 8.2 Amend `public-edition` §1 the same way, keeping recovery, the production reputation policy and the switches
 - [ ] 8.3 Correct `public-edition` U9's premise while there: it presents the closed state as the work of `ACME_ALLOW_ACCOUNT_CREATION`, and that switch gates buying a TEAM account. It has never been what stops a stranger registering
 - [ ] 8.4 Add this change to `openspec/changes/SEQUENCE.md`
+- [ ] 8.5 Keep S7's reversal cross-referenced in both directions: `account-invitations` V13 argues it and this change implements it, and a reader arriving at either must be sent to the other

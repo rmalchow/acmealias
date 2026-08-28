@@ -123,19 +123,39 @@ explanation and a remedy — which is why `SuspensionReason` returns a sentence 
 a screen with a way out. Approval is the absence of any judgment at all about a stranger, and there is
 nobody to explain anything to yet beyond "we have your registration".
 
-## S7. An invitation is a vouching, so an invited person is not held
+## S7. An invited person waits like everybody else — REVERSED
 
-A person created by accepting an invitation is created **active**. They do not wait for approval.
+**This decision used to say the opposite, and the reversal is the point of reading it.**
 
-The queue exists to look at **strangers**. Somebody accepting an invitation is not one: a paying
-customer named their address and took responsibility for them. Holding them inserts our latency into
-another customer's onboarding and asks a reviewer with no context to second-guess somebody who had
-plenty.
+It read: a person created by accepting an invitation is created **active** and does not wait for
+approval, because the queue exists to look at strangers and somebody a paying customer vouched for is
+not one. Mechanically that was two enrolment flows in authentik — the one reached from the sign-in
+page creating users inactive, the one an invitation link entered creating them active, one differing
+`user_write` key.
 
-Mechanically this is a property of which flow created the user, which is a distinction authentik draws
-natively: the enrolment flow reached from the sign-in page creates users inactive, and the flow an
-invitation link enters creates them active. Two flows, two `user_write` stages, one differing key —
-rather than a rule somebody has to apply.
+**It now reads: there is one enrolment flow, and everybody who walks through it waits.** An invited
+person is held for approval exactly like a stranger. `account-invitations` V13 carries the full
+argument; the short form is that "who deserves to skip the queue" is the wrong question, because the
+queue is not a courtesy. While self-registration is closed, it is the only thing between the outside
+world and a user row, and an exemption reachable by anybody who receives an invitation is a hole in it
+whose width is decided by whichever customer is least careful about who they invite. The second flow
+also had to be kept in step with the first by hand, forever, to preserve a distinction we no longer
+want.
+
+**What is still skipped is the address confirmation, and only that.** The invitation link is itself
+proof of control of the address it was sent to, so a user created through one has that address
+confirmed and receives no confirmation mail (`account-invitations` V3). *Confirmed* and *admitted* are
+different facts. It is worth saying because "the address is already verified" reads like "they are
+already through", and it is not.
+
+**The cost, which belongs here because this is the decision that creates it.** The invitation expires
+fourteen days after it was issued, and that clock runs while the invitee waits for us. Somebody
+invited on the 1st who signs up on the 1st and is approved on the 16th signs in for the first time to
+find the invitation expired — having done everything right, and having waited because of us. So the
+open question below about **what response time to promise is no longer cosmetic**: any promise longer
+than fourteen days is a promise to break invitations. The failure is at least legible — it is an
+expired invitation, and the account re-sends it in one click — and that is the whole of the
+consolation.
 
 ## S8. Opening the door does not release those already behind it
 
@@ -213,7 +233,8 @@ product passes through.
 1. Blueprint: enrolment flow, verification stage, `create_users_as_inactive`, reputation policy,
    outbound mail.
 2. Blueprint: the message an unapproved person sees when they try to sign in (task 7.6).
-3. The invitation flow's own `user_write`, creating active users (S7).
+3. Nothing for invitations: S7 is reversed, and there is no second enrolment flow. An invited person
+   walks the same one and waits like everybody else (`account-invitations` V13).
 
 Rollback is removing the flow. A partially rolled-out state has an enrolment form that creates users
 nobody activates, which presents as registrations that never complete — visible in the provider's user
@@ -223,7 +244,9 @@ list rather than silent.
 
 - **How long the wait should be promised as.** It is a commitment to a response time, and
   `staff-plane` already owns a twelve-hour commitment for its abuse contact; this should probably
-  match rather than invent a second number.
+  match rather than invent a second number. S7's reversal makes this load-bearing rather than
+  a matter of manners: an approval wait longer than fourteen days expires the invitation the person
+  registered in order to accept.
 - **Whether a refused registration is told.** Silence is unkind; a message is a signal to somebody
   probing what gets through. Not decided here.
 - **Whether approval can ever be automatic for a recognised domain** — an address at a company we

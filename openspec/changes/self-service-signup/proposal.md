@@ -94,14 +94,28 @@ So it is a requirement on the flow rather than an argument against the design, a
 this change that must not be quietly dropped: skipping it produces the whole support load while
 keeping none of the benefit.
 
-### An invited person does not queue
+### An invited person queues too
 
-Approval looks at strangers. Somebody accepting an invitation is not one — a paying customer named
-their address and took responsibility for them — so holding them inserts our latency into another
-customer's onboarding and asks a reviewer with no context to second-guess somebody who had plenty.
+An earlier draft of this change exempted them: approval looks at strangers, and somebody a paying
+customer vouched for is not one. That is reversed. **There is one enrolment flow and everybody walks
+through it**, invited or not.
 
-This falls out of which flow created them: enrolment from the sign-in page creates users inactive, an
-invitation link creates them active. Two flows, one differing key, rather than a rule to remember.
+The queue is not a courtesy extended to people who deserve scrutiny. While self-registration is
+closed it is the only thing between the outside world and a user row, and an exemption anybody can
+reach by receiving an invitation is a hole in it whose width is set by whichever customer is least
+careful about who they invite. The exemption also cost a second enrolment flow at the identity
+provider, differing from the first by one key, to be kept in step by hand forever.
+
+What an invited person *does* skip is the confirmation mail: the invitation link already proved they
+control the address, so it is recorded as confirmed and no second message is sent. Confirmed is not
+admitted.
+
+**The consequence is unpleasant and is stated rather than buried.** An invitation expires fourteen
+days after it was issued and that clock does not stop while its invitee waits for us. Somebody who
+signs up the day they are invited and is approved a fortnight later finds the invitation expired,
+having done everything right. That makes the response time we promise a commitment about invitations
+working, not only about politeness — see the open question. The account can re-send in one click,
+which is the whole of the consolation.
 
 ### Turning it off is an action, not just a setting
 
@@ -127,7 +141,8 @@ as `public-edition` task 1.4, and it is required here rather than deferred.
 ## Capabilities
 
 - `identity-and-roles` — enrolment exists, an address is verified before it can authenticate, and a
-  self-registered person cannot authenticate until approved; an invited one can immediately
+  self-registered person cannot authenticate until approved, and neither can an invited one — an
+  invitation confirms an address, not a person
 
 ## Impact
 

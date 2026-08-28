@@ -62,11 +62,27 @@ Changing it SHALL NOT change whether a person who has already registered may aut
 - **WHEN** approval becomes required
 - **THEN** everybody who could already authenticate still can
 
-### Requirement: A person who arrives by invitation is not held for approval
+### Requirement: An invitation confirms an address; it does not admit a person
 
-A person who becomes a user by accepting an invitation SHALL be able to authenticate immediately.
+A person who becomes a user by following an invitation link SHALL have the invited address recorded as
+confirmed without a confirmation message being sent.
 
-#### Scenario: An invited person does not wait
+That person SHALL NOT thereby be exempt from approval: while approval is required, they SHALL NOT be
+able to authenticate until approved.
 
-- **WHEN** a person accepts an invitation while approval is required for self-registration
-- **THEN** they can authenticate without being approved
+The service SHALL NOT provide a second enrolment path that creates users already approved.
+
+#### Scenario: An invited person's address needs no confirmation
+
+- **WHEN** a person registers by following an invitation link
+- **THEN** the invited address is recorded as confirmed and no confirmation message is sent
+
+#### Scenario: An invited person still waits
+
+- **WHEN** a person registers by following an invitation link while approval is required
+- **THEN** they cannot authenticate until approved
+
+#### Scenario: There is one enrolment path
+
+- **WHEN** the enrolment paths are enumerated
+- **THEN** none of them creates a user that is approved on creation while approval is required

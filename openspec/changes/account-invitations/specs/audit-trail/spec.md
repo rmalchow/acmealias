@@ -2,8 +2,8 @@
 
 ### Requirement: The invitation lifecycle is recorded
 
-The service SHALL record the issuing, revocation, re-sending, acceptance and expiry of an invitation as
-distinct actions, each naming the account, the invited address and the role offered.
+The service SHALL record the issuing, revocation, re-sending, acceptance, decline and expiry of an
+invitation as distinct actions, each naming the account and the invited address.
 
 An entry for an acceptance SHALL name both the invited address and the accepting user, so that the record
 evidences that the person who joined is the person who was invited.
@@ -13,7 +13,7 @@ An entry recording an expiry SHALL identify the service itself as the actor.
 #### Scenario: Issuing is attributable
 
 - **WHEN** an invitation is issued
-- **THEN** an entry names the issuing user, the invited address and the role offered
+- **THEN** an entry names the issuing user and the invited address
 
 #### Scenario: Acceptance evidences who joined
 
@@ -29,6 +29,11 @@ An entry recording an expiry SHALL identify the service itself as the actor.
 
 - **WHEN** an invitation is revoked, and another is re-sent
 - **THEN** the two entries record different actions
+
+#### Scenario: A decline is distinguishable from an expiry
+
+- **WHEN** an invitation is declined, and another expires unanswered
+- **THEN** the two entries record different actions, and the decline names the user that declined
 
 ### Requirement: An invitation entry never contains its token
 
