@@ -152,20 +152,131 @@
         =========================================================================================
       -->
       <section class="clients">
-        <h2 class="sr-only">Supported ACME clients</h2>
-        <p class="client-label">Works with</p>
-        <ul>
-          <li>Traefik</li>
-          <li>cert-manager</li>
-          <li>certbot</li>
-          <li>acme.sh</li>
-          <li>lego</li>
-          <li>Caddy</li>
-          <li>win-acme</li>
-          <li>Posh-ACME</li>
-          <li>Certify The Web</li>
-        </ul>
+        <h2>Your client, configured once</h2>
+        <p class="section-lede">
+          The challenge is the only part that touches us, and in every one of these it is a few lines.
+        </p>
+
+        <div class="tabs">
+          <div class="tablist" role="tablist" aria-label="ACME clients">
+            <button role="tab" id="tab-traefik" aria-controls="panel-traefik"
+                    aria-selected="true" tabindex="0">Traefik</button>
+            <button role="tab" id="tab-cert-manager" aria-controls="panel-cert-manager"
+                    aria-selected="false" tabindex="-1">cert-manager</button>
+            <button role="tab" id="tab-certbot" aria-controls="panel-certbot"
+                    aria-selected="false" tabindex="-1">certbot</button>
+            <button role="tab" id="tab-acme-sh" aria-controls="panel-acme-sh"
+                    aria-selected="false" tabindex="-1">acme.sh</button>
+            <button role="tab" id="tab-lego" aria-controls="panel-lego"
+                    aria-selected="false" tabindex="-1">lego</button>
+            <button role="tab" id="tab-caddy" aria-controls="panel-caddy"
+                    aria-selected="false" tabindex="-1">Caddy</button>
+            <button role="tab" id="tab-win-acme" aria-controls="panel-win-acme"
+                    aria-selected="false" tabindex="-1">win-acme</button>
+            <button role="tab" id="tab-posh-acme" aria-controls="panel-posh-acme"
+                    aria-selected="false" tabindex="-1">Posh-ACME</button>
+            <button role="tab" id="tab-certify" aria-controls="panel-certify"
+                    aria-selected="false" tabindex="-1">Certify The Web</button>
+          </div>
+          <div class="panels">
+          <div role="tabpanel" id="panel-traefik" aria-labelledby="tab-traefik">
+            <p>One provider line. The endpoint and credentials come from the environment.</p>
+            <div class="term"><pre>certificatesResolvers:
+  acmealias:
+    acme:
+      dnsChallenge:
+        provider: httpreq
+
+# HTTPREQ_ENDPOINT=https://api.acmealias.com/
+# HTTPREQ_USERNAME / HTTPREQ_PASSWORD = your key</pre></div>
+          </div>
+          <div role="tabpanel" id="panel-cert-manager" aria-labelledby="tab-cert-manager" hidden>
+            <p>The acmeDNS solver is built into cert-manager. No webhook to deploy.</p>
+            <div class="term"><pre>solvers:
+  - dns01:
+      acmeDNS:
+        host: https://api.acmealias.com
+        accountSecretRef:
+          name: acmealias
+          key: acmedns.json</pre></div>
+          </div>
+          <div role="tabpanel" id="panel-certbot" aria-labelledby="tab-certbot" hidden>
+            <p>certbot reaches us through an auth hook — the console gives you the script.</p>
+            <div class="term"><pre>certbot certonly \
+  --preferred-challenges dns \
+  --manual-auth-hook /etc/acmealias/present \
+  -d shop.example.com</pre></div>
+          </div>
+          <div role="tabpanel" id="panel-acme-sh" aria-labelledby="tab-acme-sh" hidden>
+            <p>Four environment variables from the credentials file, then issue as usual.</p>
+            <div class="term"><pre>export ACMEDNS_BASE_URL="https://api.acmealias.com"
+export ACMEDNS_USERNAME="..." ACMEDNS_PASSWORD="..."
+export ACMEDNS_SUBDOMAIN="shop-example-com"
+
+acme.sh --issue --dns dns_acmedns -d shop.example.com</pre></div>
+          </div>
+          <div role="tabpanel" id="panel-lego" aria-labelledby="tab-lego" hidden>
+            <p>The same provider Traefik uses, because Traefik is lego underneath.</p>
+            <div class="term"><pre>HTTPREQ_ENDPOINT=https://api.acmealias.com/ \
+HTTPREQ_USERNAME=... HTTPREQ_PASSWORD=... \
+lego --dns httpreq -d shop.example.com run</pre></div>
+          </div>
+          <div role="tabpanel" id="panel-caddy" aria-labelledby="tab-caddy" hidden>
+            <p>One tls block, using Caddy's acmedns DNS module.</p>
+            <div class="term"><pre>tls {
+  dns acmedns {
+    server_url https://api.acmealias.com
+    username   {env.ACMEALIAS_USER}
+    password   {env.ACMEALIAS_PASS}
+    subdomain  shop-example-com
+  }
+}</pre></div>
+          </div>
+          <div role="tabpanel" id="panel-win-acme" aria-labelledby="tab-win-acme" hidden>
+            <p>Choose <strong>acme-dns</strong> as the validation method and give it the credentials from the console. win-acme remembers them for every renewal.</p>
+          </div>
+          <div role="tabpanel" id="panel-posh-acme" aria-labelledby="tab-posh-acme" hidden>
+            <p>The <strong>AcmeDns</strong> plugin ships with Posh-ACME. Point it at the endpoint and pass the credentials from the console.</p>
+          </div>
+          <div role="tabpanel" id="panel-certify" aria-labelledby="tab-certify" hidden>
+            <p>Add <strong>acme-dns</strong> as a credential in the UI, paste what the console gave you, and pick it on the certificate.</p>
+          </div>
+          </div>
+        </div>
       </section>
+
+      <!--
+        Tabs, progressively. Without JavaScript every panel is visible and the page is a list of nine
+        configurations — longer, and still completely usable. The script hides all but one and wires
+        the roving tabindex the ARIA tab pattern wants: arrow keys move between tabs, and only the
+        selected tab is in the tab order, so a keyboard user traverses the group rather than nine
+        separate stops.
+      -->
+      <script>
+        for (const group of document.querySelectorAll('.tabs')) {
+          const tabs = [...group.querySelectorAll('[role="tab"]')];
+          const show = (i) => {
+            tabs.forEach((tab, n) => {
+              const on = n === i;
+              tab.setAttribute('aria-selected', String(on));
+              tab.tabIndex = on ? 0 : -1;
+              document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
+            });
+          };
+          tabs.forEach((tab, i) => {
+            tab.addEventListener('click', () => show(i));
+            tab.addEventListener('keydown', (e) => {
+              const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+              if (!d) return;
+              e.preventDefault();
+              const next = (i + d + tabs.length) % tabs.length;
+              show(next);
+              tabs[next].focus();
+            });
+          });
+          show(0);
+        }
+      </script>
 
       <!--
         The mechanism, shown rather than described.

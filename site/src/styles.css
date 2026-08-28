@@ -498,36 +498,73 @@ h1 {
 }
 
 /* -- The clients ----------------------------------------------------------
-   A quiet strip, not a feature. It substantiates the claim the card above it
-   makes and should not compete with it - so the names are set in the body face
-   at one weight and one colour, which is also the only way nine wordmarks sit
-   together without one of them shouting. */
+   Tabs, set the way the console's navigation is set (shell.component's `.nav`):
+   a row of plain words over a rule, with the active one carrying an accent
+   underline that COVERS the rule rather than sitting under it. Same product, so
+   the control that means "pick one of these" should look the same in both
+   places, and somebody who has used the console already knows what this is.
+
+   The section gets top padding of its own. It used to be `0 3rem`, which pushed
+   the label hard against the reason cards above and made the strip read as
+   though it belonged to the third card. */
 .clients {
-  padding-block: 0 3rem;
+  padding-block: 3rem;
 }
 
-.clients ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.tablist {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
+  gap: 0 1.5rem;
+  border-block-end: 1px solid var(--line);
+  margin-block-end: 1.5rem;
 }
 
-.clients li {
-  font-size: 1.05rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+/* Buttons and not links: these change what is displayed on this page, they do
+   not navigate. A link here would offer a middle-click that opens nothing. */
+.tablist button {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0.5rem 0;
+  margin-block-end: -1px;
+  border-block-end: 2px solid transparent;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.tablist button:hover {
   color: var(--ink);
 }
 
-.client-label {
-  margin: 0 0 0.5rem;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-size: 0.7rem;
+.tablist button[aria-selected="true"] {
+  color: var(--ink);
+  border-block-end-color: var(--accent);
+}
+
+.tablist button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* A minimum height, so switching between a six-line snippet and a two-line one
+   does not move the rest of the page under the reader's cursor. */
+.panels {
+  min-block-size: 15rem;
+}
+
+.panels p {
+  margin: 0 0 1rem;
   color: var(--ink-dim);
+  max-inline-size: 62ch;
+}
+
+/* Without JavaScript every panel is shown, so they need separating from each
+   other; with it, only one is ever visible and this never applies. */
+.panels [role='tabpanel'] + [role='tabpanel'] {
+  margin-block-start: 2rem;
 }
 
 /* ── The terminal ─────────────────────────────────────────────────────────────
