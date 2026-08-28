@@ -20,14 +20,13 @@ func TestIntegrationAPIKeyRoundTrip(t *testing.T) {
 	// question about them rather than about a foreign key — so a key with no
 	// grants appears on no project's screen, correctly.
 	key := &model.APIKey{
+		Kind:          model.APIKeyKindProject,
+		ProjectID:     &p.ID,
 		Identifier:    "k_7f3a91c4",
 		SecretHash:    []byte("digest"),
 		DisplayPrefix: "7f3a91",
 		Networks: []model.APIKeyNetwork{
 			{CIDR: "203.0.113.0/24"},
-		},
-		Grants: []model.APIKeyGrant{
-			{ObjectType: "project", ObjectID: &p.ID, Action: "challenge.publish", Inheritable: true},
 		},
 	}
 	if err := CreateAPIKey(ctx, db, sc, key, AllowAnyGrant); err != nil {

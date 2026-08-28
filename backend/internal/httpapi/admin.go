@@ -296,8 +296,16 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	acct.DELETE("/domains/:id", a.deleteDomain)
 
 	acct.GET("/projects/:id/interactions", a.listInteractions)
+	// Keys, on the two screens their two kinds belong to (design K8). A PROJECT
+	// key is made on the project's page and dies with the project; a SYSTEM key
+	// is made in the account's settings, beside roles and members, and outlives
+	// every project in the account. That is not a UI preference — it is the
+	// lifetime made visible, and one screen for both is how somebody finds out
+	// by having their automation revoked.
 	acct.GET("/projects/:id/keys", a.listKeys)
 	acct.POST("/projects/:id/keys", a.createKey)
+	acct.GET("/keys", a.listSystemKeys)
+	acct.POST("/keys", a.createSystemKey)
 	acct.PUT("/keys/:id/networks", a.restrictKey)
 	acct.PUT("/keys/:id/expiry", a.setKeyExpiry)
 	acct.POST("/keys/:id/rotate", a.rotateKey)

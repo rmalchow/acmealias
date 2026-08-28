@@ -375,7 +375,12 @@ func newEnv(t *testing.T) *env {
 		if err != nil {
 			t.Fatalf("new api key: %v", err)
 		}
-		k.Grants = []model.APIKeyGrant{{ObjectType: "project", ObjectID: &projectID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "project", ObjectID: &projectID, Action: "challenge.withdraw", Inheritable: true}}
+		// A PROJECT key: bound to the project by a foreign key, its two challenge
+		// grants synthesized in authz.SubjectFromKey rather than written here.
+		// This is the shape every publisher has now, so it is the shape the
+		// protocol tests authenticate with.
+		k.Kind = model.APIKeyKindProject
+		k.ProjectID = &projectID
 		if err := store.CreateAPIKey(ctx, db, sc, k, store.AllowAnyGrant); err != nil {
 			t.Fatalf("create api key: %v", err)
 		}
@@ -617,7 +622,8 @@ func TestRegisterChallengeRefusesUnprotectedCIDRRestriction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.Grants = []model.APIKeyGrant{{ObjectType: "project", ObjectID: &p.ID, Action: "challenge.publish", Inheritable: true}, {ObjectType: "project", ObjectID: &p.ID, Action: "challenge.withdraw", Inheritable: true}}
+	k.Kind = model.APIKeyKindProject
+	k.ProjectID = &p.ID
 	k.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
 	if err := store.CreateAPIKey(ctx, db, sc, k, store.AllowAnyGrant); err != nil {
 		t.Fatalf("create api key: %v", err)

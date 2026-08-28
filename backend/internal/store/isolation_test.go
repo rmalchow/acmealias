@@ -33,6 +33,8 @@ var crossAccountReaders = map[string]string{
 	"DeleteExpired":               "the expiry sweep is fleet-wide",
 	"FindAPIKeyByIdentifier":      "this is what establishes which account a request belongs to",
 	"TouchLastUsed":               "runs on the authentication path, against the row establishing the account",
+	"NodeAddressesForProject":     "runs on the authentication path, before a scope exists, against the project a key names through a foreign key the database keeps inside the key's own account — and it names that account in its own where clause",
+	"NoteAddressRefusal":          "the same path and the same row: it records why the key that was establishing the account was refused",
 	"FindAliasByChallengeName":    "a challenge name is claimed globally; the account is compared afterwards",
 	"AliasIDsByLabel":             "maps observed labels for every account's aliases at once",
 	"ApplyQueryObservations":      "applies fleet-wide DNS observations",

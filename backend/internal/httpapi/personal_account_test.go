@@ -58,6 +58,12 @@ func TestIntegrationAPersonalAccountHasNoRoster(t *testing.T) {
 		{http.MethodPost, acct + "/roles", `{"name":"ops","grants":[]}`},
 		{http.MethodGet, acct + "/members", ""},
 		{http.MethodPost, acct + "/members", `{"subject":"someone","roleId":"` + model.NewID().String() + `"}`},
+		// And a system key, which is a member that is not a person (design K7).
+		// It holds a ROLE, and a personal account has none — so there is
+		// nothing for one to hold, and the refusal is the same refusal for the
+		// same reason. A PROJECT key still works here, which is asserted below.
+		{http.MethodGet, acct + "/keys", ""},
+		{http.MethodPost, acct + "/keys", `{"note":"ci","roleId":"` + model.NewID().String() + `"}`},
 	} {
 		rec := cl.do(tc.method, tc.path, tc.body)
 		if rec.Code != http.StatusConflict {
@@ -96,9 +102,14 @@ func TestIntegrationGrantsStayLiveInAPersonalAccount(t *testing.T) {
 
 	// The key minted here is NARROWER than its holder: the owner is
 	// unrestricted — every action on every object of the account — and the key
-	// gets two grants over one project. That narrowing is the good practice C9
+	// reaches one project's challenges. That narrowing is the good practice C9
 	// says survives in an account of one, and it is what breaks if somebody
 	// deletes the grant machinery along with the roles screen.
+	//
+	// A PROJECT key works in a personal account, and that is design K7's other
+	// half: system keys are a team thing because they hold roles and a personal
+	// account has none, but the thing keys are MOSTLY for still works here. An
+	// account of one is a working product, not a demo.
 	rec = cl.do(http.MethodPost, projPath+"/keys", `{"note":"renewals"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create a key in a personal account: %d %s, want 201 — the grant model is not conditional on kind",
@@ -106,13 +117,19 @@ func TestIntegrationGrantsStayLiveInAPersonalAccount(t *testing.T) {
 	}
 	var created keyCreated
 	decode(t, rec, &created)
-	if len(created.Key.Grants) != 2 {
-		t.Fatalf("the key holds %d grants, want two over one project: %s", len(created.Key.Grants), rec.Body.String())
+	if created.Key.Kind != model.APIKeyKindProject {
+		t.Fatalf("the key's kind is %q, want %q", created.Key.Kind, model.APIKeyKindProject)
 	}
-	for _, g := range created.Key.Grants {
-		if g.ObjectID == nil || *g.ObjectID != proj.ID {
-			t.Fatalf("a grant names %v rather than the project the key was minted for; the key is not scoped", g.ObjectID)
-		}
+	if created.Key.ProjectID == nil || *created.Key.ProjectID != proj.ID {
+		t.Fatalf("the key names %v rather than the project it was minted on; it is not scoped", created.Key.ProjectID)
+	}
+	// It holds no grant ROWS, and that is the point of design K2 rather than an
+	// omission: its authority is synthesized from the foreign key above, so
+	// there is nothing left behind when the project is deleted. What it may do
+	// is asserted where it is decided — authz.SubjectFromKey — rather than here.
+	if len(created.Key.Grants) != 0 {
+		t.Fatalf("a project key wrote %d grant row(s); its authority comes from its project: %s",
+			len(created.Key.Grants), rec.Body.String())
 	}
 
 	// The subset rule itself runs on this path — a.mint hands store.CreateAPIKey

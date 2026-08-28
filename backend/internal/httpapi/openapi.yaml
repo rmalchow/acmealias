@@ -243,8 +243,43 @@ components:
         expiresAt: { type: string, format: date-time }
     ApiKey:
       type: object
+      description: |
+        A key is of one of two kinds, and the kind says what its authority is and what it dies
+        with. A PROJECT key is bound to one project, answers that project's challenges, and is
+        deleted when the project is. A SYSTEM key holds a role, does whatever that role permits,
+        and outlives every project in the account.
+
+        Neither kind is authorized differently from anybody else: both resolve to grants before
+        anything is decided, which is why a project key lists no grants of its own.
       properties:
         id: { type: string, format: uuid }
+        kind: { type: string, enum: [project, system] }
+        projectId:
+          type: string
+          format: uuid
+          description: The project a project key is bound to and dies with. Absent on a system key.
+        roleId:
+          type: string
+          format: uuid
+          description: |
+            The role a system key holds. Absent on a project key, and absent on a system key that
+            predates the two kinds and carries its own grants instead.
+        roleName: { type: string }
+        restrictToNodes:
+          type: boolean
+          description: |
+            Whether this project key accepts requests only from the addresses configured on its
+            project's nodes. A switch, not a copied list: what it permits is whatever the project's
+            nodes are when a request arrives. A project with no nodes then permits nothing.
+        lastRefusedIp:
+          type: string
+          nullable: true
+          description: |
+            The source address of the most recent refusal for an address restriction, and the
+            address the service actually SAW rather than the one configured on a node. It is here
+            because the refusal itself is deliberately indistinguishable from a wrong secret, and
+            behind NAT or an egress gateway the two differ.
+        lastRefusedAt: { type: string, format: date-time, nullable: true }
         identifier: { type: string }
         displayPrefix: { type: string }
         note: { type: string }
@@ -479,7 +514,11 @@ paths:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
     get:
-      summary: The keys whose authority reaches this project
+      summary: This project's keys
+      description: |
+        Project keys only. A system key that happens to reach this project through its role is not
+        listed here: it belongs to the account and outlives every project in it, and showing the two
+        together is how somebody discovers that deleting a project revoked their automation.
       responses:
         "200":
           description: OK
@@ -487,12 +526,44 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/ApiKey" } }
     post:
-      summary: Create a key with grants over this project
+      summary: Create a project key
       description: |
-        Refused unless every grant is covered by a single grant the creator holds. Coverage is not
-        assembled from several held grants: the union is true only of today's inventory.
+        The key is bound to this project by a foreign key and is deleted with it. Its authority is
+        that project's challenge answering and nothing else; it holds no grants of its own.
+
+        Refused unless that authority is covered by a single grant the creator holds. Coverage is
+        not assembled from several held grants: the union is true only of today's inventory.
+
+        `restrictToNodes` limits the key to the addresses configured on this project's nodes. It is
+        a switch, not a copied list: what it permits is whatever the project's nodes are when a
+        request arrives, so adding a node needs no change to the key. A project with no nodes
+        permits nothing.
       responses:
         "201": { description: Created — the secret is in this response and nowhere else, ever }
+
+  /accounts/{accountId}/keys:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+    get:
+      summary: The account's system keys
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ApiKey" } }
+    post:
+      summary: Create a system key
+      description: |
+        A system key holds a role, and is otherwise a member of the account that happens not to be a
+        person. It outlives every project. `roleId` is required and names a role of this account.
+
+        Team accounts only. A personal account has no roles and no roster, so there is nothing for
+        such a key to hold — the refusal reports that one cannot exist there rather than that the
+        caller may not create one.
+      responses:
+        "201": { description: Created — the secret is in this response and nowhere else, ever }
+        "409": { description: This is a personal account, which has no roles }
 
   /accounts/{accountId}/keys/{id}/networks:
     parameters:

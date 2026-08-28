@@ -340,3 +340,172 @@ func TestLastUsedSwallowsWriteErrors(t *testing.T) {
 	l := newLastUsed(func(context.Context, model.ID) error { return errNotFound }, slog.New(slog.DiscardHandler))
 	l.Touch(context.Background(), model.NewID()) // must not panic
 }
+
+// The project-node address switch (design K3, K4, K5; tasks 3.3 and 3.6).
+//
+// serveWithNodes is a second harness rather than a parameter on the first,
+// because the thing under test is a dependency the first does not have: the
+// union is RESOLVED PER REQUEST, so the test has to be able to change it between
+// requests without touching the key.
+func serveWithNodes(t *testing.T, req *http.Request, nodes func() ([]string, error), refused *string, k *model.APIKey) *httptest.ResponseRecorder {
+	t.Helper()
+	e := echo.New()
+	e.Logger.SetOutput(io.Discard)
+	ext, err := IPExtractor([]string{"192.0.2.1/32"})
+	if err != nil {
+		t.Fatalf("IPExtractor: %v", err)
+	}
+	e.IPExtractor = ext
+	opts := Options{
+		Lookup: lookupOf(k),
+		Logger: slog.New(slog.DiscardHandler),
+	}
+	if nodes != nil {
+		opts.NodeAddresses = func(context.Context, model.ID, model.ID) ([]string, error) { return nodes() }
+	}
+	if refused != nil {
+		opts.NoteRefusal = func(_ context.Context, _ model.ID, ip string) { *refused = ip }
+	}
+	e.Use(Middleware(opts))
+	e.GET("/", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+
+// The three transitions, on ONE key that is never written to again. That is the
+// whole feature: a copied list would need a write here and would be wrong until
+// it got one, and the symptom of being wrong is a renewal that silently does not
+// happen.
+func TestMiddlewareNodeLimitFollowsTheProject(t *testing.T) {
+	projectID := model.NewID()
+	k, secret := fixture(t, func(k *model.APIKey) {
+		k.Kind = model.APIKeyKindProject
+		k.ProjectID = &projectID
+		k.RestrictToProjectNodes = true
+	})
+
+	var addrs []string
+	nodes := func() ([]string, error) { return addrs, nil }
+	attempt := func(from string) int {
+		req := request(t, from)
+		req.SetBasicAuth(k.Identifier, secret)
+		return serveWithNodes(t, req, nodes, nil, k).Code
+	}
+
+	// No nodes yet: refused. This is design K4, and it is the case that must NOT
+	// share a code path with addressAllowed's empty list — there, no entries
+	// means the customer never asked for a limit and everything is allowed.
+	if got := attempt("203.0.113.5"); got != http.StatusUnauthorized {
+		t.Fatalf("with no nodes: status %d, want 401 — 'only from my nodes' with no nodes is 'from nowhere', "+
+			"and treating it as unrestricted would be a key that says it is limited and is not", got)
+	}
+
+	// A node is added. Nothing about the key changes.
+	addrs = []string{"203.0.113.5", "2001:db8::5"}
+	if got := attempt("203.0.113.5"); got != http.StatusOK {
+		t.Fatalf("after adding a node: status %d, want 200 with no change to the key", got)
+	}
+	if got := attempt("2001:db8::5"); got != http.StatusOK {
+		t.Fatalf("the node's IPv6 address: status %d, want 200", got)
+	}
+	if got := attempt("198.51.100.9"); got != http.StatusUnauthorized {
+		t.Fatalf("an address no node holds: status %d, want 401", got)
+	}
+
+	// The node is removed. Again nothing about the key changes.
+	addrs = nil
+	if got := attempt("203.0.113.5"); got != http.StatusUnauthorized {
+		t.Fatalf("after removing the node: status %d, want 401 — a copied list would still be permitting it", got)
+	}
+}
+
+// Everything that stops the switch from being evaluable is a refusal, not a
+// pass. A limit that cannot be checked is not a limit, and the whole premise is
+// that somebody asked for one.
+func TestMiddlewareNodeLimitFailsClosed(t *testing.T) {
+	projectID := model.NewID()
+	limited := func(k *model.APIKey) {
+		k.Kind = model.APIKeyKindProject
+		k.ProjectID = &projectID
+		k.RestrictToProjectNodes = true
+	}
+
+	cases := []struct {
+		name  string
+		nodes func() ([]string, error)
+		opt   func(*model.APIKey)
+	}{
+		{"the lookup failed", func() ([]string, error) { return nil, errNotFound }, limited},
+		{"this listener cannot resolve nodes at all", nil, limited},
+		{"the key names no project", func() ([]string, error) { return []string{"203.0.113.5"}, nil },
+			func(k *model.APIKey) {
+				k.Kind = model.APIKeyKindProject
+				k.RestrictToProjectNodes = true
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			k, secret := fixture(t, tc.opt)
+			req := request(t, "203.0.113.5")
+			req.SetBasicAuth(k.Identifier, secret)
+			if got := serveWithNodes(t, req, tc.nodes, nil, k).Code; got != http.StatusUnauthorized {
+				t.Fatalf("status %d, want 401", got)
+			}
+		})
+	}
+
+	// And a key that carries no switch is not affected by any of it: a system
+	// key, or a project key with the switch off, never asks about nodes.
+	k, secret := fixture(t, func(k *model.APIKey) { k.Kind = model.APIKeyKindSystem })
+	req := request(t, "203.0.113.5")
+	req.SetBasicAuth(k.Identifier, secret)
+	if got := serveWithNodes(t, req, nil, nil, k).Code; got != http.StatusOK {
+		t.Fatalf("a key with no address limit: status %d, want 200", got)
+	}
+}
+
+// The refusal records the address it SAW, which is the only way somebody behind
+// NAT finds out in one attempt (design K5).
+//
+// The response stays the same opaque 401 as every other rejection — that is
+// design D3 and is asserted elsewhere — so this is where the answer has to be.
+func TestMiddlewareRecordsTheAddressItRefused(t *testing.T) {
+	projectID := model.NewID()
+	k, secret := fixture(t, func(k *model.APIKey) {
+		k.Kind = model.APIKeyKindProject
+		k.ProjectID = &projectID
+		k.RestrictToProjectNodes = true
+	})
+
+	// A node behind NAT: its configured address is private, and it arrives from
+	// the gateway's. Nothing about the configuration looks wrong.
+	nodes := func() ([]string, error) { return []string{"10.0.0.4"}, nil }
+
+	var refused string
+	req := request(t, "198.51.100.9")
+	req.SetBasicAuth(k.Identifier, secret)
+	if got := serveWithNodes(t, req, nodes, &refused, k).Code; got != http.StatusUnauthorized {
+		t.Fatalf("status %d, want 401", got)
+	}
+	if refused != "198.51.100.9" {
+		t.Fatalf("recorded %q, want the address the request arrived from — the node's configured "+
+			"address is what the operator already believes, so repeating it back explains nothing", refused)
+	}
+
+	// The hand-typed list records it too. "Why is this key being refused" is the
+	// same question whichever restriction answered it.
+	refused = ""
+	k2, secret2 := fixture(t, func(k *model.APIKey) {
+		k.Kind = model.APIKeyKindSystem
+		k.Networks = []model.APIKeyNetwork{{CIDR: "203.0.113.0/24"}}
+	})
+	req = request(t, "198.51.100.9")
+	req.SetBasicAuth(k2.Identifier, secret2)
+	if got := serveWithNodes(t, req, nil, &refused, k2).Code; got != http.StatusUnauthorized {
+		t.Fatalf("status %d, want 401", got)
+	}
+	if refused != "198.51.100.9" {
+		t.Fatalf("a CIDR refusal recorded %q", refused)
+	}
+}

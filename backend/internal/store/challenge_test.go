@@ -234,7 +234,7 @@ func TestIntegrationPublisherSurvivesKeyRevocation(t *testing.T) {
 	ctx := context.Background()
 	alias := challengeFixture(t, db, sc, 1)[0]
 
-	key := model.APIKey{Identifier: "k_7f3a91c4", SecretHash: []byte{1, 2, 3}, DisplayPrefix: "k_7f3a"}
+	key := model.APIKey{Kind: model.APIKeyKindSystem, Identifier: "k_7f3a91c4", SecretHash: []byte{1, 2, 3}, DisplayPrefix: "k_7f3a"}
 	if err := CreateAPIKey(ctx, db, sc, &key, AllowAnyGrant); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}

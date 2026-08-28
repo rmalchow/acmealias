@@ -96,6 +96,9 @@ table api_key_networks
   rls enabled=false forced=false
 
 table api_keys
+  check api_keys_kind_check CHECK ((kind = ANY (ARRAY['project'::text, 'system'::text])))
+  check api_keys_node_limit_needs_a_project CHECK (((restrict_to_project_nodes = false) OR (kind = 'project'::text)))
+  check api_keys_shape CHECK ((((kind = 'project'::text) AND (project_id IS NOT NULL) AND (role_id IS NULL)) OR ((kind = 'system'::text) AND (project_id IS NULL))))
   column account_id uuid not null
   column created_at timestamp with time zone not null default now()
   column disabled_at timestamp with time zone null
@@ -103,14 +106,27 @@ table api_keys
   column expires_at timestamp with time zone null
   column id uuid not null default uuidv7()
   column identifier text not null
+  column kind text not null default 'system'::text
+  column last_refused_at timestamp with time zone null
+  column last_refused_ip inet null
   column last_used_at timestamp with time zone null
   column note text not null default ''::text
+  column project_id uuid null
+  column restrict_to_project_nodes boolean not null default false
+  column role_id uuid null
   column secret_hash bytea not null
   constraint api_keys_identifier_key unique (identifier)
+  constraint api_keys_kind_check check ()
+  constraint api_keys_node_limit_needs_a_project check ()
   constraint api_keys_pkey primary key (id)
+  constraint api_keys_project_account_fkey foreign key (project_id,account_id)
+  constraint api_keys_role_account_fkey foreign key (role_id,account_id)
+  constraint api_keys_shape check ()
   index api_keys_account_id_idx CREATE INDEX api_keys_account_id_idx ON api_keys USING btree (account_id)
   index api_keys_identifier_key CREATE UNIQUE INDEX api_keys_identifier_key ON api_keys USING btree (identifier)
   index api_keys_pkey CREATE UNIQUE INDEX api_keys_pkey ON api_keys USING btree (id)
+  index api_keys_project_id_idx CREATE INDEX api_keys_project_id_idx ON api_keys USING btree (project_id)
+  index api_keys_role_id_idx CREATE INDEX api_keys_role_id_idx ON api_keys USING btree (role_id)
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
   rls enabled=true forced=true
 

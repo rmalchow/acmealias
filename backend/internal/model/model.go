@@ -434,14 +434,54 @@ type Domain struct {
 
 func (Domain) TableName() string { return "domains" }
 
+// The two kinds of API key (design K1). They are a SHAPE over the grant model
+// and never a second way of deciding what a caller may do: both resolve to
+// grants in authz.SubjectFromKey, before the predicate compiler sees them.
+const (
+	// APIKeyKindProject is bound to one project by a real foreign key and
+	// answers that project's challenges. It dies with the project.
+	APIKeyKindProject = "project"
+	// APIKeyKindSystem holds a role, and is otherwise a member of the account
+	// that happens not to be a person. It outlives every project.
+	APIKeyKindSystem = "system"
+)
+
 // APIKey stores only the SHA-256 digest of the secret; the secret itself is shown
 // once at creation and never persisted (design D3).
 type APIKey struct {
 	ID        ID `gorm:"primaryKey"`
 	AccountID ID `gorm:"column:account_id"`
-	// There is no ProjectID. A key is a subject anchored to an account,
-	// and what it may reach is its grants — see the api_keys section of the
-	// schema baseline for why the column could not stay alongside them.
+	// Kind is APIKeyKindProject or APIKeyKindSystem, constrained by the
+	// database. There was one kind — the expert one, a subject holding grants
+	// — and it left the common case to be assembled by hand out of the grant
+	// grammar.
+	Kind string
+	// ProjectID is set exactly for a project key, and it is a REAL foreign key
+	// with ON DELETE CASCADE, which a grant cannot have: an object_id is
+	// polymorphic across nine tables, so it declares no reference and nothing
+	// deletes a grant when the object it names goes (design K2).
+	ProjectID *ID `gorm:"column:project_id"`
+	// RoleID is the role a system key holds. NOT cascading: deleting a role a
+	// key holds is refused, matching account-invitations V6.
+	//
+	// It is nullable for one reason, and the reason is historical rather than a
+	// shape anybody may create: every key that existed before this became two
+	// kinds is a system key holding its own grants, and inventing a role for
+	// each of them at migration time is a decision nobody asked for. New system
+	// keys must name one.
+	RoleID *ID `gorm:"column:role_id"`
+	// RestrictToProjectNodes is a SWITCH, not a list (design K3). On means
+	// "only from this project's nodes", resolved from lb_nodes when a request
+	// arrives — so adding a node changes what the key permits with no further
+	// action, and there is nothing that can go stale.
+	RestrictToProjectNodes bool `gorm:"column:restrict_to_project_nodes"`
+	// The most recent address-refusal, so somebody behind NAT finds out in one
+	// attempt instead of by reasoning (design K5). The refusal on the wire
+	// stays the single opaque 401 design D3 requires, so this is where the
+	// answer lives. Best-effort, like LastUsedAt.
+	LastRefusedIP *string    `gorm:"column:last_refused_ip;type:inet"`
+	LastRefusedAt *time.Time `gorm:"column:last_refused_at"`
+
 	Identifier    string // 'k_7f3a91c4', non-secret
 	SecretHash    []byte `gorm:"column:secret_hash"`
 	DisplayPrefix string
@@ -454,7 +494,16 @@ type APIKey struct {
 	Networks []APIKeyNetwork `gorm:"foreignKey:APIKeyID"`
 	// Grants are preloaded with the key on the authentication path, so the
 	// challenge handler adds no query to check a permission (constraint 2).
+	//
+	// A PROJECT key has none: its authority is synthesized from ProjectID, which
+	// is what stops this change adding new polymorphic grants that nothing would
+	// ever delete. A system key holding a role has none either. Rows here are
+	// the legacy shape.
 	Grants []APIKeyGrant `gorm:"foreignKey:APIKeyID"`
+	// Role rides along on the authentication path for the same reason Grants
+	// does: resolving a system key's authority must add no query the challenge
+	// handler pays for.
+	Role *Role `gorm:"foreignKey:RoleID"`
 }
 
 func (APIKey) TableName() string { return "api_keys" }

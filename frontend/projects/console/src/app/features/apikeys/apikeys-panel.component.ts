@@ -11,7 +11,13 @@ import { openApiKeyCreateModal } from './apikey-create.modal';
 import { openApiKeyRevealModal } from './apikey-reveal.modal';
 
 /**
- * 19.4 — API keys for one load balancer.
+ * This project's keys.
+ *
+ * PROJECT keys only, and that is design K8 rather than a filter that happens to be convenient. A
+ * project key is bound to this project and is deleted with it; a system key belongs to the account
+ * and outlives every project in it. Listing both here would leave somebody asking, later and
+ * angrily, why deleting a project revoked their automation — and the answer would be a rule they
+ * had no way to see. System keys are in the account's settings, beside roles and members.
  *
  * Creation and the once-only reveal are both modals; the reveal's rule (acknowledge before
  * dismissal) lives in ApiKeyRevealModalComponent, which is also what `rotate` opens — a rotation mints a
@@ -22,7 +28,7 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
   imports: [DatePipe, NzButtonModule, NzIconModule, NzTableModule, NzTagModule, NzToolTipModule],
   template: `
     <div class="panel-head">
-      <h2>API keys</h2>
+      <h2>Project keys</h2>
       <button
         nz-button
         nzType="primary"
@@ -33,14 +39,15 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
         (click)="create()"
       >
         <span nz-icon nzType="plus"></span>
-        New API key
+        New project key
       </button>
     </div>
 
     <p class="ac-hint">
-      Rotating mints a successor but does not revoke the current key — deploy the new secret,
-      confirm it works, then revoke the old one. The two are valid side by side on purpose, so
-      there is no gap.
+      A project key answers this project's ACME challenges and nothing else, and it is deleted with
+      the project. Rotating mints a successor but does not revoke the current key — deploy the new
+      secret, confirm it works, then revoke the old one. The two are valid side by side on purpose,
+      so there is no gap.
     </p>
 
     @if (error(); as msg) {
@@ -59,7 +66,6 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
         <tr>
           <th>Identifier</th>
           <th>Note</th>
-          <th>Authority</th>
           <th>Restrictions</th>
           <th>Expires</th>
           <th>Last used</th>
@@ -73,23 +79,38 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
             <td class="ac-mono">{{ k.displayPrefix }}&hellip;</td>
             <td>{{ k.note || '—' }}</td>
             <!--
-              What this key can actually do. It used to be implied by which load balancer the key
-              belonged to; a key is a subject holding grants now, so showing the grants is the only
-              honest answer — and a key that reaches a whole project looks different here from one
-              that reaches a single load balancer, which is the point of the change.
+              There is no Authority column, and its absence is the point: every key here reaches
+              exactly this project's challenges. A column repeating one sentence on every row is a
+              column that stops being read.
             -->
             <td>
-              @for (g of k.grants; track $index) {
-                <div class="ac-mono ac-grant">{{ g.summary }}</div>
-              } @empty {
-                <span class="ac-hint">no grants — this key can do nothing</span>
+              @if (k.restrictToNodes) {
+                <div>this project&rsquo;s node addresses</div>
+                <p class="ac-hint">
+                  Follows the project — a node added later works with no change here.
+                </p>
               }
-            </td>
-            <td>
               @if (k.networks.length) {
-                {{ k.networks.join(', ') }}
-              } @else {
+                <div class="ac-mono">{{ k.networks.join(', ') }}</div>
+              }
+              @if (!k.restrictToNodes && !k.networks.length) {
                 <span class="ac-hint">unrestricted</span>
+              }
+              <!--
+                The address we actually SAW. Behind NAT or an egress gateway it is not the address
+                configured on the node, and without this the operator has a key that looks
+                correctly configured and refuses everything (design K5). Shown only when there is
+                one, because a key that has never been refused should say nothing.
+              -->
+              @if (k.lastRefusedIp) {
+                <p class="refused">
+                  Last refused from <span class="ac-mono">{{ k.lastRefusedIp }}</span>
+                  @if (k.lastRefusedAt) {
+                    on {{ k.lastRefusedAt | date: 'medium' }}
+                  }
+                  — that is the address the request arrived from, which is not always the one on
+                  the node.
+                </p>
               }
             </td>
             <td class="ac-nowrap">{{ k.expiresAt ? (k.expiresAt | date: 'medium') : 'never' }}</td>
@@ -152,6 +173,12 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
       }
       tr.inactive td {
         opacity: 0.55;
+      }
+      .refused {
+        margin: 0.25rem 0 0;
+        font-size: 0.8125rem;
+        color: var(--ac-warn);
+        max-width: 26rem;
       }
     `,
   ],

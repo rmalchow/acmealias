@@ -41,17 +41,39 @@ type grantView struct {
 }
 
 type keyView struct {
-	ID            model.ID    `json:"id"`
-	Grants        []grantView `json:"grants"`
-	Identifier    string      `json:"identifier"`
-	DisplayPrefix string      `json:"displayPrefix"`
-	Note          string      `json:"note"`
-	Networks      []string    `json:"networks"`
-	CreatedAt     time.Time   `json:"createdAt"`
-	ExpiresAt     *time.Time  `json:"expiresAt"`
-	LastUsedAt    *time.Time  `json:"lastUsedAt"`
-	DisabledAt    *time.Time  `json:"disabledAt"`
-	Active        bool        `json:"active"`
+	ID model.ID `json:"id"`
+	// Kind is "project" or "system" (design K1). It is on every key view rather
+	// than implied by which screen asked, because a program reading this API has
+	// no screen.
+	Kind string `json:"kind"`
+	// ProjectID is set for a project key: the project it dies with.
+	ProjectID *model.ID `json:"projectId,omitempty"`
+	// RoleID and RoleName describe a system key's authority. The NAME rides
+	// along for the same reason the audit trail records role names rather than
+	// references: a console that had to resolve the id itself would show a blank
+	// where the interesting word belongs.
+	RoleID   *model.ID `json:"roleId,omitempty"`
+	RoleName string    `json:"roleName,omitempty"`
+	// RestrictToNodes is the switch, not a list — see design K3. What it permits
+	// is whatever the project's nodes are when a request arrives.
+	RestrictToNodes bool        `json:"restrictToNodes"`
+	Grants          []grantView `json:"grants"`
+	Identifier      string      `json:"identifier"`
+	DisplayPrefix   string      `json:"displayPrefix"`
+	Note            string      `json:"note"`
+	Networks        []string    `json:"networks"`
+	CreatedAt       time.Time   `json:"createdAt"`
+	ExpiresAt       *time.Time  `json:"expiresAt"`
+	LastUsedAt      *time.Time  `json:"lastUsedAt"`
+	// The most recent address refusal (design K5). It is here because the
+	// refusal on the wire is deliberately opaque — a caller must not be able to
+	// tell a wrong secret from a wrong address — so this is the only place
+	// somebody behind NAT can see that their node arrives from an address no
+	// node carries.
+	LastRefusedIP *string    `json:"lastRefusedIp,omitempty"`
+	LastRefusedAt *time.Time `json:"lastRefusedAt,omitempty"`
+	DisabledAt    *time.Time `json:"disabledAt"`
+	Active        bool       `json:"active"`
 }
 
 // keyCreated is the only response in the service that carries a secret. The
@@ -67,9 +89,15 @@ const secretNotice = "this secret is shown exactly once and is not recoverable; 
 
 func toKey(k model.APIKey) keyView {
 	v := keyView{
-		ID: k.ID, Identifier: k.Identifier, DisplayPrefix: k.DisplayPrefix,
+		ID: k.ID, Kind: k.Kind, ProjectID: k.ProjectID, RoleID: k.RoleID,
+		RestrictToNodes: k.RestrictToProjectNodes,
+		Identifier:      k.Identifier, DisplayPrefix: k.DisplayPrefix,
 		Note: k.Note, Networks: []string{}, Grants: []grantView{}, CreatedAt: k.CreatedAt,
 		ExpiresAt: k.ExpiresAt, LastUsedAt: k.LastUsedAt, DisabledAt: k.DisabledAt,
+		LastRefusedIP: k.LastRefusedIP, LastRefusedAt: k.LastRefusedAt,
+	}
+	if k.Role != nil {
+		v.RoleName = k.Role.Name
 	}
 	for _, g := range k.Grants {
 		parsed := authz.GrantFromRow(g)
@@ -110,6 +138,15 @@ func (a *admin) listKeys(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
+// createKey mints a PROJECT key: bound to this project, dying with it, and
+// answering its challenges (design K1, K8).
+//
+// The two grants it used to write are gone. A project key's authority is
+// synthesized from api_keys.project_id in authz.SubjectFromKey, which is what
+// stops this change from adding new polymorphic grant rows that nothing deletes
+// when their object goes (design K2). They are still SUBSET-CHECKED — passed to
+// store.CreateAPIKey as `implied` — because the caller must hold what they
+// confer whether or not it is written down.
 func (a *admin) createKey(c echo.Context) error {
 	sc, err := a.scope(c)
 	if err != nil {
@@ -120,9 +157,15 @@ func (a *admin) createKey(c echo.Context) error {
 		return err
 	}
 	var body struct {
-		Note      string   `json:"note"`
-		Networks  []string `json:"networks"`
-		ExpiresIn string   `json:"expiresIn"` // a Go duration, e.g. "720h"; empty means no expiry
+		Note     string   `json:"note"`
+		Networks []string `json:"networks"`
+		// RestrictToNodes is the switch (design K3). It is a boolean and not a
+		// list on purpose: what it permits is whatever the project's nodes are
+		// when a request arrives, so there is nothing to keep in step. The
+		// console used to offer the same idea by copying the addresses into
+		// `networks`, and that copy was right until somebody added a node.
+		RestrictToNodes bool   `json:"restrictToNodes"`
+		ExpiresIn       string `json:"expiresIn"` // a Go duration, e.g. "720h"; empty means no expiry
 	}
 	if err := bind(c, &body); err != nil {
 		return err
@@ -139,25 +182,113 @@ func (a *admin) createKey(c echo.Context) error {
 	if _, err := store.GetProject(ctx, a.db(), sc, projectID); err != nil {
 		return err
 	}
-	// The route is POST /projects/{id}/keys, because that is the screen an
-	// operator is on. What it creates is a key anchored to the account holding
-	// grants over this project — the same authority the dropped
-	// api_keys.load_balancer_id column carried, in a grammar that says it
-	// explicitly.
-	grants := []model.APIKeyGrant{
-		{ObjectType: string(authz.TypeProject), ObjectID: &projectID, Action: challengePublish, Inheritable: true},
-		{ObjectType: string(authz.TypeProject), ObjectID: &projectID, Action: challengeWithdraw, Inheritable: true},
+	k := &model.APIKey{
+		Kind: model.APIKeyKindProject, ProjectID: &projectID,
+		RestrictToProjectNodes: body.RestrictToNodes,
 	}
-	return a.mint(c, grants, body.Note, nets, expires, authz.ActionKeyCreate)
+	return a.mint(c, k, body.Note, nets, expires, authz.ActionKeyCreate)
 }
 
-// rotateKey mints a successor for the same project, copying the note and the
-// address restrictions, and leaves the existing key working.
+// createSystemKey mints a SYSTEM key: a member of the account that happens not
+// to be a person (design K6, K8).
 //
-// That is the whole of design D3's rotation: create, deploy, then revoke the
-// old one — the model supports several live keys per project precisely so the
-// window between the two never has a gap. Revoking the predecessor here
-// automatically would reintroduce the downtime the design removed.
+// It lives in the account's settings rather than on a project's page, and that
+// is the lifetime made visible rather than a placement preference: a project key
+// dies with its project and a system key outlives every project in the account.
+// One screen for both would leave somebody asking, later and angrily, why
+// deleting a project revoked their automation.
+//
+// TEAM ACCOUNTS ONLY, for the reason roles are (design K7, C9). A personal
+// account has no roster and no roles, and a system key is a role-holder — so
+// there is nothing for one to hold. The refusal is C9's "there cannot be one
+// here" and NOT a permission error: in an account of one there is nobody to ask
+// for permission, which is exactly the confusion C11 warns about.
+func (a *admin) createSystemKey(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	if err := a.requireTeamAccount(c, sc, "creating a system key"); err != nil {
+		return err
+	}
+	// The same authority adding a MEMBER needs, because that is what this is.
+	if err := a.authorizeUnrestricted(c, "creating a system key"); err != nil {
+		return err
+	}
+	var body struct {
+		Note      string   `json:"note"`
+		RoleID    model.ID `json:"roleId"`
+		Networks  []string `json:"networks"`
+		ExpiresIn string   `json:"expiresIn"`
+	}
+	if err := bind(c, &body); err != nil {
+		return err
+	}
+	if body.RoleID == model.NilID {
+		return fmt.Errorf("%w: a system key holds a role; roleId is required", inventory.ErrInvalid)
+	}
+	nets, err := parseCIDRs(body.Networks)
+	if err != nil {
+		return err
+	}
+	expires, err := parseExpiry(body.ExpiresIn)
+	if err != nil {
+		return err
+	}
+	ctx := c.Request().Context()
+	// Read the role through the scope, so naming a role of another account is a
+	// not-found rather than a key holding somebody else's authority.
+	roles, err := store.RolesFor(ctx, a.db(), sc, body.RoleID)
+	if err != nil {
+		return err
+	}
+	if len(roles) == 0 {
+		return fmt.Errorf("%w: no such role in this account", inventory.ErrInvalid)
+	}
+	// The role rides along on the object being created, so the response names it
+	// without a second read. Only the created row is answered with, and it is
+	// answered with once.
+	k := &model.APIKey{Kind: model.APIKeyKindSystem, RoleID: &body.RoleID, Role: &roles[0]}
+	return a.mint(c, k, body.Note, nets, expires, authz.ActionKeyCreate)
+}
+
+// listSystemKeys answers the settings screen. Project keys are deliberately not
+// here; they are on their project's page (design K8).
+func (a *admin) listSystemKeys(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	// Refused rather than answered empty, for the reason the roster is (design
+	// C9, C11). An empty list reads as "there are none YET" and invites a client
+	// to render an Add button for something that can never exist here; a refusal
+	// says "there cannot be any", which is the true sentence.
+	if err := a.requireTeamAccount(c, sc, "system keys"); err != nil {
+		return err
+	}
+	ks, err := store.ListSystemAPIKeys(c.Request().Context(), a.db(), sc)
+	if err != nil {
+		return err
+	}
+	out := make([]keyView, 0, len(ks))
+	for _, k := range ks {
+		out = append(out, toKey(k))
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+// rotateKey mints a successor of the same KIND, copying everything but the
+// secret, and leaves the existing key working.
+//
+// That is the whole of design D3's rotation: create, deploy, then revoke the old
+// one — the model supports several live keys per project precisely so the window
+// between the two never has a gap. Revoking the predecessor here automatically
+// would reintroduce the downtime the design removed.
+//
+// "Everything but the secret" now includes the kind, the project or the role,
+// the address switch and any hand-typed CIDR blocks. A rotation replaces a
+// secret, never an authority: a rotation that silently widened or narrowed what
+// a key can do would be the worst kind of change, because nobody would look.
 func (a *admin) rotateKey(c echo.Context) error {
 	sc, err := a.scope(c)
 	if err != nil {
@@ -185,15 +316,17 @@ func (a *admin) rotateKey(c echo.Context) error {
 	} else {
 		note = fmt.Sprintf("%s (rotated from %s)", note, old.Identifier)
 	}
-	return a.mint(c, grantsOf(old), note, nets, nil, authz.ActionKeyRotate)
+	k := &model.APIKey{
+		Kind: old.Kind, ProjectID: old.ProjectID, RoleID: old.RoleID, Role: old.Role,
+		RestrictToProjectNodes: old.RestrictToProjectNodes,
+		Grants:                 grantsOf(old),
+	}
+	return a.mint(c, k, note, nets, nil, authz.ActionKeyRotate)
 }
 
-// mint is the shared body of create and rotate: generate, persist, audit,
-// answer once with the secret.
-// grantsOf copies a key's grants for a rotation: the new key holds exactly what
-// the old one did. Rotation replaces a secret, never an authority — a rotation
-// that silently widened or narrowed what a key can do would be the worst kind of
-// change, because nobody would look.
+// grantsOf copies a key's own grant rows for a rotation. Only the LEGACY shape
+// has any: a project key's authority comes from its project and a system key's
+// from its role, and both follow the columns copied beside this.
 func grantsOf(k *model.APIKey) []model.APIKeyGrant {
 	out := make([]model.APIKeyGrant, 0, len(k.Grants))
 	for _, g := range k.Grants {
@@ -205,7 +338,32 @@ func grantsOf(k *model.APIKey) []model.APIKeyGrant {
 	return out
 }
 
-func (a *admin) mint(c echo.Context, grants []model.APIKeyGrant, note string, networks []string, expires *time.Time, action string) error {
+// impliedGrants are the grants a key will hold with no row of its own, so the
+// subset rule can be applied to authority that is synthesized rather than
+// stored. A project key's two challenge actions are the only such authority
+// today; a system key's come from its role, which was itself subset-checked when
+// the role was written.
+//
+// This has to agree with authz.SubjectFromKey. Two places computing one thing is
+// a real risk, and the alternative — importing authz into store, or the
+// evaluator into the handler — is a dependency cycle. What holds them together
+// is a test asserting a project key's checked authority equals its resolved
+// authority.
+func impliedGrants(k *model.APIKey) []store.Grant {
+	if k.Kind != model.APIKeyKindProject || k.ProjectID == nil {
+		return nil
+	}
+	return []store.Grant{
+		{ObjectType: string(authz.TypeProject), ObjectID: k.ProjectID, Action: challengePublish, Inheritable: true},
+		{ObjectType: string(authz.TypeProject), ObjectID: k.ProjectID, Action: challengeWithdraw, Inheritable: true},
+	}
+}
+
+// mint is the shared body of create and rotate: generate, persist, audit,
+// answer once with the secret. k arrives carrying its kind and whatever that
+// kind hangs off — everything except the identifier and the digest, which only
+// apikey.New can produce.
+func (a *admin) mint(c echo.Context, k *model.APIKey, note string, networks []string, expires *time.Time, action string) error {
 	ctx := c.Request().Context()
 	sc, err := a.scope(c)
 	if err != nil {
@@ -221,11 +379,13 @@ func (a *admin) mint(c echo.Context, grants []model.APIKeyGrant, note string, ne
 		return err
 	}
 
-	k, secret, err := apikey.New()
+	fresh, secret, err := apikey.New()
 	if err != nil {
 		return err
 	}
-	k.Grants = grants
+	k.Identifier = fresh.Identifier
+	k.SecretHash = fresh.SecretHash
+	k.DisplayPrefix = fresh.DisplayPrefix
 	k.Note = note
 	k.ExpiresAt = expires
 	for _, n := range networks {
@@ -234,7 +394,7 @@ func (a *admin) mint(c echo.Context, grants []model.APIKeyGrant, note string, ne
 
 	var v keyView
 	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := store.CreateAPIKey(ctx, tx, sc, k, check); err != nil {
+		if err := store.CreateAPIKey(ctx, tx, sc, k, check, impliedGrants(k)...); err != nil {
 			return nil, err
 		}
 		v = toKey(*k)
@@ -419,7 +579,7 @@ func (a *admin) setKeyExpiry(c echo.Context) error {
 func key(ctx context.Context, db *gorm.DB, sc store.Scope, id model.ID) (*model.APIKey, error) {
 	var k model.APIKey
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		return sc.Where(tx).Preload("Networks").Preload("Grants").First(&k, "id = ?", id).Error
+		return sc.Where(tx).Preload("Networks").Preload("Grants").Preload("Role").First(&k, "id = ?", id).Error
 	})
 	if err != nil {
 		return nil, fmt.Errorf("get api key %s: %w", id, err)

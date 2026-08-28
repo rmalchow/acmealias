@@ -48,11 +48,65 @@ func SubjectFromRoles(accountID model.ID, roles []model.Role) Subject {
 // The key's own AccountID is the anchor, taken from the row the database
 // returned rather than from anything the request said — which is what makes it
 // unforgeable by a caller.
+//
+// THIS IS WHERE BOTH KINDS BECOME GRANTS, and it is the only place (design K1).
+// A project key resolves to its project's challenge actions; a system key
+// resolves to its role's grants, which is exactly what a member holding that
+// role resolves to. Downstream of this function nothing knows a key has a kind
+// — the predicate compiler sees a subject with grants, the way it does for a
+// person. If either kind ever grows a check of its own, that is not a feature:
+// it is a second authorization path appearing, which is the thing
+// `tenancy-and-permissions` was written to prevent.
+//
+// Every branch that cannot resolve returns a subject holding NOTHING rather than
+// falling back to something. A project key with no project, a role of another
+// account, a role reference that did not load: all of them are states the
+// database forbids, so reaching one means something upstream is wrong, and an
+// empty authority is the only safe reading of a wrong answer.
 func SubjectFromKey(k *model.APIKey) Subject {
 	if k == nil {
 		return Subject{}
 	}
 	s := Subject{AccountID: k.AccountID}
+
+	switch {
+	case k.Kind == model.APIKeyKindProject:
+		if k.ProjectID == nil {
+			return s
+		}
+		// The two challenge actions over the project, inheritable — which is
+		// the same authority the console used to compose by hand, and the same
+		// two grants the CLI's --project flag wrote. Synthesized rather than
+		// stored, because a stored grant would be one more polymorphic row that
+		// nothing deletes when its project goes; the foreign key on
+		// api_keys.project_id is what replaces it.
+		for _, action := range []string{ActionChallengePublish, ActionChallengeWithdraw} {
+			s.Grants = append(s.Grants, Grant{
+				AccountID: k.AccountID, Type: TypeProject, ObjectID: k.ProjectID,
+				Action: action, Inheritable: true,
+			})
+		}
+		return s
+
+	case k.RoleID != nil:
+		// A system key holding a role IS its role. Changing the role changes
+		// every holder at once, which is what somebody actually wants when they
+		// realise the automation has too much authority.
+		if k.Role == nil || k.Role.ID != *k.RoleID || k.Role.AccountID != k.AccountID {
+			return s
+		}
+		if k.Role.Unrestricted {
+			s.Unrestricted = true
+		}
+		for _, g := range k.Role.Grants {
+			s.Grants = append(s.Grants, grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Action, g.Inheritable, g.ID))
+		}
+		return s
+	}
+
+	// The legacy shape: a system key holding its own grants, which is what every
+	// key was before there were two kinds. Their grants are kept exactly as they
+	// were, because converting them into roles is a decision nobody asked for.
 	for _, g := range k.Grants {
 		s.Grants = append(s.Grants, grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Action, g.Inheritable, g.ID))
 	}

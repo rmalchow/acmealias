@@ -83,6 +83,13 @@ func trimmed(s string) string { return strings.TrimSpace(s) }
 // application-level check. Nodes CASCADE: they carry no state of their own and a
 // project without them publishes nothing, so they are part of the thing being
 // deleted rather than contents standing in its way.
+//
+// PROJECT KEYS cascade for the same reason, and that is design K2's whole point:
+// a key bound to this project is authority over a thing that no longer exists,
+// so leaving it behind would leave a live credential naming nothing. A grant
+// could not have said this — api_key_grants.object_id is polymorphic and
+// declares no reference, which is exactly why every project deleted before this
+// left its grants behind.
 func DeleteProject(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) error {
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
 		res := sc.Where(tx).Delete(&model.Project{}, "id = ?", id)

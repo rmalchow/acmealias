@@ -159,6 +159,20 @@ func RegisterChallenge(ctx context.Context, e *echo.Echo, o ChallengeOptions) er
 		Lookup:   o.Lookup,
 		LastUsed: o.LastUsed,
 		Logger:   o.Log,
+		// The address switch, resolved per request rather than copied (design
+		// K3). Both of these are closures over the handle this function already
+		// has, deliberately: threading two more fields through ServerOptions and
+		// main.go would be two more places to forget, and the listener that owns
+		// the challenge protocol is the only listener that authenticates keys.
+		NodeAddresses: func(ctx context.Context, accountID, projectID model.ID) ([]string, error) {
+			return store.NodeAddressesForProject(ctx, o.DB, accountID, projectID)
+		},
+		NoteRefusal: func(ctx context.Context, id model.ID, ip string) {
+			if err := store.NoteAddressRefusal(ctx, o.DB, id, ip); err != nil {
+				o.Log.WarnContext(ctx, "api key address refusal not recorded",
+					slog.String("api_key_id", id.String()), slog.Any("error", err))
+			}
+		},
 	})
 	// The body limit belongs to these routes rather than to the listener, since
 	// design P16 put everything on one. A publish body is two short strings;

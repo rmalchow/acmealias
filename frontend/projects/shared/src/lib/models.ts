@@ -130,12 +130,55 @@ export interface Project {
   domainCount?: number;
 }
 
+/**
+ * The two kinds of key, and the difference is a LIFETIME as much as an authority.
+ *
+ * A `project` key is bound to one project, answers that project's challenges, and is deleted with
+ * it. A `system` key holds a role, does whatever that role permits, and outlives every project in
+ * the account. That is why they are managed on different screens: one screen for both would make
+ * the difference invisible, and somebody would find out by having their automation revoked.
+ */
+export type ApiKeyKind = 'project' | 'system';
+
 export interface ApiKey {
   id: string;
+  kind: ApiKeyKind;
+  /** The project a project key is bound to and dies with. Absent on a system key. */
+  projectId?: string;
+  /**
+   * The role a system key holds — and it IS the role: editing the role changes what every key
+   * holding it may do, at once. Absent on a project key, and absent on a system key made before
+   * there were two kinds, which carries its own grants below instead.
+   */
+  roleId?: string;
+  roleName?: string;
+  /**
+   * Whether this project key accepts requests only from its project's node addresses.
+   *
+   * A SWITCH, not a copied list: what it permits is whatever the project's nodes are when a
+   * request arrives, so adding a node needs no change here. The console used to offer the same
+   * idea by copying the addresses into `networks`, and that copy was right until somebody added
+   * a node — at which point the symptom was a renewal that silently did not happen.
+   */
+  restrictToNodes: boolean;
+  /**
+   * The source address of the most recent refusal for an address restriction: the address the
+   * service actually SAW, not the one configured on a node.
+   *
+   * It is here because the refusal on the wire is deliberately indistinguishable from a wrong
+   * secret, and behind NAT or an egress gateway the two addresses differ — so this is the only
+   * place somebody can find that out in one attempt instead of by reasoning.
+   */
+  lastRefusedIp?: string | null;
+  lastRefusedAt?: string | null;
   /**
    * What the key may do, and to what. A key used to belong to one load balancer and its authority
    * WAS that foreign key; it is a subject holding grants now, anchored to the account, so the only
    * honest way to show what it can reach is to show them (task 9.5).
+   *
+   * EMPTY for both current kinds, and that is not a key that can do nothing: a project key's
+   * authority comes from `projectId` and a system key's from `roleId`. Rows appear here only on a
+   * key that predates the two kinds.
    */
   grants: KeyGrant[];
   identifier: string;

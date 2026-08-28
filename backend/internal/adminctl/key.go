@@ -65,17 +65,24 @@ func parseGrant(spec GrantSpec) (model.APIKeyGrant, error) {
 // — only its digest is — so this is the one and only time it is ever shown; the
 // output says so plainly.
 //
-// A key is a subject holding grants, anchored to the account (design P8). Two
-// ways to say what it may reach:
+// A key is of one of two kinds (design K1), and which flag is used decides
+// which:
 //
-//   - --project, which is the common case and what an operator has in front of
-//     them. It creates the two challenge grants over that project: the same
-//     authority the dropped api_keys.load_balancer_id column carried.
-//   - --grant, repeatable, for anything wider or narrower — a key confined to
-//     one domain, or one holding a single action.
+//   - --project makes a PROJECT key: bound to that project by a foreign key,
+//     answering its challenges, and deleted with it. This is the common case and
+//     what an operator has in front of them.
+//   - --grant, repeatable, makes a SYSTEM key holding exactly those grants — a
+//     key confined to one domain, or one holding a single action.
 //
-// Both may be given; the grants add up, because authority is a union and never a
-// subtraction.
+// They no longer add up. They used to, on the reasoning that authority is a
+// union and never a subtraction, and that is still true of grants; what changed
+// is that a project key has a LIFETIME as well as an authority. A key that dies
+// with one project while carrying grants over something else is a lifetime
+// nobody could reason about, so the combination is refused rather than resolved.
+//
+// The CLI is deliberately the one place a system key can be minted without a
+// role: it writes grants directly, which is the legacy shape, and it is the tool
+// somebody reaches for when the console cannot help. The API refuses it.
 func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, ref, note string, expiresIn time.Duration, specs []GrantSpec) error {
 	k, secret, err := apikey.New()
 	if err != nil {
@@ -89,10 +96,13 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 			return err
 		}
 		describedFor = p.Slug
-		k.Grants = append(k.Grants,
-			model.APIKeyGrant{ObjectType: string(authz.TypeProject), ObjectID: &p.ID, Action: authz.ActionChallengePublish, Inheritable: true},
-			model.APIKeyGrant{ObjectType: string(authz.TypeProject), ObjectID: &p.ID, Action: authz.ActionChallengeWithdraw, Inheritable: true},
-		)
+		// A PROJECT key (design K1). It used to be two grants written by hand
+		// over the project; it is now a foreign key, which is what makes the key
+		// die with the project — something a polymorphic grant reference could
+		// never do. The authority is identical either way: authz.SubjectFromKey
+		// synthesizes exactly those two challenge grants from this column.
+		k.Kind = model.APIKeyKindProject
+		k.ProjectID = &p.ID
 	}
 	for _, spec := range specs {
 		g, err := parseGrant(spec)
@@ -101,7 +111,22 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 		}
 		k.Grants = append(k.Grants, g)
 	}
-	if len(k.Grants) == 0 {
+	// --project and --grant no longer add up, and that is the one behaviour this
+	// change takes away from the CLI. A key is of one kind: bound to a project,
+	// or holding authority of its own. Mixing them would produce a key that dies
+	// with a project while carrying grants over something else, which is a
+	// lifetime nobody could reason about.
+	if k.Kind == model.APIKeyKindProject && len(k.Grants) > 0 {
+		return fmt.Errorf("--project makes a project key, whose authority is that project's " +
+			"challenges and nothing else; use --grant alone for a key with authority of its own")
+	}
+	if k.Kind == "" {
+		// Everything that is not a project key is a system key: an
+		// account-anchored holder of authority, which is what every key was
+		// before there were two kinds.
+		k.Kind = model.APIKeyKindSystem
+	}
+	if k.Kind == model.APIKeyKindSystem && len(k.Grants) == 0 {
 		// A key with no grants authenticates and can do nothing. That is a
 		// coherent row and a useless credential, and minting one silently is
 		// how an operator ends up debugging a 403 that was decided here.
@@ -134,7 +159,7 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 	}
 
 	if describedFor != "" {
-		fmt.Fprintf(out, "created api key %q (id %s) for load balancer %q: %s\n", k.Identifier, k.ID, describedFor, note)
+		fmt.Fprintf(out, "created project api key %q (id %s) for project %q: %s\n", k.Identifier, k.ID, describedFor, note)
 	} else {
 		fmt.Fprintf(out, "created api key %q (id %s): %s\n", k.Identifier, k.ID, note)
 	}

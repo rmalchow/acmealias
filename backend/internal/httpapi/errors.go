@@ -41,6 +41,7 @@ type ErrorBody struct {
 //	store.ErrPersonalAccountFixed                  409
 //	store.ErrSecondPersonalAccount                 409
 //	store.ErrPersonalAccountHasNoRoster            409
+//	store.ErrRoleHeldBySystemKey                   409
 //	gorm.ErrRecordNotFound                         404
 //	*echo.HTTPError                                its own code
 //	anything else                                  500, detail to the log only
@@ -84,6 +85,13 @@ func (a *admin) mapError(err error, c echo.Context) (int, any) {
 		// confer authority they do not hold. Hiding that as "not found" would
 		// leave them retrying a request that will never work.
 		return http.StatusForbidden, ErrorBody{Message: err.Error()}
+	case errors.Is(err, store.ErrRoleHeldBySystemKey):
+		// 409, with the same reasoning as the roles below it and one addition:
+		// the message NAMES the keys. "This role is in use" is not actionable —
+		// a role held by an automation nobody can find is a role nobody dares
+		// touch — and the remedy is to delete those keys or give them another
+		// role, which needs their identifiers.
+		return http.StatusConflict, ErrorBody{Message: err.Error()}
 	case errors.Is(err, store.ErrUnrestrictedRole), errors.Is(err, store.ErrLastUnrestrictedMember),
 		errors.Is(err, store.ErrOwnerMustBeUnrestricted):
 		// 409 for all three: the request is refused by the shape of the account

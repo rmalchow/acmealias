@@ -26,7 +26,7 @@
 
 ## 4. The credentials file
 
-- [ ] 4.1 Produce the JSON object clients read — `username`, `password`, `fulldomain`, `subdomain` — from the console, for one domain
+- [ ] 4.1 Produce the JSON object clients read — `username`, `password`, `fulldomain`, `subdomain` — from the console, for one domain. The key it carries is a **PROJECT key** (`api-key-kinds`, now implemented): bound to the domain's project by a foreign key, holding that project's challenge answering and nothing else, and deleted with the project. That is the whole reason `api-key-kinds` sits before this change — a credentials file handing out a key assembled by hand from the grant grammar is the file somebody pastes into a Kubernetes Secret and never looks at again. Offer the address limit switch beside it where the project has nodes
 - [ ] 4.2 Follow the show-once rule for the secret it contains, as the API key screen already does. See the open question
 - [ ] 4.3 Make the format exactly what cert-manager's `accountSecretRef` expects, since that is the client with the least tolerance for a near-miss: a Kubernetes Secret is not somewhere a person notices a typo
 

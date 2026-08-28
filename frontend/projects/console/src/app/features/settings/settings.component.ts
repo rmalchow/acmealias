@@ -8,6 +8,7 @@ import { Account, LOW_BALANCE, PageHeaderComponent } from '@acme/shared';
 import { AccountsService } from '../accounts/accounts.service';
 import { openCheckout } from '../accounts/checkout.modal';
 import { RolesComponent } from '../roles/roles.component';
+import { SystemKeysPanelComponent } from '../apikeys/system-keys-panel.component';
 
 /**
  * Settings: what administers the ACCOUNT, as opposed to the inventory it holds (task 6.5).
@@ -26,7 +27,7 @@ import { RolesComponent } from '../roles/roles.component';
 @Component({
   selector: 'app-settings',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, NzButtonModule, NzIconModule, NzToolTipModule, PageHeaderComponent, RolesComponent],
+  imports: [DatePipe, NzButtonModule, NzIconModule, NzToolTipModule, PageHeaderComponent, RolesComponent, SystemKeysPanelComponent],
   template: `
     @if (account(); as a) {
       <app-page-header [crumbs]="[{ label: 'Settings' }]" title="Settings" [subtitle]="a.name" />
@@ -84,6 +85,16 @@ import { RolesComponent } from '../roles/roles.component';
       <!-- Its own two headings, Roles and Members, carry this part; a third above them would
            only name the pair. -->
       <app-roles />
+
+      <!--
+        And the members that are not people (design K8). It sits after the roster rather than with
+        the inventory because that is what it is: a system key holds a role, so it belongs beside
+        the roles it can hold. A key for one project's challenge answering is made on that
+        project's page, dies with the project, and is deliberately not offered here.
+      -->
+      <section class="keys">
+        <app-system-keys-panel />
+      </section>
     }
   `,
   styles: [
@@ -115,6 +126,9 @@ import { RolesComponent } from '../roles/roles.component';
       .warn {
         color: var(--ac-warn);
         max-width: 32rem;
+      }
+      .keys {
+        margin-block-start: 2.5rem;
       }
     `,
   ],

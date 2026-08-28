@@ -316,11 +316,13 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 
 	case "key create":
 		fs := flag.NewFlagSet("key create", flag.ExitOnError)
-		project := fs.String("project", "", "project reference: the two challenge grants over it")
+		// Which kind to use, in one sentence each, where somebody minting their
+		// first key from the command line reads it (task 7.1).
+		project := fs.String("project", "", "project reference: a PROJECT key, answering that project's challenges and deleted with it. This is what a load balancer or ACME client wants")
 		name := fs.String("name", "", "key note")
 		expires := fs.String("expires", "", "key lifetime, e.g. 8760h (empty: never expires)")
 		var grants grantFlag
-		fs.Var(&grants, "grant", "TYPE:OBJECT:ACTION[:noinherit], repeatable; OBJECT may be * within the account")
+		fs.Var(&grants, "grant", "TYPE:OBJECT:ACTION[:noinherit], repeatable: a SYSTEM key holding these grants, outliving every project. Not combinable with --project")
 		fs.Parse(args)
 		var d time.Duration
 		if *expires != "" {

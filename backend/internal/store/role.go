@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -19,6 +20,11 @@ import (
 
 // ErrUnrestrictedRole is the refusal to edit or delete the account's fixed role.
 var ErrUnrestrictedRole = errors.New("store: the unrestricted role cannot be changed")
+
+// ErrRoleHeldBySystemKey is the refusal to delete a role a system key holds.
+// The message it wraps names the keys, because "delete the keys or give them
+// another role" is only actionable if you know which keys.
+var ErrRoleHeldBySystemKey = errors.New("store: this role is held by system key(s) and cannot be deleted")
 
 // ErrLastUnrestrictedMember is the refusal to remove the last member of the
 // unrestricted role.
@@ -170,6 +176,25 @@ func DeleteRole(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) error {
 		}
 		if members > 0 {
 			return fmt.Errorf("store: delete role %s: %d member(s) still hold it", id, members)
+		}
+		// And the members that are not people (design K6). A system key holding
+		// a role is refused for the same reason a person holding one is: the
+		// alternatives are to cascade, which silently strips an automation of
+		// its authority, or to set null, which leaves a key whose authority is a
+		// mystery. The foreign key on api_keys.role_id says `on delete restrict`
+		// and is the floor under this; what this adds is a sentence naming what
+		// holds the role, because a constraint violation is a 500 and not an
+		// explanation.
+		var keys []model.APIKey
+		if err := sc.Where(tx).Where("role_id = ?", id).Find(&keys).Error; err != nil {
+			return fmt.Errorf("store: delete role %s: %w", id, err)
+		}
+		if len(keys) > 0 {
+			names := make([]string, 0, len(keys))
+			for _, k := range keys {
+				names = append(names, k.Identifier)
+			}
+			return fmt.Errorf("%w: %s", ErrRoleHeldBySystemKey, strings.Join(names, ", "))
 		}
 		if err := sc.Where(tx).Delete(&model.Role{}, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("store: delete role %s: %w", id, err)

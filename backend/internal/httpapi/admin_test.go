@@ -246,9 +246,8 @@ func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
 		if err != nil {
 			t.Fatalf("seed key: %v", err)
 		}
-		k.Grants = []model.APIKeyGrant{
-			{ObjectType: "project", ObjectID: &v.projID, Action: "challenge.publish", Inheritable: true},
-		}
+		k.Kind = model.APIKeyKindProject
+		k.ProjectID = &v.projID
 		if err := store.CreateAPIKey(t.Context(), v.db, v.sc, k, store.AllowAnyGrant); err != nil {
 			t.Fatalf("seed key: %v", err)
 		}
@@ -616,6 +615,20 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"PUT", "", `{"expiresIn":"720h"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/expiry")},
 		{"POST", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("/rotate")},
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedKeyPath("")},
+
+		// System keys, which are governed like MEMBERSHIP and not like keys, and
+		// that is the row worth reading twice. A system key is a member of the
+		// account that happens not to be a person (design K6, K8): it holds a
+		// role, so minting one is handing out a role, and handing out a role is
+		// the unrestricted member's act everywhere else in this table. Letting
+		// KEY_ROTATION mint one would let the role whose whole point is rotating
+		// secrets create a credential holding ADMIN's authority.
+		//
+		// Reading them is any member's, for the reason reading the roster is: a
+		// credential in the account that nobody can see is how an account
+		// acquires an automation nobody remembers creating.
+		{"GET", acct + "/keys", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		{"POST", acct + "/keys", `{"note":"ci","roleId":"` + v.roleID.String() + `"}`, []string{"ADMIN"}, nil},
 
 		// The published contract, reachable by anyone — including, deliberately,
 		// callers with no session at all. A contract nobody can read without

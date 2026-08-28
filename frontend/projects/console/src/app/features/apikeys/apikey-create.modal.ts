@@ -10,17 +10,29 @@ import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
 import { ApiKeyCreated, ApiService, LBNode, apiErrorMessage } from '@acme/shared';
 export interface ApiKeyCreateData {
   projectId: string;
-  /** The load balancer's nodes, offered as one-click source-address restrictions. */
+  /**
+   * The project's nodes — and this modal now uses them only to SAY what the switch below would
+   * permit. It does not copy them anywhere.
+   */
   nodes: LBNode[];
 }
 
 /**
- * "New API key", as a modal.
+ * "New project key", as a modal.
  *
- * The source-address restrictions are the reason this is a form and not two fields: a key that
- * may only be used from the load balancer's own addresses is the difference between a leaked secret
- * being an incident and being a nuisance, and nobody types a /32 correctly from memory. The
- * load balancer's node addresses are therefore offered as chips.
+ * The key it creates is bound to the project and dies with it, and its authority is that
+ * project's challenge answering. There is nothing to compose: the grant grammar is still there
+ * for the expert case, and it is not what almost every key is for.
+ *
+ * THE ADDRESS LIMIT IS A SWITCH, AND THAT IS THE CHANGE. It used to copy the node addresses into
+ * the CIDR list, which is the obvious implementation and reintroduces the exact problem the
+ * feature exists to remove: the copy is right until somebody adds a node, and then the new node
+ * publishes, is refused for its address, and the symptom is a renewal that silently does not
+ * happen — surfacing weeks later as an expired certificate nobody connects to the node added
+ * last month. On means "only from this project's nodes", resolved when a request arrives.
+ *
+ * The hand-typed CIDR list stays, for the cases the switch cannot express: a NAT gateway, an
+ * egress range, a bastion. It is a different thing from the switch and is not mixed with it.
  */
 @Component({
   selector: 'app-apikey-create-modal',
@@ -42,28 +54,45 @@ export interface ApiKeyCreateData {
       </nz-form-item>
 
       <nz-form-item>
-        <nz-form-label>Source-address restrictions (CIDR)</nz-form-label>
-        <nz-form-control nzExtra="No restriction means the key works from anywhere.">
+        <nz-form-label>Restrict to this project's nodes</nz-form-label>
+        <nz-form-control>
           @if (nodeAddresses().length) {
             <!-- eslint-disable-next-line @angular-eslint/template/label-has-associated-control --
          nz-switch renders its own control inside this label and owns the association; the
          rule cannot see through the directive. -->
             <label class="pin">
-              <nz-switch
-                nzSize="small"
-                name="pinToNodes"
-                [(ngModel)]="pinToNodes"
-                (ngModelChange)="onPinChange($event)"
-              />
-              Restrict to this load balancer's node addresses
+              <nz-switch nzSize="small" name="restrictToNodes" [(ngModel)]="restrictToNodes" />
+              Only accept requests from this project's node addresses
             </label>
             <p class="ac-hint pin-hint">
-              {{ nodeAddresses().join(', ') }} — a leaked secret is then useless from anywhere else.
+              Currently {{ nodeAddresses().join(', ') }} — and it follows the project: add a node
+              and the new node works, with no change here. A leaked secret is useless from anywhere
+              else.
+            </p>
+            <p class="ac-hint pin-hint">
+              The address compared is the one the request ARRIVES FROM. Behind NAT, a CDN or an
+              egress gateway that is not the address configured on the node, and this would refuse
+              everything while looking correct — the key's row shows the address actually seen when
+              that happens.
             </p>
           } @else {
-            <p class="ac-hint">This load balancer has no node addresses yet, so there is nothing to pin the key to.</p>
+            <!--
+              Design K4: the switch is not offered as an inert control here. "Only from my nodes"
+              with no nodes means "from nowhere", which is the correct reading and a trap if it is
+              only correct — somebody's first act on a new project may well be to make a key before
+              adding a node, and they would meet a refusal that reads as a broken key.
+            -->
+            <p class="ac-hint">
+              This project has no node addresses yet, so there is nothing to permit. Add a node and
+              this becomes available.
+            </p>
           }
+        </nz-form-control>
+      </nz-form-item>
 
+      <nz-form-item>
+        <nz-form-label>Source-address restrictions (CIDR)</nz-form-label>
+        <nz-form-control nzExtra="For anything the switch above cannot express — a NAT gateway, an egress range. No restriction means the key works from anywhere.">
           @if (networks().length) {
             <div class="chips">
               @for (n of networks(); track n; let i = $index) {
@@ -140,34 +169,25 @@ export class ApiKeyCreateModalComponent {
   note = '';
   expiresIn = '';
   cidrInput = '';
-  /** The one-switch version of the common case: pin the key to the load balancer's own nodes. */
-  pinToNodes = false;
+  /**
+   * The common case, as one boolean sent to the service. Nothing is copied out of `nodes` — that
+   * list is read only to say what the switch would permit today.
+   */
+  restrictToNodes = false;
 
+  /**
+   * What the switch permits AT THIS MOMENT, for the sentence under it. Bare addresses rather than
+   * /32 and /128, because the switch compares addresses and not prefixes — writing a mask here
+   * would suggest a list that could be edited, which is the thing this replaced.
+   */
   readonly nodeAddresses = computed(() => {
     const addrs: string[] = [];
     for (const n of this.data.nodes) {
-      if (n.ipv4) addrs.push(`${n.ipv4}/32`);
-      if (n.ipv6) addrs.push(`${n.ipv6}/128`);
+      if (n.ipv4) addrs.push(n.ipv4);
+      if (n.ipv6) addrs.push(n.ipv6);
     }
     return addrs;
   });
-
-  /**
-   * Adds or removes the node addresses as a block.
-   *
-   * Removing only what the switch added — a CIDR typed by hand that happens to equal a node
-   * address stays, because the operator put it there for their own reason and a toggle should not
-   * quietly discard it. In practice that is the same list either way; the difference only shows
-   * when someone has been editing by hand, which is exactly when surprises are unwelcome.
-   */
-  onPinChange(on: boolean): void {
-    if (on) {
-      for (const addr of this.nodeAddresses()) this.addNetwork(addr);
-      return;
-    }
-    const node = new Set(this.nodeAddresses());
-    this.networks.update((ns) => ns.filter((n) => !node.has(n)));
-  }
 
   addNetwork(cidr: string): void {
     if (!this.networks().includes(cidr)) this.networks.update((ns) => [...ns, cidr]);
@@ -192,6 +212,7 @@ export class ApiKeyCreateModalComponent {
       .post<ApiKeyCreated>(`/projects/${this.data.projectId}/keys`, {
         note: this.note,
         expiresIn: this.expiresIn,
+        restrictToNodes: this.restrictToNodes,
         networks: this.networks(),
       })
       .subscribe({
@@ -206,7 +227,7 @@ export class ApiKeyCreateModalComponent {
 
 export function openApiKeyCreateModal(modal: NzModalService, data: ApiKeyCreateData) {
   return modal.create<ApiKeyCreateModalComponent, ApiKeyCreateData>({
-    nzTitle: 'New API key',
+    nzTitle: 'New project key',
     nzContent: ApiKeyCreateModalComponent,
     nzData: data,
     nzFooter: null,

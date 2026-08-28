@@ -74,7 +74,8 @@ func TestIntegrationMigrateDownReverses(t *testing.T) {
 		}
 	}
 	key := model.APIKey{
-		AccountID: account.ID, Identifier: "k_7f3a91c4",
+		AccountID: account.ID, Kind: model.APIKeyKindProject, ProjectID: &project.ID,
+		Identifier: "k_7f3a91c4",
 		SecretHash: []byte("0123456789abcdef0123456789abcdef"), DisplayPrefix: "AbCdEf",
 	}
 	if err := db.Create(&key).Error; err != nil {
