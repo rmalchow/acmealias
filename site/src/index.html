@@ -99,9 +99,10 @@
             <p>
               The challenge API implements <a href="https://go-acme.github.io/lego/dns/httpreq/">lego's
               <code>httpreq</code> protocol</a>, so anything built on lego works unchanged —
-              <strong>Traefik</strong> needs one provider line and no plugin. cert-manager and Caddy
-              reach DNS through their own interfaces and want a small adapter each; those are being
-              written.
+              <strong>Traefik</strong> needs one provider line and no plugin. The
+              <a href="https://github.com/joohoi/acme-dns">acme-dns</a> protocol is next, which is what
+              <strong>cert-manager</strong>, <strong>acme.sh</strong>, <strong>certbot</strong>,
+              Posh-ACME and win-acme already speak.
             </p>
           </li>
           <li>

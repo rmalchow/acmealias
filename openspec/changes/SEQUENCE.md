@@ -79,16 +79,29 @@ the bottom.
    build against us, which is why it is styled like the product rather than left stock, and why the
    assets are vendored rather than fetched from a CDN that would blank the page on an air-gapped
    deployment.
-11. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+11. **`acme-dns-protocol`** — speak the protocol the ecosystem already speaks. The challenge API
+    implements lego's `httpreq`, which covers lego and Traefik and leaves every other client needing
+    an adapter written by us, one at a time. But acme-dns is a server with THE SAME DESIGN as this
+    product — a permanent `CNAME` into a zone somebody else runs, updated over HTTP — and its API has
+    become the de facto standard for the pattern. We arrived at their architecture independently and
+    then chose a different spelling for the one call it needs.
+
+    The arithmetic decides it: native adapters mean a cert-manager WEBHOOK (a deployable apiserver
+    extension), a Caddy libdns module, an acme.sh plugin and a Posh-ACME plugin — four projects with
+    four release cycles. Speaking acme-dns's `/update` is ONE endpoint, and acme.sh, Certify The Web,
+    cert-manager, lego, Posh-ACME, Sewer, Traefik and WACS all work the day it ships; cert-manager's
+    support is built in, needing only a `host:` line. It sits immediately before the first customers
+    because which clients work is what decides whether somebody can adopt this at all.
+12. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-12. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+13. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-13. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+14. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-14. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
+15. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
     never spoken to: a self-service enrolment flow at the identity provider, a real payment provider
     behind the checkout that currently takes no money, protective limits that hold whether or not
     anybody has paid, the production identity provider and the rest of the staff/customer separation,
