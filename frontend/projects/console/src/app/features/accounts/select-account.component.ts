@@ -57,23 +57,24 @@ import { InvitationOffer } from '../invitations/invitations.models';
         It grants nothing the link grants. Both require being signed in as the invited address, and
         being signed in as it is stronger evidence than holding a message sent to it.
       -->
+      <!--
+        Plain markup rather than an nz-alert with a projected description, on purpose: the
+        description would have to be an <ng-template> declared INSIDE this loop, and a template
+        reference resolved per iteration is a subtlety to reason about every time somebody edits
+        this block. A card is what the accept screen uses for the same offer, so the two places a
+        person can answer an invitation look like each other.
+      -->
       @for (i of invitations.mine(); track i.accountId) {
-        <nz-alert
-          class="invite"
-          nzType="info"
-          [nzMessage]="'You have been invited to join ' + i.account"
-          [nzDescription]="inviteBody"
-        >
-        </nz-alert>
-        <ng-template #inviteBody>
-          <p>Invited as {{ i.email }}. It lapses on {{ expiry(i) }}.</p>
+        <div class="invite">
+          <h3><span nz-icon nzType="mail"></span>You have been invited to join {{ i.account }}</h3>
+          <p class="ac-hint">Invited as {{ i.email }}. It lapses on {{ expiry(i) }}.</p>
           <div class="invite-actions">
             <button nz-button nzType="primary" nzSize="small" [disabled]="busy()" (click)="join(i)">
               Join {{ i.account }}
             </button>
             <button nz-button nzSize="small" [disabled]="busy()" (click)="refuse(i)">Decline</button>
           </div>
-        </ng-template>
+        </div>
       }
 
       @if (accounts.accounts().length > 0) {
@@ -185,6 +186,17 @@ import { InvitationOffer } from '../invitations/invitations.models';
       }
       .invite {
         margin-block-end: 1rem;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--ac-info-line, rgba(23, 125, 220, 0.35));
+        background: var(--ac-info-soft, rgba(23, 125, 220, 0.12));
+        border-radius: 6px;
+      }
+      .invite h3 {
+        margin: 0 0 0.25rem;
+        font-size: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
       }
       .invite-actions {
         margin-block-start: 0.5rem;
