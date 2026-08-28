@@ -318,6 +318,65 @@ what the service is doing *right now*, which is worth having when something is
 wrong and worth nothing the rest of the time. It stays out of the first
 navigation and is reconsidered when somebody has actually wanted it.
 
+## C14. A personal account's slug is derived from its owner's email
+
+`accounts.slug` is `not null unique`, and a personal account is never named by
+anybody (C1). So one is derived, from the owner's email address.
+
+**The derivation has to be sanitised and disambiguated**, because an email is not
+a slug. `dnsname.ValidateLabel` governs the column's shape, and addresses contain
+characters it refuses and distinctions it erases: `a.b@x.com` and `a-b@x.com`
+both reduce to `a-b-x-com`. A collision is therefore possible between two real
+people, and the derivation must carry a discriminator rather than fail the second
+person's first sign-in.
+
+**What this costs, and it is worth stating rather than discovering.** A slug that
+encodes an email is an email in the database in a second form, and a globally
+unique slug is checkable. If a slug is ever exposed on a surface a stranger can
+probe, "does `ruben-example-com` exist" answers "does this person have an
+account" — the same membership-oracle shape the alias label reasoning already
+rejects for a public zone. Two things keep that acceptable today: accounts are
+addressed by id in every route, and the slug is not reachable from outside the
+account. **Neither is a property to lose casually**, and a future change that
+makes slugs public has to revisit this rather than inherit it.
+
+**Rejected: making the column nullable.** It would be honest — a personal account
+genuinely has no name — and it would put a null check into every path that reads
+a slug, for the benefit of one account kind. A derived value is a smaller lie
+than a null that half the code forgets to handle.
+
+## C15. Deleting a user cascades into their personal account and is refused for a team one
+
+A person who leaves is deleted. Their personal account goes with them; a team
+account they own stops the deletion.
+
+**The database already says both**, and the application only has to respect the
+order:
+
+```
+  accounts.owner_user_id   references users    on delete RESTRICT
+  projects.account_id      references accounts on delete RESTRICT
+  account_members.user_id  references users    on delete CASCADE
+```
+
+So deletion is an explicit, ordered operation: remove the personal account's
+projects, then the account, then the user. Their memberships of other accounts
+vanish on their own. If they own a team account, `RESTRICT` refuses the delete and
+the error is the honest one — *this person still owns something other people are
+using* — rather than an orphaned row discovered months later.
+
+**The restricts are the backstop, not the mechanism.** A deletion path that gets
+the order wrong fails loudly instead of half-completing, which is the property
+worth having in an operation nobody performs often enough to remember.
+
+**A team account whose owner leaves has no automatic answer, deliberately.** The
+alternatives are all worse: transferring to an arbitrary member picks somebody
+who did not agree to be responsible for a bill; deleting the account destroys
+other people's work; and leaving it ownerless makes the owner column a lie. What
+exists instead is `adminctl`'s transfer verb — somebody decides, and the decision
+is recorded. This is the one place in the model where the answer is "a human
+handles it", and saying so is better than a default nobody would have chosen.
+
 ## C10. Removing the internal edition is part of this change, not a follow-up
 
 It is tempting to split, because a deletion has a different risk profile from a
