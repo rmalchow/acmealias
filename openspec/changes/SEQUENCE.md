@@ -10,6 +10,16 @@ the bottom.
 
 ## The order
 
+**Where this stands, 2026-08-28.** Entries 1 through 12 are ARCHIVED except one: everything from
+`tenancy-and-permissions` to `acme-dns-protocol` is built and its specs are in the main specs, and
+what remains open below that line is `transactional-email` (entry 5, 15 of 17) and
+`authentik-and-self-signup`, which sits outside the numbering. The per-entry notes further down were
+written while those changes were in flight and have not all been rewritten — where an entry says how
+many of its tasks are done, read the archive rather than the note. `collapse-project-and-loadbalancer`
+was the last of them, archived after dropping a REMOVED block naming a requirement the main specs
+never held; its task 1.8 records that. **The next body of real work is entry 14,
+`domain-diagnostics`, at 5 of 93.**
+
 1. **`tenancy-and-permissions`** — the floor, and the only change that is substantially cheaper now
    than later, because it rewrites the shape of every table while the only data is ours.
    *Implemented: 81 of 81 tasks. The acceptance suite runs green on the branch, from a destroyed
