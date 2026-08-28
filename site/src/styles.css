@@ -471,15 +471,13 @@ h1 {
    page rather than arriving with its own spacing. */
 .proof,
 .scope,
-.pricing,
-.cta {
+.pricing {
   padding-block: 3rem;
 }
 
 .proof h2,
 .scope h2,
-.pricing h2,
-.cta h2 {
+.pricing h2 {
   margin: 0 0 0.5rem;
   font-size: 1.35rem;
   letter-spacing: -0.01em;
@@ -637,16 +635,26 @@ h1 {
   color: var(--ink-dim);
 }
 
-/* ── The closing call to action ───────────────────────────────────────────── */
-.cta {
-  border-block-start: 1px solid var(--line);
-  margin-block-start: 1rem;
+/* ── Sign up ──────────────────────────────────────────────────────────────
+   Under the comparison rather than at the foot of the page: the table is where
+   the question "which of these am I" gets answered, and the answer to both is the
+   same button. A call to action three sections later would be asking somebody to
+   remember a decision they already made. */
+.signup {
+  margin-block-start: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
 }
 
-.cta p {
-  margin: 0 0 1.5rem;
+/* Beside the button, not under it: this sentence is a condition on what the
+   button does, and a reader who has already pressed it has not been told. */
+.signup p {
+  margin: 0;
   color: var(--ink-dim);
-  max-inline-size: 55ch;
+  font-size: 0.95rem;
+  max-inline-size: 42ch;
 }
 
 /* Visually gone, still announced. The comparison's caption and the dashes'
