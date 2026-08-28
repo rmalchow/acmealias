@@ -3,9 +3,10 @@ import { FormsModule } from '@angular/forms';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzInputModule } from 'ng-zorro-antd/input';
+import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzRadioModule } from 'ng-zorro-antd/radio';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
-import { Account, apiErrorMessage } from '@acme/shared';
+import { Account, MARKETING_SITE, apiErrorMessage } from '@acme/shared';
 import { AccountsService } from './accounts.service';
 
 /**
@@ -40,8 +41,29 @@ export interface CheckoutData {
 @Component({
   selector: 'app-checkout-modal',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, NzButtonModule, NzFormModule, NzInputModule, NzRadioModule],
+  imports: [FormsModule, NzAlertModule, NzButtonModule, NzFormModule, NzInputModule, NzRadioModule],
   template: `
+    <!--
+      ABOVE the form, not beside the button.
+
+      The credit is real — it is written to the account and spent like any other — and no money
+      moves. Somebody has to know that BEFORE they fill in a slug and a name and pick an amount,
+      not after: a person who works through a form and is then told it was not a purchase has been
+      allowed to misunderstand for the length of the task, which is worse than not being told.
+
+      It links out rather than explaining here. A modal is not where to write three paragraphs
+      about the state of a business, and the page it points at can say more and change without a
+      release.
+    -->
+    <nz-alert class="not-live" nzType="warning" nzMessage="Payment is not live" [nzDescription]="notLive" />
+    <ng-template #notLive>
+      Nothing is charged and no card is asked for. The credit is real — it lands in the account and
+      is spent like any other — but no money moves.
+      <a [href]="about" target="_blank" rel="noopener">
+        There are other ways to support this</a
+      >.
+    </ng-template>
+
     <form nz-form nzLayout="vertical" class="ac-modal-form" (ngSubmit)="save()">
       @if (data.mode === 'buy') {
         <nz-form-item>
@@ -93,6 +115,14 @@ export interface CheckoutData {
   `,
   styles: [
     `
+      /* Above the form and clear of it. The modal's own padding puts the form hard against the
+         alert otherwise, and a warning touching the field it warns about reads as that field's
+         validation error. */
+      .not-live {
+        display: block;
+        margin-block-end: 1.25rem;
+      }
+
       .actions {
         display: flex;
         justify-content: flex-end;
@@ -103,6 +133,9 @@ export interface CheckoutData {
   ],
 })
 export class CheckoutModalComponent implements OnInit {
+  /** The site explains what "not live" means; a modal is not the place for three paragraphs. */
+  protected readonly about = MARKETING_SITE + '/about';
+
   private readonly accounts = inject(AccountsService);
   readonly ref = inject(NzModalRef<CheckoutModalComponent, Account | undefined>);
   readonly data = inject<CheckoutData>(NZ_MODAL_DATA);

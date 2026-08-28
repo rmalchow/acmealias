@@ -497,6 +497,55 @@ h1 {
   max-inline-size: 62ch;
 }
 
+/* -- The about page ------------------------------------------------------- */
+.about {
+  padding-block: 1rem 3rem;
+  max-inline-size: 68ch;
+}
+
+.about h2 {
+  margin: 2rem 0 0.5rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+
+.about p {
+  margin: 0 0 1rem;
+  color: var(--ink-dim);
+}
+
+.about strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.help {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+/* A rule down the side rather than a card each. These are four asks, not four
+   offers, and the raised panel the feature cards use would give them the weight
+   of things being sold. */
+.help li {
+  border-inline-start: 2px solid var(--line);
+  padding-inline-start: 1rem;
+  color: var(--ink-dim);
+}
+
+/* The one paragraph on the page that admits to a hole. Marked, so it does not
+   read as finished copy somebody approved. */
+.pending {
+  margin-block-start: 2rem;
+  padding: 0.85rem 1rem;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
 /* -- The clients ----------------------------------------------------------
    Tabs, set the way the console's navigation is set (shell.component's `.nav`):
    a row of plain words over a rule, with the active one carrying an accent

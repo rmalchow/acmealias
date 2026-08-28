@@ -415,6 +415,20 @@ export function accountIcon(a: Pick<Account, 'kind'>): string {
 }
 
 /**
+ * Where the marketing site lives.
+ *
+ * ONE PLACE, because it is a hostname the console has no way to know. The service knows it — it is
+ * `post_logout_redirect_url` in the deployment's configuration, which is where sign-out sends
+ * somebody — but the console is never told, and inventing a second source for it would mean two
+ * things to change on the day the domain does.
+ *
+ * So it is a constant carrying a DEVELOPMENT hostname, and that is a debt with a name rather than a
+ * string somebody finds in a component. Before this ships anywhere real it has to come from the
+ * service, alongside the value sign-out already uses.
+ */
+export const MARKETING_SITE = 'http://www.localhost';
+
+/**
  * The balance below which the console warns (task 6.10, design C4).
  *
  * The refusal at zero is soft — renewals stop and the certificate on the wire

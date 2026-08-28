@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About AcmeAlias</title>
+    <meta
+      name="description"
+      content="Let's Encrypt certificates over the DNS-01 challenge, without handing anyone your DNS credentials. One CNAME, once."
+    />
+    <link rel="icon" href="../brand/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <!--
+        The wordmark is TEXT, not the artwork in brand/wordmark.svg. Set in the same
+        face the artwork is drawn in (Barlow Condensed, served from fonts/), so the
+        two are the same shapes — and in white, because the mark beside it is the
+        only green thing the bar is allowed. Text also selects, scales with the
+        browser's font size and reads out to a screen reader as a name rather than
+        as alt text standing in for one.
+
+        `Acme` is set light and `Alias` regular. The <b> carries no emphasis and is
+        purely the weight boundary; it sits INSIDE the one span so the word is a
+        single string — selecting it, or reading it out, gives "AcmeAlias" and not
+        "Acme Alias".
+
+        brand/wordmark.svg stays in the repository: it is what a printed or emailed
+        surface uses, where no font is being served.
+      -->
+      <a class="mark" href="/" aria-label="AcmeAlias — home">
+        <img class="mark-logo" src="../brand/logo.svg" alt="" />
+        <span class="mark-word"><b>Acme</b>Alias</span>
+      </a>
+      <nav>
+        <!--
+          The glyph is Bootstrap Icons' box-arrow-in-right, inlined rather than linked: the
+          site ships no icon font and no CDN link, and one icon is not a dependency. Inline
+          also means it inherits `currentColor`, so the hover state needs no second rule.
+        -->
+        <a class="button" href="http://console.localhost">
+          <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path
+              fill-rule="evenodd"
+              d="M6 3.5a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-2a.5.5 0 0 0-1 0v2A1.5 1.5 0 0 0 6.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-8A1.5 1.5 0 0 0 5 3.5v2a.5.5 0 0 0 1 0z"
+            />
+            <path
+              fill-rule="evenodd"
+              d="M11.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5H1.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708z"
+            />
+          </svg>
+          Sign in
+        </a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Where this is</p>
+        <h1>Being built in the open, and not yet taking money.</h1>
+        <p class="lede">
+          The service works. The checkout does not — and rather than hide that behind a
+          &ldquo;coming soon&rdquo;, here is exactly what is real, what is not, and what would
+          genuinely help.
+        </p>
+      </section>
+
+      <section class="about">
+        <h2>What is real</h2>
+        <p>
+          Everything the front page describes. A permanent <code>CNAME</code> into our zone, an
+          answer published only while a certificate authority is asking, a record of every
+          publication and every query it drew. That is running, it is tested end to end against a
+          real ACME server, and it is what you would be using.
+        </p>
+
+        <h2>What is not</h2>
+        <p>
+          <strong>Payment.</strong> The checkout asks for an amount and takes no card, because there
+          is nothing behind it yet. The credit it adds is real — it lands in the account and is spent
+          like any other credit — but no money moves, and nothing is owed.
+        </p>
+        <p>
+          It exists in that half-state deliberately. The credit model is the part worth getting
+          wrong early and cheaply: how an account is funded, what happens when it runs out, what a
+          team account can do that a personal one cannot. Those are answered. Which payment provider
+          takes the card is the easy question, and answering it first would have proved nothing.
+        </p>
+
+        <h2>What would help</h2>
+        <ul class="help">
+          <li>
+            <strong>Use it and break it.</strong> The most useful thing anybody can do is point it at
+            a domain that matters and tell us what went wrong. Every assumption in here was made by
+            somebody who already knew how it worked.
+          </li>
+          <li>
+            <strong>Tell us which client you run.</strong> The challenge API speaks lego&rsquo;s
+            <code>httpreq</code> protocol and is growing acme-dns support. If yours is neither, that
+            is worth knowing before the adapter list is decided rather than after.
+          </li>
+          <li>
+            <strong>Say what is missing.</strong> Not features — <em>situations</em>. The setup you
+            have that this does not fit is more useful than a feature request, because the fix is
+            often not the feature you would have asked for.
+          </li>
+          <li>
+            <strong>Wait, if you were about to pay.</strong> When payment goes live, the accounts and
+            the credit in them are already there; nothing you build now has to be rebuilt.
+          </li>
+        </ul>
+
+        <!--
+          NO CONTACT ADDRESS IS INVENTED HERE. The site carries no imprint, privacy statement or
+          abuse contact yet — public-edition tasks 8.5-8.8 — and putting a plausible-looking address
+          on the one page that asks people to get in touch would be the worst place to guess. This
+          paragraph is the placeholder, and it says so rather than looking finished.
+        -->
+        <p class="pending">
+          <strong>Getting in touch:</strong> this page needs a real address, and does not have one
+          yet. It goes in with the imprint, privacy statement and abuse contact, none of which are
+          written.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        <strong>Placeholder.</strong> This page exists so the hostname, its routing and its build are
+        real. The published commitments this site is required to carry are listed in
+        <code>public-edition</code> U11 and are not written yet.
+      </p>
+    </footer>
+  </body>
+</html>
