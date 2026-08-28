@@ -35,15 +35,16 @@ the bottom.
 5. **`account-invitations`** — the entry path into a TEAM account. While self-registration is
    closed, an invitation is the only way a person joins one. It now depends on the change above,
    because team accounts do not exist without it.
-6. **`self-service-signup`** — the front door, with a human at it. Nothing currently refuses a
-   stranger who wants to sign up; there is simply no enrolment flow in the blueprint, so the product
-   is closed BY OMISSION rather than by any decision — which is why two changes above describe the
-   closure wrongly. This adds the flow and, behind it, an approval gate: initially a member of staff
-   confirms each registration, later the gate is switched off and the door is simply open. The gate
-   is OURS, not the identity provider's, because "may this person use the product" is a decision
-   about our product rather than about who somebody is — and because an inactive user at the
-   provider cannot be TOLD anything, which turns a review into what looks to them like a broken
-   password. It sits after invitations because accepting one is a vouching that bypasses the queue.
+6. **`self-service-signup`** — the front door. Nothing currently refuses a stranger who wants to sign
+   up; there is simply no enrolment flow in the blueprint, so the product is closed BY OMISSION rather
+   than by any decision — which is why two changes above describe the closure wrongly. This adds the
+   flow, linked from the sign-in form, and holds each new person inactive until somebody approves
+   them; later that gate is switched off and the door is simply open. The gate is the IDENTITY
+   PROVIDER'S, because "may this person authenticate at all" is a fact about an identity, while
+   "suspended" is a fact about a known customer's account and stays ours. Putting it there also means
+   no `accounts` row is ever written for somebody we have not admitted, and nothing in our schema or
+   in `store.Usable` changes. It sits after invitations because accepting one is a vouching that
+   bypasses the gate.
 7. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
    sits immediately before the first customers rather than after them, because the very first thing
    any customer does is publish one `CNAME`, and this is the only thing that tells them whether they

@@ -38,153 +38,135 @@ is the scarce resource the whole gate depends on.
 Neither substitutes for the other. Verification alone admits anybody who owns a mailbox. Approval
 alone has staff adjudicating strangers who may never come back.
 
-## S3. The gate is in our service, not in authentik
+## S3. The gate is in the identity provider, and the two refusals are different things
 
-authentik does this natively: an enrolment flow whose `user_write` stage carries
-`create_users_as_inactive`, and an administrator sets `is_active` afterwards. It costs one blueprint
-key and no code, and it is still the wrong place.
+**This decision said the opposite, and was wrong.** It argued the approval gate belonged in our
+service. The correction is not deference to a preference; it is a distinction the first version
+missed, and once it is drawn the rest follows.
 
-**The person is told nothing.** An inactive authentik user is not shown an explanation; they are shown
-a sign-in that fails. To them that is indistinguishable from a wrong password — so they retry it, run a
-password reset, retry again, and mail support. Every one of those is work our silence created, and the
-one thing we needed to say ("we have your registration, somebody is looking at it") is the one thing
-that channel cannot say.
+There are two refusals in this product and they are about different objects:
 
-**The reviewer is in the wrong building.** authentik's admin interface is a separate plane with its own
-access, and what it shows is an *identity* — a username, a group list, a login history. What a reviewer
-needs is a *registration*: who signed up, when, at what address, and what they have asked for. That is
-staff console material, and `staff-plane` already builds the console it belongs in.
+| | *Not approved yet* | *Suspended* |
+| --- | --- | --- |
+| About | an **identity** — may this person authenticate at all | an **account** — this known customer's workspace does not work |
+| Known to us | nothing; they are a stranger | everything; they have been using the product |
+| Lives in | authentik | our service (`store.Usable`) |
+| Reached by | nobody, ever — they cannot get a session | the person, on a screen |
 
-**Nothing lands in our audit trail.** `staff-plane` exists to make staff decisions about customers
-accountable. "Who let this person in" is squarely that class of decision, and a flag flipped in
-authentik's own log is not somewhere our audit answers from.
+"Not approved yet" is a statement about somebody we have not admitted. There is no account for it to
+be a fact about, and inventing one to hold the flag is what the first version of this decision did.
 
-Underneath all three is one principle: **the identity provider proves somebody is who they say they
-are; whether we want them is a decision about our product.** Filing that judgment under identity is
-the same category error `tenancy-and-permissions` P18 refuses when it declines to read membership out
-of directory groups. The provider can create a person. It cannot decide they are a customer.
+### What that mistake actually cost, which is the argument
 
-**Rejected, and worth naming: doing both.** Inactive in authentik *and* unapproved here would be two
-gates that can disagree, with no single answer to "why can this person not get in" — the failure mode
-being a customer approved in one place and stuck in the other, and two teams each certain they had
-done their part.
+If approval lives in our service, then an unapproved stranger **completes enrolment, receives a
+session, and gets an `accounts` row written for them**. We would be materializing database rows —
+account, slug, personal-account invariants, audit entries — for every person we have explicitly not
+yet decided to admit. Anybody who can complete a signup form can make us write rows.
 
-## S4. Approval is not a new state; it is the one existing predicate, with a third reason
+Held inactive at the provider, they never reach us at all. The gate is in front of the thing being
+protected instead of inside it, which is where a gate belongs.
 
-`store.Usable` is the only place the question "does this account work" is answered (design C3), and
-`store.SuspensionReason` is the only place it is explained. C6 wrote the reason down in advance: the
-suspensions are "a conjunction, written here once, so that adding a third reason later is one clause
-rather than an audit of every call site."
+### The objection that survives, as a requirement rather than a reason
 
-```sql
-ALTER TABLE accounts ADD COLUMN approved_at timestamptz NULL;
-```
+The first version's best point stands and does not go away: **an inactive user is told nothing.**
+authentik's default behaviour for one is a sign-in that fails, which to the person is
+indistinguishable from a wrong password — so they retry, reset their password, retry, and mail
+support, and every one of those is work our silence created.
 
-```
-usable(account) = approved_at IS NOT NULL
-                  AND (kind == personal OR (credits > 0 AND NOT staff_suspended))
-```
+But that is a fact about authentik's DEFAULT, not about where the gate belongs. authentik can be made
+to say it: a policy on the authentication flow that recognises an unapproved user and a stage that
+renders a real message rather than a generic failure. So it becomes a requirement on the flow — task
+7.6 — and it is the one part of this that must not be skipped, because skipping it produces exactly
+the support load the first version predicted while keeping none of what it was trading for.
 
-A nullable timestamp rather than a boolean, for the reason the invitation table takes the same shape:
-*when* is audit evidence and *whether* is not, and a boolean throws the first away for nothing.
+The other two objections do not survive contact with the correction. "The reviewer is in the wrong
+building" assumed a reviewer working in our staff console on a queue of our rows; there are no rows,
+and the provider's own user list is where an identity decision is taken. "Nothing lands in our audit
+trail" is right and is no longer a defect: our audit trail records what happens to accounts and the
+people in them, and somebody who was never admitted is in neither category. The provider's event log
+is the correct home for the decision, because it was a decision about an identity.
 
-**Rejected: a `pending` account kind, or an account status enum.** Both introduce a state every
-existing `switch` on `Kind` must now handle, and every one that does not becomes a place where a
-pending account is quietly treated as a working one. The conjunct cannot be forgotten by a caller
-because no caller evaluates it — they call `Usable`.
+## S4. Nothing changes in the account model
 
-## S5. The new conjunct sits ABOVE the kind test, and that is the opposite of `staff_suspended`
+The consequence of S3 worth stating on its own, because the first version of this change specified
+all of it and none of it is now needed:
 
-`Usable` carries a comment about exactly this line:
+- **No `accounts.approved_at`**, no migration, no backfill.
+- **No new conjunct in `store.Usable`.** The predicate stays exactly as C3 wrote it, which also means
+  the question C6 left open — what a staff suspension means for a free account — stays open and
+  `staff-plane`'s to answer, rather than being disturbed by a change that had no business near it.
+- **No third reason in `SuspensionReason`**, and no new console screen. Suspension keeps its two
+  meanings and its existing screen.
 
-> because the personal clause comes FIRST and short-circuits, a staff suspension does not stop a
-> personal account. That is design C6 as written… When `staff-plane` gives somebody the power to set
-> that column it will also be the change that decides what it means for a free account, and this is
-> the one line it has to edit.
+A change that adds a column, a clause in the one predicate the whole permission model funnels
+through, a reason string, a customer screen and a staff queue — against one that adds a flow to a
+blueprint. The second is not merely smaller; it leaves the load-bearing part of the system untouched.
 
-**This change does not edit that.** `staff_suspended` keeps its position and its meaning, and what a
-staff suspension does to a free account remains `staff-plane`'s decision to make. The approval clause
-is a separate conjunct placed above the whole expression, so it gates every account of every kind.
+## S5. The service does not learn about somebody until they are admitted
 
-That asymmetry is deliberate and it is worth being able to defend, since two adjacent booleans now
-behave differently:
+There is no state in our database for a pending registration, and that is the point rather than an
+omission. `store.EnsurePersonalAccount` runs on first sign-in, and a person who has not been approved
+never signs in, so it never runs for them.
 
-- **A suspension is a judgment about conduct**, applied to an account that has been working. Whether
-  it should reach into somebody's free personal workspace is a genuinely hard question about
-  proportionality, and it is the question `staff-plane` is going to answer.
-- **Approval is the absence of any judgment yet.** There is nothing to be proportionate about: the
-  account has never worked, nobody has come to rely on it, and the entire purpose of the gate is that
-  it applies to a person we know nothing about. A gate that let unapproved people use their personal
-  account would gate nothing — the personal account is the whole product for a new arrival.
+The property this preserves is worth naming because it is easy to give away: **every row in
+`accounts` belongs to somebody we decided to admit.** Once the gate is in front, that is true by
+construction rather than by a predicate somebody has to remember to consult.
 
-## S6. "Awaiting review" is not "suspended", to the only audience that matters
+## S6. Suspension stays exactly where it is
 
-One predicate, two sentences, and the console already has the machinery: `SuspensionReason` returns a
-sentence the caller acts on, and `suspended.component.ts`'s own comment records that "the reason comes
-from the service rather than being inferred from the balance."
+The user's split, kept as written: *"not approved yet"* in authentik, *"suspended"* on the user in the
+app.
 
-Somebody who registered an hour ago and is told their account is **suspended** reads *punished*. They
-go looking for what they did wrong; they write to support to appeal a penalty nobody imposed; and
-their first impression of the product is an accusation. The word is wrong even though the mechanism is
-right.
+They are not two implementations of one idea. A suspension is a judgment about **conduct**, applied to
+an account that has been working, that somebody has come to rely on, and whose owner is owed both an
+explanation and a remedy — which is why `SuspensionReason` returns a sentence and the console renders
+a screen with a way out. Approval is the absence of any judgment at all about a stranger, and there is
+nobody to explain anything to yet beyond "we have your registration".
 
-So the screen is a different screen, and specifically it has **no checkout button**. Every other
-unusable account in this product is fixed by paying, and offering to take money from somebody whose
-problem is that a human has not looked at them yet is the worst possible misreading of their
-situation. The remedy is waiting, so the screen says that, and says roughly how long.
+## S7. An invitation is a vouching, so an invited person is not held
 
-## S7. An invitation is a vouching, so an invited person does not queue
-
-Accepting an invitation sets `approved_at` on the accepter's personal account if it is not already set.
+A person created by accepting an invitation is created **active**. They do not wait for approval.
 
 The queue exists to look at **strangers**. Somebody accepting an invitation is not one: a paying
-customer named their address and took responsibility for them. Sending them to a review queue inserts
-our latency into another customer's onboarding, and asks a reviewer with no context to second-guess
-somebody who had plenty.
+customer named their address and took responsibility for them. Holding them inserts our latency into
+another customer's onboarding and asks a reviewer with no context to second-guess somebody who had
+plenty.
 
-There is also a half-state to avoid. An invited person holds two things — the account they were
-invited into and their own personal account — and approving only the first leaves them able to work in
-somebody else's account but not their own, which is not a rule anybody could infer or would expect.
+Mechanically this is a property of which flow created the user, which is a distinction authentik draws
+natively: the enrolment flow reached from the sign-in page creates users inactive, and the flow an
+invitation link enters creates them active. Two flows, two `user_write` stages, one differing key —
+rather than a rule somebody has to apply.
 
-**Rejected: approving the user rather than the account.** Approval hangs off the account because that
-is where `Usable` reads, and because a person's relationship to the product is mediated by accounts
-everywhere else in this design. A `users.approved_at` would be a second axis to consult.
+## S8. Opening the door does not release those already behind it
 
-## S8. The switch decides what is WRITTEN, not what is READ
+Approval is required or not according to one key on the enrolment flow's `user_write` stage,
+`create_users_as_inactive`. Turning it off means the flow stops creating inactive users. It does
+**not** activate the people it created earlier.
 
-`ACME_REQUIRE_ACCOUNT_APPROVAL` is consulted once, by `EnsurePersonalAccount`, when the row is
-created. On: `approved_at` null. Off: `approved_at = now()`.
+That asymmetry is right in one direction and a trap in the other, and both halves are worth stating:
 
-It is emphatically **not** read by `Usable`. C3 keeps that predicate a comparison over one row, and a
-predicate that consults configuration means the same row is usable or not depending on a setting —
-which makes every stored decision provisional and every audit entry ambiguous about what was true at
-the time.
+- **Turning it ON cannot lock anybody out.** Existing users keep `is_active`. A setting somebody
+  tightens must never suspend the customers already using the product.
+- **Turning it OFF leaves the backlog inactive.** The people who registered while the gate was up stay
+  where they are, waiting for a gate that no longer exists.
 
-The consequence, which is the interesting half:
+The second is handled by being deliberate about it rather than by making the flow retroactive:
+switching the gate off is accompanied by activating whoever is still waiting, as an explicit action
+somebody takes and the provider's event log records. A config change that silently admits a backlog of
+real people, attributed to nobody, at a moment when nobody is looking at them, is not an improvement
+on remembering.
 
-- **Turning approval ON does not suspend anybody.** Existing accounts keep their `approved_at`. This
-  is plainly right; the alternative locks out every customer the day somebody tightens a setting.
-- **Turning approval OFF does not release the backlog.** People who registered while it was on stay
-  unapproved. This one is a trap, and it is handled by making it visible rather than by weakening the
-  predicate: with approval off and accounts still waiting, the staff queue says exactly that and
-  offers to approve them together. Somebody decides, once, and the decision is recorded like every
-  other approval.
+## S9. What the reviewer does
 
-**Rejected: auto-approving the backlog when the switch flips.** It is a bulk decision about real
-people taken by a config reload, attributed to nobody, at a moment when nobody is looking at the
-queue.
+Approving somebody is setting `is_active` on a user in authentik's own interface. There is no queue to
+build, because the provider already lists its users and can filter them by exactly this.
 
-## S9. What the reviewer sees, and what they must not need
+Refusal is leaving them inactive, or deleting the user. Neither needs a mechanism from us. Whether
+somebody may re-register after a refusal is `staff-plane`'s blocklist question and not this one.
 
-The queue is a list of registrations: address, when they registered, whether the address is verified,
-and the account slug. That is the whole of it, and the shortness is the point — a reviewer deciding
-about a stranger has nothing else to go on, and a screen implying otherwise invites them to look for
-signal that is not there.
-
-Two actions: **approve**, and **refuse**. Refusal is not deletion — the row stays, the audit entry
-stays, and a refused registration is distinguishable from one nobody has reached yet, so the queue
-does not re-present the same person forever. Refusal also does not delete the authentik user; whether
-somebody may re-register is `staff-plane`'s blocklist question, not this one.
+What a reviewer has to go on is short — an address, when it registered, whether it is verified — and
+the shortness is honest rather than a limitation of the screen. A reviewer deciding about a stranger
+has nothing else, and a richer interface would only invite them to look for signal that is not there.
 
 ## S10. Abuse: what genuinely changes and what does not
 
@@ -212,35 +194,38 @@ the provider swap.
 
 ## Risks / Trade-offs
 
-- **A queue nobody reads is worse than no gate**, because the person waiting has been promised a
-  decision. Mitigated by the screen setting an expectation and by the queue being in the console staff
-  already open — not by anything technical, and worth saying plainly.
-- **Approval is friction at exactly the wrong moment**, when somebody has just decided to try the
-  product. Accepted deliberately and temporarily: S8 makes removing it a setting and an action rather
-  than a change.
-- **Two adjacent booleans behave differently** (S5), which is a thing somebody will trip over. Written
-  down in `Usable`'s comment where they will be standing when they do.
+- **A queue nobody reads is worse than no gate**, because the person waiting has been told a decision
+  is coming. There is nothing technical to mitigate it with; it is a commitment somebody has to keep,
+  and it is named here so that turning the gate on is understood as taking on that commitment.
+- **The refusal message is the whole of the person's experience** and it lives in authentik's flow
+  rather than in a screen we design. That is the price of S3, and task 7.6 is what stops it becoming
+  the dead-login problem the first version of this design was right to worry about.
+- **Approval is friction at the worst possible moment**, when somebody has just decided to try the
+  product. Accepted deliberately and temporarily — S8 makes removing it one key and one action.
 
 ## Migration Plan
 
-1. Add `approved_at`, backfilling every existing account to `created_at` — they predate the gate and
-   were usable before it.
-2. Add the clause to `Usable` and the reason to `SuspensionReason`.
-3. Add the setting, defaulting to **required**, so a deployment that does nothing gets the gate rather
-   than an open door.
-4. Blueprint: enrolment flow, verification stage, reputation policy, outbound mail.
-5. Console screens, customer then staff.
+There is no migration. Nothing in our schema changes, no account is touched, and nothing needs
+backfilling — which is itself the strongest evidence that S3's correction was the right one, since the
+first version of this plan had a column, a backfill and a change to the predicate every read in the
+product passes through.
 
-Rollback is dropping the column and the clause; a partially rolled-out state leaves unapproved
-accounts unusable with a reason string nothing renders, which presents as a generic suspension.
+1. Blueprint: enrolment flow, verification stage, `create_users_as_inactive`, reputation policy,
+   outbound mail.
+2. Blueprint: the message an unapproved person sees when they try to sign in (task 7.6).
+3. The invitation flow's own `user_write`, creating active users (S7).
+
+Rollback is removing the flow. A partially rolled-out state has an enrolment form that creates users
+nobody activates, which presents as registrations that never complete — visible in the provider's user
+list rather than silent.
 
 ## Open Questions
 
-- **How long the expectation on the waiting screen should promise.** It is a commitment to a response
-  time and `staff-plane` owns the twelve-hour abuse-contact commitment already; this should probably
+- **How long the wait should be promised as.** It is a commitment to a response time, and
+  `staff-plane` already owns a twelve-hour commitment for its abuse contact; this should probably
   match rather than invent a second number.
-- **Whether a refused registration is told.** Silence is unkind and a message is a signal to somebody
-  probing what gets through. Deferred, not decided here.
-- **Whether approval should ever be automatic for a recognised domain** — an address at a company we
-  already bill. Attractive, and it is a rule about identity that S3's principle says to be careful
-  with.
+- **Whether a refused registration is told.** Silence is unkind; a message is a signal to somebody
+  probing what gets through. Not decided here.
+- **Whether approval can ever be automatic for a recognised domain** — an address at a company we
+  already bill. Attractive, and now unambiguously an identity-side rule, which is where S3 says such a
+  rule belongs.

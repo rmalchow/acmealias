@@ -2,70 +2,71 @@
 
 ### Requirement: A person may register themselves
 
-The service SHALL offer an unauthenticated person a way to create their own user, reachable from the
-sign-in page.
+The service's identity provider SHALL offer an unauthenticated person a way to create their own user,
+reachable from the sign-in form.
 
-The address given SHALL be verified before the person can authenticate, and the verification SHALL be
-proof of control of that address rather than a declaration of it.
+The address given SHALL be verified before that person can authenticate, and the verification SHALL be
+proof of control of the address rather than a declaration of it.
 
 #### Scenario: A stranger can begin
 
-- **WHEN** an unauthenticated person reaches the sign-in page
+- **WHEN** an unauthenticated person reaches the sign-in form
 - **THEN** they are offered a way to register
 
 #### Scenario: An unverified address does not authenticate
 
-- **WHEN** a person completes registration and has not proved control of the address
+- **WHEN** a person completes registration without proving control of the address
 - **THEN** they cannot authenticate
 
-### Requirement: A self-registered account does not work until it is approved
+### Requirement: A self-registered person cannot authenticate until they are approved
 
-Where approval is required, an account created for a person who registered themselves SHALL NOT be
-usable until it has been approved, whatever its kind and whatever its balance.
+Where approval is required, a person who registers themselves SHALL NOT be able to authenticate until
+somebody approves them.
 
-An account that has never been approved SHALL be distinguishable, in the reason given for its being
-unusable, from an account that is suspended and from one that has no credit.
+An unapproved person SHALL be told that their registration is awaiting review. They SHALL NOT be given
+a refusal indistinguishable from a wrong password.
 
-Approval SHALL be recorded with the time it happened.
+#### Scenario: A registered person waits, and knows it
 
-#### Scenario: A registered person waits
-
-- **WHEN** a person registers themselves and signs in while approval is required
-- **THEN** their account is not usable, and the reason names review rather than payment or suspension
+- **WHEN** an unapproved person attempts to sign in
+- **THEN** they are refused, and are told their registration is under review
 
 #### Scenario: Approval admits them
 
-- **WHEN** their account is approved
-- **THEN** it is usable, and behaves as any other account of its kind
+- **WHEN** they are approved and sign in
+- **THEN** they hold their own account and are an ordinary customer
 
-#### Scenario: Approval is not payment
+### Requirement: The service holds nothing for a person who has not been admitted
 
-- **WHEN** an account is unusable for want of approval
-- **THEN** adding credit does not make it usable
+No account SHALL be created for a person who has not been approved.
 
-### Requirement: Approval is required by configuration, and the requirement is evaluated once
+#### Scenario: Registration writes nothing to the service
 
-Whether approval is required SHALL be a matter of configuration, and SHALL be evaluated when an
-account is created rather than when it is used.
+- **WHEN** a person registers themselves while approval is required
+- **THEN** the service holds no account for them until they first sign in
 
-Changing the configuration SHALL NOT change whether an existing account is usable.
+### Requirement: Whether approval is required is configurable, and is applied when a person registers
 
-#### Scenario: Opening the door does not release those already waiting
+Whether a self-registered person requires approval SHALL be a matter of configuration, applied when
+they register.
+
+Changing it SHALL NOT change whether a person who has already registered may authenticate.
+
+#### Scenario: Opening the door does not release those behind it
 
 - **WHEN** approval ceases to be required
-- **THEN** accounts awaiting approval remain unusable until somebody approves them
+- **THEN** people who registered while it was required still cannot authenticate until approved
 
 #### Scenario: Closing the door does not lock out those already admitted
 
 - **WHEN** approval becomes required
-- **THEN** every account that was usable remains usable
+- **THEN** everybody who could already authenticate still can
 
-### Requirement: Accepting an invitation approves the accepter
+### Requirement: A person who arrives by invitation is not held for approval
 
-Accepting an invitation SHALL approve the accepting person's own account if it is not already
-approved.
+A person who becomes a user by accepting an invitation SHALL be able to authenticate immediately.
 
 #### Scenario: An invited person does not wait
 
-- **WHEN** a person who registered while approval was required accepts an invitation
-- **THEN** their own account is usable, and they are not presented for review
+- **WHEN** a person accepts an invitation while approval is required for self-registration
+- **THEN** they can authenticate without being approved

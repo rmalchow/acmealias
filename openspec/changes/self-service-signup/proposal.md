@@ -46,90 +46,73 @@ exist. Both, in that order, so the queue a human reads contains only real people
 
 ### The flow, end to end, with real values
 
-A stranger at `console.localhost` clicks *Sign up*, gives `dana@corp.example` and a password, and
-receives a verification message. She clicks the link. At that moment:
+A stranger at `console.localhost` clicks *Sign up* — a link on the sign-in form, which is the part
+that does not exist today — gives `dana@corp.example` and a password, and receives a verification
+message. She clicks the link. At that moment:
 
-1. Her authentik user exists and her address is verified. She can authenticate.
-2. She signs in. `EnsurePersonalAccount` materializes her personal account, `dana-corp-example`,
-   with `approved_at` **null**.
-3. The console does not show her the product. It shows her one screen: her registration is being
-   reviewed, and roughly how long that takes.
-4. A member of staff opens the staff console's review queue, sees `dana@corp.example`, and approves.
-5. Dana's next request works. Her personal account is an ordinary personal account and always was —
-   nothing about it is special once `approved_at` is set.
+1. Her authentik user exists, her address is verified, and she is **inactive**. The flow tells her her
+   registration is being reviewed.
+2. She tries to sign in. authentik refuses, and says why — not a generic failure, which is what she
+   would otherwise get and would read as a wrong password.
+3. Nothing has happened in our service. There is no session, no `accounts` row, nothing to clean up if
+   she is never approved.
+4. Somebody activates her user in authentik.
+5. She signs in. `EnsurePersonalAccount` materializes `dana-corp-example`, and she is an ordinary
+   customer from her first request — there is no half-state for her to be in.
 
-With approval switched off, steps 3 and 4 do not exist: `approved_at` is written at creation and Dana
-goes from step 2 to step 5.
+With the gate off, step 1 creates her active and steps 2–4 do not happen.
 
-### The gate lives in our service, not in authentik
+### The gate lives in the identity provider, and the two refusals are different things
 
-authentik can do this natively — an enrolment flow whose `user_write` stage sets
-`create_users_as_inactive`, and an administrator flips `is_active` afterwards. It is nearly free. It
-is rejected, for three reasons that compound:
+There are two refusals in this product, and the temptation is to build them out of one mechanism
+because they both end in somebody not being able to work. They are about different objects:
 
-- **The person is told nothing.** An inactive user does not get a message; they get a sign-in that
-  does not work. That is indistinguishable from a wrong password, so they will retry it, reset their
-  password, retry again, and then mail support — every one of which is work created by our silence.
-- **The reviewer works in the wrong place.** authentik's administration interface is a different
-  plane from the staff console, with its own access, and it shows an identity rather than a
-  registration. Whoever is reviewing wants to see who signed up and act on it where they already are.
-- **Nothing is recorded where we look.** Approving a customer is exactly the class of decision
-  `staff-plane` exists to make accountable, and a flag flipped in authentik's own log is not in our
-  audit trail.
+- **"Not approved yet"** is about an **identity**. May this person authenticate at all? We know
+  nothing about them; there is no account for it to be a fact about. That belongs in authentik.
+- **"Suspended"** is about an **account**. A known customer's workspace does not work, and they are
+  owed an explanation and a remedy. That belongs in our service, where it already is.
 
-The decisive argument is the first principle underneath all three: **authentik's job is proving
-somebody is who they say they are. Whether we want them as a customer is our decision, about our
-product.** Putting it in the identity provider files a product judgment under identity, which is the
-same mistake `tenancy-and-permissions` P18 refuses when it declines to derive membership from
-directory groups.
+Putting approval in our service means an unapproved stranger completes enrolment, **receives a
+session, and gets an `accounts` row written for them** — account, slug, personal-account invariants,
+audit entries — for a person we have explicitly not decided to admit. Anybody able to complete a
+signup form could make us write rows. Held inactive at the provider, they never reach us at all: the
+gate stands in front of the thing it protects rather than inside it.
 
-### Approval is not a new state — it is the existing one, with a third reason
+The consequence is that **nothing in our schema changes**. No column, no migration, no new clause in
+`store.Usable` — which also leaves the question C6 deliberately left open, what a staff suspension
+means for a free account, undisturbed and still `staff-plane`'s to answer.
 
-The service already has exactly one place that answers "does this account work" (`store.Usable`,
-design C3), and one place that says why not (`store.SuspensionReason`), and a console screen that
-takes the reason *from the service* rather than inferring it from the balance. C6 anticipated this
-precisely: the two suspensions are "a conjunction, written here once, so that adding a third reason
-later is one clause rather than an audit of every call site."
+### The one thing that must not be skipped
 
-This is that third reason. One nullable column, one clause:
+authentik's default treatment of an inactive user is a sign-in that simply fails. To the person that
+is indistinguishable from a wrong password, so they retry, reset their password, retry again, and mail
+support — all of it work our silence created, at the exact moment we wanted to say one sentence: *we
+have your registration, somebody is looking at it.*
 
-```
-usable(account) = approved_at IS NOT NULL
-                  AND (kind == personal OR (credits > 0 AND NOT staff_suspended))
-```
-
-The new conjunct sits **above** the kind test, so it stops a personal account — which `staff_suspended`
-deliberately does not. That difference is the subject of a design decision rather than an accident.
-
-### "Awaiting review" and "suspended" are different sentences
-
-They are the same boolean to the database and must never be the same sentence to the reader. Somebody
-who signed up an hour ago and is told their account is **suspended** reads that as *punished*: they go
-looking for what they did wrong, and they mail support to appeal a penalty that was never imposed.
-
-So the reason distinguishes them, and the console renders a different screen — with no checkout
-button, because there is nothing to buy. The remedy for an unfunded account is money; the remedy here
-is waiting, and the screen's job is to say so and set an expectation.
+That is a fact about a default, not about where the gate belongs, and authentik can be made to say it.
+So it is a requirement on the flow rather than an argument against the design, and it is the part of
+this change that must not be quietly dropped: skipping it produces the whole support load while
+keeping none of the benefit.
 
 ### An invited person does not queue
 
-Approval gates people who arrive as strangers. Somebody accepting an invitation was vouched for by a
-paying customer who took responsibility for them, and making them wait for staff review inserts a
-delay into somebody else's onboarding and puts an entry in the queue that second-guesses a decision
-made with more context than the reviewer will ever have.
+Approval looks at strangers. Somebody accepting an invitation is not one — a paying customer named
+their address and took responsibility for them — so holding them inserts our latency into another
+customer's onboarding and asks a reviewer with no context to second-guess somebody who had plenty.
 
-So accepting an invitation approves the accepter's personal account as a side effect, and the queue
-contains exactly the strangers it is for.
+This falls out of which flow created them: enrolment from the sign-in page creates users inactive, an
+invitation link creates them active. Two flows, one differing key, rather than a rule to remember.
 
 ### Turning it off is an action, not just a setting
 
-`ACME_REQUIRE_ACCOUNT_APPROVAL` decides what is written when an account is created — not what is read
-on every request, which would put configuration inside the one predicate C3 keeps pure.
+The gate is one key on the enrolment flow — `create_users_as_inactive`. Turning it off stops the flow
+creating inactive users; it does **not** activate the people it created earlier.
 
-The consequence is that flipping it off does not approve the people already waiting. That is correct
-for the reverse direction (turning it *on* must not lock out existing customers) and a trap in this
-one, so the queue states it: with approval off and people still waiting, the staff screen says so and
-offers to approve them together. The stranded state is visible rather than silent.
+That is right in one direction and a trap in the other. Turning it *on* must never lock out existing
+customers, and does not. Turning it *off* leaves the backlog waiting for a gate that no longer exists,
+so switching it off is accompanied by activating whoever is still held — an explicit action somebody
+takes, rather than a config change that silently admits a batch of real people at a moment when nobody
+is looking at them.
 
 ### What this does not open up
 
@@ -143,16 +126,16 @@ as `public-edition` task 1.4, and it is required here rather than deferred.
 
 ## Capabilities
 
-- `identity-and-roles` — enrolment exists; a self-registered person holds their personal account and
-  nothing else; approval gates the account and invitation bypasses it
-- `admin-console` — the awaiting-review screen, and the staff review queue
-- `audit-trail` — approval and refusal are recorded decisions about a named person
+- `identity-and-roles` — enrolment exists, an address is verified before it can authenticate, and a
+  self-registered person cannot authenticate until approved; an invited one can immediately
 
 ## Impact
 
-- **Schema** — `accounts.approved_at`, and one clause in `store.Usable`
-- **Config** — `ACME_REQUIRE_ACCOUNT_APPROVAL`
-- **Blueprint** — an enrolment flow, email verification, a reputation policy, outbound mail
-- **Both consoles** — a screen in the customer one, a queue in the staff one
+- **Blueprint** — an enrolment flow linked from the sign-in form, email verification, inactive
+  creation, the message an unapproved person meets, a reputation policy, outbound mail
+- **Nothing in the schema, the predicate, or either console.** An earlier version of this proposal
+  added `accounts.approved_at`, a clause in `store.Usable`, a third suspension reason, a customer
+  screen and a staff queue. Putting the gate in front of the service instead of inside it removes all
+  of it
 - **Takes over** the enrolment tasks currently duplicated between `authentik-and-self-signup` §5 and
   `public-edition` §1, which specify overlapping halves of the same work
