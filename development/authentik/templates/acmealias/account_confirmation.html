@@ -1,0 +1,40 @@
+{% extends "email/base.html" %}
+{% load i18n %}
+
+{% block content %}
+<tr>
+  <td align="center">
+    <h1>{% blocktrans with username=user.username %}Hi {{ username }},{% endblocktrans %}</h1>
+  </td>
+</tr>
+<tr>
+  <td align="center">
+    <table border="0">
+      <tr>
+        <td align="center" style="max-width: 300px; padding: 20px 0; color: #212124;">
+          {% trans "Somebody — we hope you — registered this address with AcmeAlias. Press the button below to confirm that the address is yours." %}
+        </td>
+      </tr>
+      <tr>
+        <td align="center" class="btn btn-primary">
+          <a id="confirm" href="{{ url }}" rel="noopener noreferrer" target="_blank">{% trans 'Confirm address' %}</a>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+{% endblock %}
+
+{% block sub_content %}
+<tr>
+  <td style="padding: 20px; font-size: 12px; color: #212124; word-break: break-all; overflow-wrap: break-word;" align="center">
+    {% blocktrans with url=url %}If that doesn't work, copy and paste the following link into your browser: {{ url }}{% endblocktrans %}
+  </td>
+</tr>
+<tr>
+  <td style="padding: 0 20px 20px; font-size: 12px; color: #212124;" align="center">
+    {% trans "Confirming the address is not the last step: an account is reviewed before it can sign in, and you will hear from us when that is done." %}
+  </td>
+</tr>
+{% include "acmealias/_footer.html" %}
+{% endblock %}

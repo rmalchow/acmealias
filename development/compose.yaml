@@ -184,6 +184,18 @@ services:
     volumes:
       - ./authentik/blueprints:/blueprints/custom:ro
       - ./data/authentik_media:/media
+      # /templates is `email.template_dir`, and a custom template is only
+      # OFFERED by the server — the choices an email stage lists are built by
+      # globbing this directory in the process that serves the API. The worker
+      # is what renders and sends, and it needs the same mount; a template
+      # mounted here and not there is a stage that validates and then fails at
+      # send time with a configuration-error event and no mail.
+      #
+      # The templates exist because authentik's own say "Powered by
+      # goauthentik.io" where the footer belongs and call the thing being
+      # recovered "your authentik account" — the name of software the recipient
+      # never signed up for. See ./authentik/templates/README.md.
+      - ./authentik/templates:/templates:ro
       # Our sign-in page, as two files over two the image already serves.
       #
       # /web/dist is what the server publishes at /static/dist, and every flow
@@ -229,6 +241,9 @@ services:
     volumes:
       - ./authentik/blueprints:/blueprints/custom:ro
       - ./data/authentik_media:/media
+      # The worker is what actually renders and sends, so this mount is the
+      # load-bearing one of the two.
+      - ./authentik/templates:/templates:ro
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

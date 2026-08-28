@@ -3,13 +3,12 @@
 package acceptance
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/mail"
-	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The agreement between the two senders, asserted rather than assumed
@@ -37,48 +36,206 @@ import (
 // This is the test that fails when somebody edits one side and not the other.
 const mailpitAPI = "http://mail.localhost/api/v1"
 
-type mailpitMessage struct {
-	ID      string          `json:"ID"`
-	From    mailpitAddress  `json:"From"`
-	To      []mailpitAddress `json:"To"`
-	Subject string          `json:"Subject"`
-}
-
 type mailpitAddress struct {
 	Name    string `json:"Name"`
 	Address string `json:"Address"`
 }
 
-// TestBothSendersShareOneIdentity reads the identity the SERVICE is configured
-// with out of its own effective configuration, and the identity AUTHENTIK is
-// configured with out of the compose file, and requires them to be the same
-// sender.
+// TestBothSendersShareOneIdentity provokes one message from EACH sender, reads
+// both out of mailpit, and requires the same sender identity and the same footer
+// (transactional-email T2, task 5.1).
 //
-// It reads authentik's from the compose file rather than provoking a message,
-// deliberately: provoking one means driving the enrolment or recovery flow,
-// which `self-service-signup` has not built yet. Comparing the two
-// CONFIGURATIONS catches the whole failure mode this test exists for — somebody
-// changing one side and not the other — and does it today rather than after the
-// change that would let it read a real message. When enrolment lands, task 5.1's
-// stronger form replaces this: provoke one message from each and compare what
-// arrived.
+// It used to compare the two CONFIGURATIONS instead — the service's effective
+// config against AUTHENTIK_EMAIL__FROM in the compose file — because provoking
+// an authentik message meant driving an enrolment flow that did not exist yet.
+// `self-service-signup` built it, so this is the form the task actually asked
+// for: what arrived, not what was configured. The difference is not pedantry.
+// A configuration comparison cannot see a template that renders no footer, a
+// display name the sending library rewrites, or a plain-text alternative that is
+// silently empty because somebody added `X.html` and no `X.txt` — and every one
+// of those is a way the two senders diverge while both configurations still
+// agree.
+//
+// THE FOOTER IS THE HALF THAT WAS UNASSERTED FOR LONGER THAN ANYBODY THOUGHT.
+// The service carries it as configuration and appends it beneath a `-- `
+// separator. authentik carried none at all: it renders Django templates whose
+// context is four values — url, user, expires, token — with no settings access,
+// so it signed off with "Powered by goauthentik.io." where the sender's
+// identification belongs. The fix is a mounted template directory
+// (development/authentik/templates/) whose footer is a literal, exactly as the
+// sender address is a literal in compose.yaml, and this test is what keeps the
+// literal honest.
 func TestBothSendersShareOneIdentity(t *testing.T) {
-	svc := serviceMailIdentity(t)
-	idp := authentikMailIdentity(t)
+	idp := provokeIdentityProviderMessage(t)
+	svc := provokeServiceMessage(t)
 
-	if !strings.EqualFold(svc.Address, idp.Address) {
-		t.Errorf("the two senders use different addresses:\n"+
-			"  service:  %s\n  authentik: %s\n"+
+	if !strings.EqualFold(svc.From.Address, idp.From.Address) {
+		t.Errorf("the two senders sent from different addresses:\n"+
+			"  service:   %s\n  authentik: %s\n"+
 			"Mail clients thread by sender, so these arrive as two correspondents and a customer "+
 			"looking for one of our messages finds a conversation that does not contain it. In "+
 			"production it also costs authentication alignment, which files the message as spam "+
-			"rather than bouncing it.", svc.Address, idp.Address)
+			"rather than bouncing it.", svc.From.Address, idp.From.Address)
 	}
-	if svc.Name != idp.Name {
-		t.Errorf("the two senders use different display names: service %q, authentik %q — "+
+	if svc.From.Name != idp.From.Name {
+		t.Errorf("the two senders used different display names: service %q, authentik %q — "+
 			"the name is what a recipient actually sees, and two of them read as two senders",
-			svc.Name, idp.Name)
+			svc.From.Name, idp.From.Name)
 	}
+
+	svcFooter, idpFooter := footerOf(svc.Text), footerOf(idp.Text)
+	switch {
+	case svcFooter == "":
+		t.Errorf("the service's message carries no footer beneath a `-- ` separator. "+
+			"mail.footer is validated as non-empty at start-up, so this is the RENDERING "+
+			"having lost it:\n%s", svc.Text)
+	case idpFooter == "":
+		t.Errorf("authentik's message carries no footer beneath a `-- ` separator. Its email "+
+			"stage must name a template under development/authentik/templates/, and that "+
+			"directory must be mounted at /templates in the WORKER — the worker renders and "+
+			"sends; a template mounted only in the server validates and then fails at send "+
+			"time:\n%s", idp.Text)
+	case svcFooter != idpFooter:
+		t.Errorf("the two senders carry different footers:\n  service:   %q\n  authentik: %q\n"+
+			"This is the §5 identification — who is sending and where they can be written to — "+
+			"and two spellings of it means one of them is stale. The service reads it from "+
+			"config.yaml (mail.footer, ACME_MAIL_FOOTER); authentik cannot, because an email "+
+			"stage renders with a context of four values and no settings access, so its copy "+
+			"is a literal in development/authentik/templates/acmealias/_footer.txt and must be "+
+			"edited alongside", svcFooter, idpFooter)
+	}
+}
+
+// provokeIdentityProviderMessage registers a stranger and returns the
+// confirmation message authentik actually sent.
+//
+// It walks the real enrolment flow rather than calling an API, because the
+// message only exists as the side effect of a flow reaching an email stage —
+// which is also the only thing that proves the stage is BOUND, and pointed at
+// the template this change installed.
+func provokeIdentityProviderMessage(t *testing.T) mailpitFullMessage {
+	t.Helper()
+	username := fmt.Sprintf("mailagreement-%d", time.Now().UnixNano())
+	address := username + "@corp.example"
+	t.Cleanup(func() { deleteAuthentikUser(t, username) })
+
+	client := &http.Client{Jar: newLaxJar(), Timeout: 30 * time.Second}
+	step, err := enrolStep(client, "", map[string]string{
+		"component":       "ak-stage-prompt",
+		"username":        username,
+		"name":            "A Stranger",
+		"email":           address,
+		"password":        "enrol-" + username,
+		"password_repeat": "enrol-" + username,
+	})
+	if err != nil {
+		t.Fatalf("submitting the enrolment form: %v", err)
+	}
+	if step.Component != "ak-stage-email" {
+		t.Fatalf("the enrolment flow is at %q rather than its email stage, so no message "+
+			"was sent and there is nothing to compare", step.Component)
+	}
+	return awaitMessage(t, address)
+}
+
+// provokeServiceMessage buys a team account and invites somebody, which is the
+// only thing this service currently sends mail about.
+//
+// A team account is bought rather than reused because inviting is refused on a
+// personal one — an account of one cannot have members — and buying it is three
+// lines through the same endpoint the console's Upgrade screen uses.
+func provokeServiceMessage(t *testing.T) mailpitFullMessage {
+	t.Helper()
+	owner := mustSignIn(t, adminUser, devPassword)
+	slug := unique("acc-mail")
+	var account accountView
+	if err := owner.json(http.MethodPost, "/api/v1/accounts",
+		map[string]any{"slug": slug, "name": "Acceptance (mail)", "amount": 25},
+		http.StatusCreated, &account); err != nil {
+		t.Fatalf("buying a team account to invite from: %v — the dev stack sets "+
+			"ACME_ALLOW_ACCOUNT_CREATION=true, and without it there is no way to reach an "+
+			"account that may invite", err)
+	}
+	owner.account = account.ID
+
+	// A fresh address every run, because the per-address daily limit is real and
+	// a suite that reused one would start failing on its second pass of the day
+	// with a refusal that looks like a broken endpoint.
+	address := fmt.Sprintf("invited-%d@corp.example", time.Now().UnixNano())
+	if err := owner.json(http.MethodPost, owner.acct("/invitations"),
+		map[string]any{"email": address}, http.StatusCreated, nil); err != nil {
+		t.Fatalf("inviting %s: %v", address, err)
+	}
+	return awaitMessage(t, address)
+}
+
+type mailpitFullMessage struct {
+	From    mailpitAddress `json:"From"`
+	Subject string         `json:"Subject"`
+	Text    string         `json:"Text"`
+	HTML    string         `json:"HTML"`
+}
+
+// awaitMessage waits for the message sent to address and returns it whole.
+//
+// Polling rather than a fixed wait: both senders queue — authentik through its
+// worker, the service after its transaction commits — and a sleep long enough
+// to be reliable is long enough to be paid on every run.
+func awaitMessage(t *testing.T, address string) mailpitFullMessage {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var page struct {
+			Messages []struct {
+				ID string           `json:"ID"`
+				To []mailpitAddress `json:"To"`
+			} `json:"messages"`
+		}
+		id := ""
+		if err := getJSONFrom(mailpitAPI+"/messages?limit=100", &page); err == nil {
+			for _, m := range page.Messages {
+				for _, to := range m.To {
+					if strings.EqualFold(to.Address, address) {
+						id = m.ID
+					}
+				}
+			}
+		}
+		if id != "" {
+			var msg mailpitFullMessage
+			if err := getJSONFrom(mailpitAPI+"/message/"+id, &msg); err != nil {
+				t.Fatalf("reading the message to %s: %v", address, err)
+			}
+			return msg
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no message reached %s within 30s. Both senders point at the compose "+
+				"service name `mailpit:1025`; mail.localhost is the WEB interface and SMTP "+
+				"does not traverse the HTTP overlay", address)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// footerOf returns what follows the last signature separator, which is where a
+// footer lives in a plain-text message.
+//
+// The separator is `-- ` alone on a line, trailing space included — RFC 3676
+// §4.3, and the thing mail clients look for when they decide what to hide behind
+// "show trimmed content". Both senders write it: the service in
+// internal/mail.(*SMTP).Render, authentik in the mounted .txt templates. The
+// text part is read rather than the HTML because it is the one both produce
+// without markup in the way, and because a missing .txt — the failure mode of
+// adding a custom template and forgetting its plain-text half — shows up here as
+// an empty body rather than as a passing test.
+func footerOf(body string) string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	const sep = "\n-- \n"
+	i := strings.LastIndex(body, sep)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSpace(body[i+len(sep):])
 }
 
 // TestTheServiceSenderIsAnswerable holds the deployment to T3: the reply
@@ -142,52 +299,10 @@ func TestTheMailSinkIsTheSMTPNameNotTheWebOne(t *testing.T) {
 	}
 }
 
-// serviceMailIdentity reads the sender out of the service's own effective
-// configuration, which is what it will actually send as.
-func serviceMailIdentity(t *testing.T) mail.Address {
-	t.Helper()
-	cfg := effectiveConfig(t)
-	from, _ := cfg["mail_from"].(string)
-	name, _ := cfg["mail_sender"].(string)
-	if from == "" {
-		t.Fatal("the service configures no sender address")
-	}
-	a, err := mail.ParseAddress(from)
-	if err != nil {
-		t.Fatalf("the service's mail_from %q is not an address: %v", from, err)
-	}
-	return mail.Address{Name: name, Address: a.Address}
-}
-
-// authentikMailIdentity reads the sender out of development/compose.yaml.
-//
-// The compose file is the source of truth rather than a constant here, for the
-// same reason zoneDelegations reads the served zone file: a value this suite
-// remembered would agree with itself forever while disagreeing with the stack.
-func authentikMailIdentity(t *testing.T) mail.Address {
-	t.Helper()
-	b, err := os.ReadFile("../../development/compose.yaml")
-	if err != nil {
-		t.Fatalf("reading the compose file: %v", err)
-	}
-	const key = "AUTHENTIK_EMAIL__FROM:"
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, key) {
-			continue
-		}
-		raw := strings.TrimSpace(strings.TrimPrefix(line, key))
-		raw = strings.Trim(raw, `"'`)
-		a, err := mail.ParseAddress(raw)
-		if err != nil {
-			t.Fatalf("authentik's %s is %q, which is not an address: %v", key, raw, err)
-		}
-		return *a
-	}
-	t.Fatalf("the compose file sets no %s, so authentik sends as whatever its image defaults to "+
-		"— which is not the product", key)
-	return mail.Address{}
-}
+// The two configuration readers that used to live here — one for the service's
+// effective config, one grepping AUTHENTIK_EMAIL__FROM out of compose.yaml — are
+// gone. Comparing what ARRIVED subsumes them: a sender that is configured
+// correctly and rendered wrongly passed the old pair and fails this one.
 
 // effectiveConfig reads the configuration the service is actually running with.
 func effectiveConfig(t *testing.T) map[string]any {
@@ -204,6 +319,3 @@ func effectiveConfig(t *testing.T) map[string]any {
 	}
 	return out
 }
-
-var _ = json.Marshal
-var _ = fmt.Sprintf

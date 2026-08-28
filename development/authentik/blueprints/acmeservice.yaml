@@ -488,7 +488,14 @@ entries:
     attrs:
       name: acmeservice-enrollment-email-verification
       use_global_settings: true
-      template: email/account_confirmation.html
+      # OURS, not the image's. authentik's account_confirmation.html signs off
+      # "Powered by goauthentik.io." where a transactional message carries the
+      # sender's identification, and the recipient never signed up for
+      # authentik. The pair of files is in ../templates/acmealias/, mounted at
+      # /templates in both the server and the worker; the .txt beside it is not
+      # optional decoration — it is the plain-text alternative, rendered by
+      # substituting the extension, and skipped SILENTLY when absent.
+      template: acmealias/account_confirmation.html
       activate_user_on_success: false
       # THE SUBJECT IS OVERRIDDEN BECAUSE THE PROVIDER'S DEFAULT IS THE NAME OF
       # THE WRONG PRODUCT. authentik's email stage defaults its subject to
@@ -659,7 +666,11 @@ entries:
     attrs:
       name: acmeservice-recovery-email
       use_global_settings: true
-      template: email/password_reset.html
+      # Ours, for the reason at the enrolment stage above, plus one specific to
+      # this message: the image's wording says "your authentik account", which
+      # names software the recipient does not know we run, in the one message
+      # somebody reads while already worried about their account.
+      template: acmealias/password_reset.html
       # FALSE, for the same reason the enrolment mail sets it false: `is_active`
       # means "we have admitted this person" in this deployment, not "they
       # proved their address". A recovery link that activated somebody would let
