@@ -189,21 +189,24 @@ import { Outcome, UsageBucket, UsageResponse } from './reporting.models';
         max-width: 48rem;
       }
       /* The same colours the interactions panel gives these outcomes, so one vocabulary reads
-         the same on both screens. */
+         the same on both screens — and now by token rather than by hand, which is what makes
+         that claim true. It was not: the live swatch was written here as #1890ff, Ant's LIGHT-theme
+         blue, while the tag it claimed to match rendered in the dark theme's. Both are now the
+         same hue at the same step of the same compiled palette, rather than two of them. */
       .o-validated {
-        background: #52c41a;
+        background: var(--ac-status-green);
       }
       .o-live {
-        background: #1890ff;
+        background: var(--ac-status-blue);
       }
       .o-pending {
-        background: #faad14;
+        background: var(--ac-status-gold);
       }
       .o-unqueried {
-        background: #f5222d;
+        background: var(--ac-status-red);
       }
       .o-abandoned {
-        background: #8c8c8c;
+        background: var(--ac-status-grey);
       }
     `,
   ],

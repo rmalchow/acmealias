@@ -1,16 +1,16 @@
-<header class="shell-bar">
-  <div class="ac-page bar-inner">
-    <a class="brand" routerLink="/projects" aria-label="acmeservice — projects">
-      <span class="brand-box"><img src="brand/logo.svg" alt="" /></span>
-      acmeservice
-    </a>
+<!--
+  The frame is <app-shell>, shared with the staff console (projects/shared/src/lib/ui/shell).
+  What is written here is only what a CUSTOMER's chrome holds and a member of staff's does not:
+  the account switcher, the user menu, the low-balance strip, and the session-expired modal.
 
-    <nav>
-      @for (item of nav(); track item.path) {
-        <a [routerLink]="item.path" routerLinkActive="active">{{ item.label }}</a>
-      }
-    </nav>
-
+  The two projected wrappers are unconditional and their CONTENTS are what the `@if` guards. A
+  control-flow block placed directly around a projected element is a node the compiler has to
+  match a slot for before it knows whether the block will render, and an empty div costs nothing
+  — where a slot silently falling through to the default one would put the account switcher in
+  the middle of the page.
+-->
+<app-shell home="/projects" [nav]="nav()">
+  <div shellIdentity class="identity">
     @if (session.me(); as me) {
       <!--
         Always rendered, including for the user who has only their personal account — inert then,
@@ -49,20 +49,24 @@
       </nz-dropdown-menu>
     }
   </div>
-</header>
 
-@if (lowBalance(); as account) {
-  <!-- Before zero, not at it (task 6.10). It names the amount and the consequence, because
-       "low balance" without either is a colour rather than a warning. -->
-  <div class="low-balance">
-    <span nz-icon nzType="wallet"></span>
-    {{ account.name }} has {{ account.credits }} EUR left. At zero this account stops and
-    certificates stop renewing.
-    <a routerLink="/settings">Add credit</a>
+  <div shellBanner>
+    @if (lowBalance(); as account) {
+      <!-- Before zero, not at it (task 6.10). It names the amount and the consequence, because
+           "low balance" without either is a colour rather than a warning. It spans the window
+           rather than the content column: a warning set inside the page reads as a paragraph of
+           the page, and this is a condition of the account. -->
+      <div class="low-balance">
+        <div class="ac-page low-balance-inner">
+          <span nz-icon nzType="wallet"></span>
+          {{ account.name }} has {{ account.credits }} EUR left. At zero this account stops and
+          certificates stop renewing.
+          <a routerLink="/settings">Add credit</a>
+        </div>
+      </div>
+    }
   </div>
-}
 
-<main class="ac-page">
   <!--
     Keyed on the selected account (task 6.2c). A switch re-mounts the routed screen, so the data
     on it belongs to the account named in the bar above it — without a page reload, which would
@@ -71,7 +75,7 @@
   @for (key of [accountKey()]; track key) {
     <router-outlet />
   }
-</main>
+</app-shell>
 
 <nz-modal
   [nzVisible]="session.expired()"

@@ -50,9 +50,9 @@ import { ApiKeyCreated } from '@acme/shared';
         gap: 0.5rem;
         margin: 1rem 0;
         padding: 0.75rem;
-        background: #141414;
-        border: 1px solid #303030;
-        border-radius: 2px;
+        background: var(--ac-ground);
+        border: 1px solid var(--ac-line);
+        border-radius: 4px;
       }
       .secret code {
         flex: 1;

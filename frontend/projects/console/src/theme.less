@@ -1,0 +1,15 @@
+/* The customer console's theme: the shared brand build, in the brand's own green.
+ *
+ * The decision this file is downstream of — a Less theme build instead of the
+ * prebuilt dark stylesheet, and why white type may never sit on `#00ffb0` — is
+ * written out in projects/shared/src/theme/brand.less. This file is only the two
+ * values that differ between the two consoles, and they are stated AFTER the
+ * import because Less takes the last declaration in a scope.
+ *
+ * angular.json loads this in place of `ng-zorro-antd.dark.min.css`; it compiles
+ * that same theme from source, so it must stay FIRST in the `styles` array —
+ * styles.css overrides it. */
+@import '../../shared/src/theme/brand.less';
+
+@ac-accent: #00ffb0;
+@ac-accent-bright: #4dffc9;

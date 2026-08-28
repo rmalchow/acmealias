@@ -1,109 +1,17 @@
-/* Global styles for the admin console.
+/* Global styles for the CUSTOMER console.
  *
- * The component library is ng-zorro (Ant Design), loaded from its prebuilt DARK stylesheet in
- * angular.json — dark is not a mode the console can be put into, it is the only theme it ships.
- * Density comes from `nzSize="small"` on the tables and controls rather than from Ant's compact
- * theme, because compact and dark are two separate prebuilt stylesheets and combining them means
- * compiling Ant's Less sources; small-size components get the same result without that build.
+ * Almost nothing is here, and that is the change: the colours are compiled by
+ * theme.less (which states the ng-zorro theming decision in full), and the frame
+ * — page width, filter rows, tables, faces — is in the one shared stylesheet
+ * imported below, because this file and the staff console's used to be
+ * byte-identical copies of each other.
  *
- * Barlow is the brand face — it is what `material/word.svg` is set in — and it arrives as an npm
- * package bundled by `ng build`. Ant's own font stack is system fonts, so nothing here reaches the
- * network for a face — the compiled bundle is embedded in the Go binary and has to render on a
- * host with no route to the internet. Barlow Condensed is the wordmark's weight-700 cut and is
- * used only where the product name is set, never for running text.
+ * Density still comes from `nzSize="small"` on the tables and controls rather
+ * than from Ant's compact theme. That was true when the theme was a prebuilt
+ * stylesheet and it stays true now that it is compiled: compact is a second set
+ * of size variables, and the small-size components already get the result.
+ *
+ * What belongs in THIS file is anything true of the customer console and not of
+ * the staff one. At present there is nothing.
  */
-@import "@fontsource/barlow/300.css";
-@import "@fontsource/barlow/400.css";
-@import "@fontsource/barlow/500.css";
-@import "@fontsource/barlow-condensed/400.css";
-@import "@fontsource/barlow-condensed/700.css";
-
-html,
-body {
-  height: 100%;
-}
-
-body {
-  margin: 0;
-  font-family: Barlow, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-}
-
-/* The page frame.
- *
- * One fixed width for the whole console, shared by the header bar's contents and by every
- * screen, so a heading never jumps sideways between two screens. `--ac-page-width` is the single
- * place that width is written down. */
-:root {
-  --ac-page-width: 78rem;
-  --ac-page-gutter: 1.5rem;
-}
-
-.ac-page {
-  width: 100%;
-  max-width: var(--ac-page-width);
-  margin-inline: auto;
-  padding-inline: var(--ac-page-gutter);
-  box-sizing: border-box;
-}
-
-/* Screens render <app-page-header> first and nothing else sets a top margin: that is what keeps
- * the first row of real content at the same y coordinate on every screen. */
-main {
-  display: block;
-  padding-block: 1.5rem 4rem;
-}
-
-/* The filter row above every list. Wraps rather than scrolls — a narrow window should reflow the
- * filters, never hide one. */
-.ac-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-.ac-filters .ac-grow {
-  flex: 1 1 18rem;
-  max-width: 26rem;
-}
-.ac-filters .ac-spacer {
-  margin-left: auto;
-}
-
-.ac-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85em;
-  word-break: break-all;
-}
-.ac-error {
-  color: var(--ac-error);
-  margin: 0.5rem 0;
-}
-.ac-hint {
-  color: rgb(255 255 255 / 45%);
-  font-size: 0.8125rem;
-}
-.ac-nowrap {
-  white-space: nowrap;
-}
-
-/* Ant's palette, named once. The components reference these rather than repeating hex codes, so
- * a theme change is one edit here. */
-:root {
-  --ac-error: #ff4d4f;
-  --ac-warn: #faad14;
-  --ac-ok: #52c41a;
-  --ac-muted: rgb(255 255 255 / 45%);
-}
-
-/* Every "New …" is an nz-modal; they all lay their fields out the same way, so a two-field form
- * and a five-field form read as the same dialog. */
-.ac-modal-form nz-form-item:last-child {
-  margin-bottom: 0;
-}
-
-/* Tables carry the console. Give them room to breathe under the filter row and keep the pager
- * visually attached to the table it pages. */
-.ac-table {
-  margin-bottom: 1.5rem;
-}
+@import "../../shared/src/theme/globals.css";

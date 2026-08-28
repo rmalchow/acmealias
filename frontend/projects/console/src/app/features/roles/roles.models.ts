@@ -1,15 +1,15 @@
 /** JSON shapes for roles, grants and membership (`backend/internal/httpapi/admin_accounts.go`). */
 
-/** One grant a role or key holds: [type, identifier, action] plus the inheritance flag. */
+/**
+ * One grant a role or key holds: [type, identifier, action] plus the inheritance flag.
+ *
+ * The identifier has exactly TWO forms — a wildcard (`objectId` absent) or one object id. A third,
+ * a typed predicate, was carried as an always-null slot for a while after the DNS product it was
+ * built for went; migration 000003 dropped the column, so nothing can produce one.
+ */
 export interface Grant {
   type: string;
   objectId?: string | null;
-  /**
-   * The reserved predicate form of an identifier. Always null: no object type defines a selector
-   * today. It was built for DNS records and went with them; the slot stays because re-adding one
-   * would otherwise mean changing the grammar every stored grant is written against.
-   */
-  selector?: null;
   action: string;
   inheritable: boolean;
   /** The grant written the way the design writes them, so a listing needs no assembly. */

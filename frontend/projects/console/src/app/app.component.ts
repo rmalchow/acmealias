@@ -1,5 +1,5 @@
 import { Component, computed, inject } from '@angular/core';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Router, RouterLink, RouterOutlet } from '@angular/router';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzDropDownModule } from 'ng-zorro-antd/dropdown';
 import { NzIconModule } from 'ng-zorro-antd/icon';
@@ -7,12 +7,7 @@ import { NzMenuModule } from 'ng-zorro-antd/menu';
 import { NzModalModule } from 'ng-zorro-antd/modal';
 import { AccountSwitcherComponent } from './features/accounts/account-switcher.component';
 import { AccountsService } from './features/accounts/accounts.service';
-import { LOW_BALANCE, SessionService } from '@acme/shared';
-
-interface NavItem {
-  path: string;
-  label: string;
-}
+import { LOW_BALANCE, NavItem, SessionService, ShellComponent } from '@acme/shared';
 
 /**
  * A personal account's navigation, and a team account's (design C11, tasks 6.2 / 6.2a).
@@ -48,7 +43,7 @@ export const TEAM_NAV: NavItem[] = [
   imports: [
     RouterOutlet,
     RouterLink,
-    RouterLinkActive,
+    ShellComponent,
     NzButtonModule,
     NzDropDownModule,
     NzIconModule,
@@ -71,8 +66,10 @@ export class AppComponent {
    * the first time rather than flickering from one shape into the other.
    *
    * Nothing while no account is selected: the picker is the only screen reachable from that
-   * state, and a bar of links that all redirect back to it is worse than an empty bar. Nothing
-   * either while the account is suspended — that account has exactly one screen (design C5).
+   * state, and a row of links that all redirect back to it is worse than no row at all — which
+   * is what an empty list gets, the shell rendering no navigation rather than an empty rule
+   * across the page. Nothing either while the account is suspended: that account has exactly one
+   * screen (design C5).
    */
   readonly nav = computed<NavItem[]>(() => {
     const account = this.accounts.current();

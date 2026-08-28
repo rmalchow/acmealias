@@ -2,32 +2,39 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterOutlet } from '@angular/router';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
-import { LOGOUT_URL, SessionService } from '@acme/shared';
+import { LOGOUT_URL, SessionService, ShellComponent } from '@acme/shared';
 
 /**
  * The staff console's shell.
  *
- * It exists before the screens it will hold, and that is the point: the hostname,
- * the identity-provider application and the ingress restriction that protect this
- * surface are worth having in place and exercised while there is nothing behind
- * them to lose. `staff-plane` fills it in.
+ * It exists before the screens it will hold, and that is the point: the hostname, the
+ * identity-provider application and the ingress restriction that protect this surface are worth
+ * having in place and exercised while there is nothing behind them to lose. `staff-plane` fills
+ * it in.
  *
- * The visible difference from the customer console is deliberate and should stay.
- * A member of staff will have both open, and two consoles that look identical is
- * how somebody suspends the wrong account.
+ * THE FRAME IS THE CUSTOMER CONSOLE'S, and that is a change from what stood here before. This
+ * file used to hand-draw its own bar — its own mark box, its own wordmark rule, its own measure
+ * for `main` (70rem, against the customer's 78rem, which was not a decision but a second
+ * hand-written copy). A member of staff and a customer now look at the same chrome, from
+ * projects/shared/src/lib/ui/shell.component.ts.
+ *
+ * The visible difference is still deliberate and still there — a member of staff will have both
+ * open, and two consoles that look identical is how somebody suspends the wrong account. It is
+ * carried by the two things that actually differ: the accent, which theme.less makes amber, so
+ * every button and focus ring below the bar is amber rather than green; and the bar's ground,
+ * which `tone="staff"` darkens to amber-cast black. Making the LAYOUT differ as well was what we
+ * had, and it bought nothing: nobody tells two consoles apart by where the sign-out link sits.
+ *
+ * There is no navigation, because there is one screen. The shell renders none rather than a rule
+ * across an empty row.
  */
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, NzButtonModule, NzIconModule],
+  imports: [RouterOutlet, ShellComponent, NzButtonModule, NzIconModule],
   template: `
-    <header class="bar">
-      <div class="mark">
-        <span class="mark-box"><img src="brand/logo.svg" alt="" /></span>
-        <strong>acmeservice</strong>
-        <span class="tag">staff</span>
-      </div>
-      <div class="who">
+    <app-shell home="/" badge="staff" tone="staff">
+      <div shellIdentity class="who">
         @if (name(); as n) {
           <span class="name">{{ n }}</span>
         }
@@ -36,66 +43,13 @@ import { LOGOUT_URL, SessionService } from '@acme/shared';
           Sign out
         </a>
       </div>
-    </header>
-    <main>
       <router-outlet />
-    </main>
+    </app-shell>
   `,
   styles: [
     `
-      :host {
-        display: flex;
-        flex-direction: column;
-        min-height: 100vh;
-      }
-      /* Amber, and not the console's blue. Two surfaces that look the same are
-         how somebody acts on the wrong one. */
-      .bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        padding: 0.6rem 1.5rem;
-        border-block-end: 1px solid rgb(255 255 255 / 12%);
-        background: #1f1a0e;
-      }
-      /* The product name is the wordmark, so it is set in the wordmark's face — Barlow Condensed
-         at weight 700, the same cut as material/word.svg. Running text stays Barlow. */
-      .mark strong {
-        font-family: 'Barlow Condensed', Barlow, sans-serif;
-        font-weight: 700;
-        font-size: 1.15rem;
-      }
-      .mark {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-      }
-      /* Same box as the customer shell, in the staff accent. The mark is a stroked
-         outline with no fill, so it needs a ground to read against at bar size. */
-      .mark-box {
-        display: grid;
-        place-items: center;
-        inline-size: 1.85rem;
-        block-size: 1.85rem;
-        border: 1px solid rgb(250 173 20 / 35%);
-        border-radius: 4px;
-        background: rgb(250 173 20 / 8%);
-      }
-      .mark-box img {
-        inline-size: 1.05rem;
-        block-size: auto;
-        display: block;
-      }
-      .tag {
-        font-size: 0.75rem;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: #faad14;
-        border: 1px solid rgb(250 173 20 / 40%);
-        border-radius: 3px;
-        padding: 0 0.35rem;
-      }
+      /* All that is left of this console's own chrome: the name beside the sign-out link. The bar,
+         the mark, the wordmark and the page's measure come from the shared shell. */
       .who {
         display: flex;
         align-items: center;
@@ -103,13 +57,6 @@ import { LOGOUT_URL, SessionService } from '@acme/shared';
       }
       .name {
         opacity: 0.75;
-      }
-      main {
-        flex: 1;
-        padding: 2rem 1.5rem;
-        max-inline-size: 70rem;
-        inline-size: 100%;
-        margin-inline: auto;
       }
     `,
   ],

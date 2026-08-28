@@ -1,0 +1,396 @@
+/* The component library, wearing the brand.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY THIS FILE EXISTS AT ALL — the decision, and what it costs
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Until now both consoles loaded `ng-zorro-antd/ng-zorro-antd.dark.min.css`, a
+ * PREBUILT stylesheet with Ant's dark blue compiled into it as literals —
+ * `#177ddc` appears 183 times in that file, its hover 31 times, its two active
+ * shades 76 times. There are no `--ant-*` custom properties in it to reassign:
+ * the bundle that does expose them (`ng-zorro-antd.variable.min.css`) is built
+ * from the LIGHT palette (`style/variable.less` sets `@root-entry-name:
+ * variable`, `style/dark.less` sets `default`), and no dark+variable bundle
+ * ships. So "swap `--ant-primary-color` at runtime" was not on the table; the
+ * two real options were a Less theme build or a hand-written override layer.
+ *
+ * THE OVERRIDE LAYER LOST. It is cheaper — a stylesheet of `!important` rules
+ * loaded after the prebuilt CSS — but it only reaches components somebody has
+ * already looked at. Everything else arrives blue the day it is first used: the
+ * spinner, the table's sort arrows and filter triggers, the date picker's
+ * selected cells and its "today" ring, the tree's drop indicator, the slider,
+ * the transfer list, the steps rail, every focus shadow derived from
+ * `@primary-color-outline`. That is a long tail nobody is going to chase, and a
+ * blue focus ring on a green product is exactly the kind of thing that is
+ * noticed once and then lived with forever.
+ *
+ * WHAT THE LESS BUILD COSTS, stated so nobody is surprised later:
+ *   - `ng build` now compiles Ant's Less sources instead of concatenating a
+ *     prebuilt file. Measured on the customer console: 3.7s → 3.9s, and the
+ *     minified stylesheet 618 kB → 623 kB, which leaves the initial bundle at
+ *     1.59 MB against a 1.6 MB warning budget — close, and worth knowing before
+ *     anybody adds a sixth font weight. The workspace already had `less` and
+ *     `less-loader` as transitive deps of the Angular builder, so nothing new
+ *     was installed.
+ *   - Upgrading ng-zorro can now break the BUILD, not just the look: this file
+ *     names ~30 of Ant's Less variables, and a renamed variable is a compile
+ *     error. That is the trade — a loud failure instead of a silent blue.
+ *   - `@plugin "./colorPalette"` runs during the build. It is Less's plugin
+ *     loader, not inline JavaScript, so `javascriptEnabled` stays false.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE ACCENT CANNOT CARRY WHITE TEXT
+ * ─────────────────────────────────────────────────────────────────────────────
+ * `#00ffb0` against white is 1.32:1 — it fails every threshold there is,
+ * including the 3:1 one for icons. Against the ground `#05070a` it is 15.30:1.
+ * The sign-in page already made this call (see the comment in
+ * development/authentik/branding/custom.css: "far too bright to carry white
+ * type") and so did the marketing site's `.button`. Ant's default is
+ * `@btn-primary-color: #fff`, and the same white shows up in six more places
+ * that are NOT variables, so those are written out as rules at the bottom of
+ * this file. Anything added to that list needs a measured ratio, not an eye.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHAT DELIBERATELY DID NOT CHANGE
+ * ─────────────────────────────────────────────────────────────────────────────
+ * `@blue-base` stays Ant's blue. The tempting move is to point it at the accent
+ * too, so that preset blue and primary agree — but `nzColor="blue"` is a live
+ * part of this product's status vocabulary (a challenge that is live, a domain
+ * that is not yet published), and mixing it into the accent compiles
+ * `.ant-tag-blue` to `#27e8a4`, one shade off `.ant-tag-green`. Two status
+ * colours that used to be distinguishable would stop being. Primary is green;
+ * preset blue remains blue and remains a status, not a brand colour.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * HOW A CONSOLE USES THIS
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Less takes the LAST declaration of a variable in a scope, and an @import is
+ * flattened into the importing file's scope. So a console imports this file and
+ * then states its own accent underneath:
+ *
+ *     @import '../../shared/src/theme/brand.less';
+ *     @ac-accent: #00ffb0;
+ *     @ac-accent-bright: #4dffc9;
+ *
+ * — which is also why every variable below is declared AFTER the ng-zorro
+ * import rather than before it. Before it, Ant's own `@primary-color: @blue-6`
+ * would be the last one and would win.
+ */
+
+@import 'ng-zorro-antd/ng-zorro-antd.dark.less';
+
+/* ── The brand tokens ───────────────────────────────────────────────────────
+ * The values, not an interpretation of them. The other two copies are
+ * site/src/styles.css and development/authentik/branding/custom.css; there is
+ * no mechanism keeping the three in step, which is stated in both of those
+ * files and is true here too.
+ *
+ * A console overrides `@ac-accent` / `@ac-accent-bright` / `@ac-accent-ink`
+ * after importing this file. Everything else is the same on both surfaces —
+ * the staff console is a different ACCENT, not a different product. */
+@ac-accent: #00ffb0;
+@ac-accent-bright: #4dffc9;
+/* The text colour that goes ON the accent. The ground, so that a filled button
+ * and the page behind it are the same two colours in the other order. */
+@ac-accent-ink: #05070a;
+
+@ac-ground: #05070a;
+@ac-raised: #16191d;
+@ac-raised-2: #1c2026;
+@ac-line: rgba(255, 255, 255, 0.12);
+@ac-ink: #ffffff;
+@ac-ink-dim: #a7b0ba;
+
+/* ── Primary ────────────────────────────────────────────────────────────── */
+@primary-color: @ac-accent;
+/* The brand names its own hover rather than deriving one, so it is stated.
+ *
+ * These two reach links, and they DO NOT reach buttons: in the dark build
+ * `.button-variant-primary` ignores the arguments it is handed and computes
+ * `colorPalette(@background, 7)` for hover and `(…, 5)` for active
+ * (button/style/mixin.less:50-80, guarded on `@theme = dark`). Only the
+ * `variable` theme honours them. That is why the primary button's states are
+ * written out as rules at the bottom of this file instead — and it is worth
+ * knowing that the derived hover goes DARKER while the brand's goes brighter,
+ * so leaving it alone would have made this the one surface of the three where
+ * hovering the green button dims it. */
+@primary-color-hover: @ac-accent-bright;
+/* One step down from the accent, for the pressed state. Taken from Ant's own
+ * palette function rather than picked by hand so it sits on the same curve as
+ * every other derived shade; in the dark theme index 7 is the darker end. */
+@ac-accent-deep: color(colorPalette('@{ac-accent}', 7));
+@primary-color-active: @ac-accent-deep;
+@link-color: @ac-accent;
+@link-hover-color: @ac-accent-bright;
+@link-active-color: @ac-accent-deep;
+
+/* ── Dark type on the accent, where Ant exposes it as a variable ──────────── */
+@btn-primary-color: @ac-accent-ink;
+/* The tick inside a checked checkbox. An icon, so the bar is 3:1 rather than
+ * 4.5:1 — white clears neither (1.32:1). */
+@checkbox-check-color: @ac-accent-ink;
+@radio-solid-checked-color: @ac-accent-ink;
+@process-icon-text-color: @ac-accent-ink;
+
+/* ── Ground and surfaces ───────────────────────────────────────────────────
+ * Ant's dark theme is a stack of neutral greys (#000 / #141414 / #1f1f1f).
+ * The brand's are the same three steps with a trace of blue in them, so the
+ * consoles and the marketing site are lit by one light. */
+@body-background: @ac-ground;
+@component-background: @ac-raised;
+@popover-background: @ac-raised-2;
+/* Everything that floats — modal, dropdown, select menu, notification, message,
+ * tooltip's neighbours — is declared in Ant's dark theme as `@popover-background`
+ * and follows it by itself. These are the ones written as literal greys there,
+ * so they have to be named. */
+@popover-customize-border-color: @ac-line;
+@tooltip-bg: #242930;
+@layout-trigger-background: @ac-raised-2;
+@segmented-selected-bg: @ac-raised-2;
+
+/* Tables carry both consoles, so their greys are worth getting exactly right
+ * rather than leaving one step out of tune with the panel behind them. */
+@table-header-bg: @ac-raised-2;
+@table-row-hover-bg: #20242a;
+@table-header-sort-bg: #20242a;
+@table-header-sort-active-bg: #262b32;
+@table-fixed-header-sort-active-bg: #262b32;
+@table-header-filter-active-bg: #2c323a;
+
+/* ── Lines ─────────────────────────────────────────────────────────────────
+ * The brand has ONE line colour. Ant needs two: the outline of a control, which
+ * has to be findable, and the split inside a component, which must not be. The
+ * brand's line is the split; the control outline is the same white pushed up
+ * until an empty input reads as an input.
+ *
+ * 34% is not a taste judgement. The boundary of a control is a non-text UI
+ * component, and WCAG asks 3:1 of it: at 34% white it is 3.11:1 against the
+ * panel and 3.10:1 against a modal, and Ant's own #434343 was 1.86:1 and
+ * 1.67:1 — it failed. The step from 22% (2.04:1, which is where this landed
+ * first) to 34% is the difference between an input you can find with your eye
+ * and one you find by clicking where you think it is. */
+@border-color-base: fade(@ac-ink, 34%);
+@border-color-split: @ac-line;
+@divider-color: @ac-line;
+
+/* ── Type ──────────────────────────────────────────────────────────────────
+ * Barlow, the same face as the marketing site and the sign-in page. Ant's own
+ * stack is system fonts, so this is the line that makes the three surfaces one
+ * product. The size stays 14px: the consoles are dense on purpose (see the
+ * `nzSize="small"` note in styles.css) and 16px is the site's measure for
+ * running prose, not for a table of certificates. */
+@font-family: Barlow, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+@text-color: fade(@ac-ink, 88%);
+@text-color-secondary: @ac-ink-dim;
+@heading-color: @ac-ink;
+
+/* 4px, which is the radius the marketing site's `.button` and the sign-in card's
+ * fields already use. Ant's 2px is a different product's corner. */
+@border-radius-base: 4px;
+
+/* ── The brand, republished as CSS custom properties ────────────────────────
+ * Component stylesheets reference these instead of pasting hex codes — which is
+ * how `nav a.active` came to be `#177ddc` written out by hand, a colour no
+ * theme change could ever have reached.
+ *
+ * They are emitted HERE, from the compiled theme, rather than in the shared
+ * global stylesheet, for one reason: the accent differs between the two
+ * consoles. A plain CSS file is loaded by both and could only state one value;
+ * this file is compiled once per console and states each one's own. It is also
+ * how `--ac-status-blue` can be the value the theme actually compiled rather
+ * than a hex code somebody hoped still matched. */
+:root {
+  --ac-accent: @ac-accent;
+  --ac-accent-bright: @ac-accent-bright;
+  --ac-accent-deep: @ac-accent-deep;
+  --ac-accent-ink: @ac-accent-ink;
+  --ac-accent-soft: fade(@ac-accent, 12%);
+  --ac-accent-line: fade(@ac-accent, 35%);
+
+  --ac-ground: @ac-ground;
+  --ac-raised: @ac-raised;
+  --ac-raised-2: @ac-raised-2;
+  --ac-line: @ac-line;
+  --ac-ink: @ac-ink;
+  --ac-ink-dim: @ac-ink-dim;
+
+  /* The status vocabulary, taken from the compiled theme rather than typed
+   * again. `--ac-status-blue` is the one that matters: it is what `nzColor="blue"`
+   * renders as, and a legend swatch that has to match a tag must read the same
+   * value the tag does. The legend on the usage panel used to say `#1890ff` —
+   * the LIGHT theme's blue, which is not what any tag beside it ever was. */
+  --ac-status-blue: @blue-6;
+  --ac-status-green: @green-6;
+  --ac-status-gold: @gold-6;
+  --ac-status-red: @red-6;
+  --ac-status-grey: fade(@ac-ink, 45%);
+
+  --ac-error: @error-color;
+  --ac-warn: @warning-color;
+  --ac-ok: @success-color;
+  --ac-muted: @text-color-secondary;
+  /* The tint and the hairline that go with a warning band — the console's
+   * low-balance strip is the one that exists today. Derived from the warning
+   * colour rather than written as `rgb(250 173 20 / 12%)`, which is what the
+   * strip used to say: Ant's gold in the dark theme is #d89715, so the literal
+   * was a slightly different gold from the text sitting on it. */
+  --ac-warn-soft: fade(@warning-color, 12%);
+  --ac-warn-line: fade(@warning-color, 35%);
+
+  /* The ambient light the page is lit by — the wash that globals.css paints over
+   * the ground. It is here rather than in that stylesheet for the reason every
+   * colour is: globals.css is loaded byte-identically by both consoles and could
+   * only ever state one value, and it was stating `rgb(0 255 176 / 10%)` — the
+   * customer's green — which lit the STAFF console green while every button on it
+   * was amber. The staff accent exists to be legible before a word is read, and a
+   * green room undercuts exactly that.
+   *
+   * The alternative was to keep it green on both, on the grounds that the wash is
+   * the brand's light and is shared with the marketing site and the sign-in page.
+   * It lost because those two are never on screen beside the staff console, and
+   * the customer console always is. */
+  --ac-glow: fade(@ac-accent, 10%);
+  --ac-glow-far: fade(@ac-accent, 4%);
+
+  /* One width for the whole console, so a heading never jumps sideways between
+   * two screens. */
+  --ac-page-width: 78rem;
+  --ac-page-gutter: 1.5rem;
+}
+
+/* ── White on the accent, where Ant hardcodes it ─────────────────────────────
+ * Everything above is a variable Ant offers. These are not: they name
+ * `@text-color-inverse` or `#fff` directly, and `@text-color-inverse` cannot be
+ * flipped globally because two dozen other rules use it correctly (the upload
+ * mask, the image preview, a red badge's count). So they are listed, and the
+ * list was produced by compiling the accent theme and scanning every rule that
+ * paints a light colour on `@primary-color` — not by looking at screens, which
+ * is how the date picker (two range pickers, on the audit screen) would have
+ * been missed.
+ *
+ * If an ng-zorro upgrade adds another, the same scan finds it: compile this
+ * file with `npx lessc --include-path=node_modules` and look for rules whose
+ * background is the accent and whose colour is not `@ac-accent-ink`.
+ *
+ * THAT SCAN HAS A BLIND SPOT, and it cost three of the entries below. It reads
+ * one rule at a time, and Ant often paints the ground in one rule and the type
+ * in another — `.ant-menu.ant-menu-dark .ant-menu-item-selected` sets the accent
+ * as background and says nothing about colour, while `.ant-menu-dark
+ * .ant-menu-item-selected` two hundred rules earlier sets `#fff` and says nothing
+ * about background. Neither rule looks wrong alone. So the scan has to be run a
+ * second way: collect the selectors that take an accent ground, then look for any
+ * LATER-or-equal rule that could match the same element and sets a light colour.
+ *
+ * Two accent grounds are knowingly left alone, and both are ng-zorro's own
+ * additions rather than Ant components: `.ant-hash-code-primary` and
+ * `.ant-check-list-checked`. Neither is reachable from a template in this
+ * workspace and neither has a stable selector worth pinning; if one is ever used,
+ * it joins this list. `.ant-splitter-bar-preview` is an accent ground too and is
+ * not a contrast question — it carries no type. */
+::selection {
+  color: @ac-accent-ink;
+}
+
+/* The primary button's own states, because the dark build derives them from the
+ * palette and never looks at `@primary-color-hover` (see the note beside that
+ * variable). Ant's selectors verbatim and no `!important`: the disabled rules
+ * that follow them in the compiled sheet carry `[disabled]` and are a step more
+ * specific, so a disabled button stays disabled-looking. */
+.@{ant-prefix}-btn-primary:hover,
+.@{ant-prefix}-btn-primary:focus {
+  color: @ac-accent-ink;
+  border-color: @ac-accent-bright;
+  background: @ac-accent-bright;
+}
+
+.@{ant-prefix}-btn-primary:active {
+  color: @ac-accent-ink;
+  border-color: @ac-accent-deep;
+  background: @ac-accent-deep;
+}
+
+/* Only the DEFAULT ribbon, which is the only one painted in the accent.
+ *
+ * This was written as `.ant-ribbon, .ant-ribbon-text` and that was wrong twice.
+ * A PRESET ribbon takes its ground from `@{colour}-6` and its text from the same
+ * `.ant-ribbon-text` rule, so the blanket form dark-inked those too: `nzColor="red"`
+ * went from white on #d4212b (7.32:1) to near-black on it (2.75:1) — a regression
+ * produced by a fix. And `.ant-ribbon-corner`, the fold that hangs below the
+ * ribbon, paints itself in `currentcolor`, so naming the wrapper's colour turned
+ * that fold into the page's own black on every ribbon, preset or not.
+ *
+ * Ant's preset classes are `.ant-ribbon-color-<name>`, so `:not()` picks out the
+ * one ribbon that has no preset — the accent one — and only its text is named.
+ * The wrapper's own colour is left as Ant sets it, which is what keeps the fold. */
+.@{ant-prefix}-ribbon:not([class*='@{ant-prefix}-ribbon-color-']) .@{ant-prefix}-ribbon-text {
+  color: @ac-accent-ink;
+}
+
+/* `-in-view` is not decoration: Ant's own rule is
+ * `.ant-picker-cell-in-view.ant-picker-cell-selected .ant-picker-cell-inner`,
+ * and an override that drops it is one class less specific and simply loses.
+ * Every selector here is Ant's, verbatim, so the cascade decides on order. */
+.@{ant-prefix}-picker-cell-in-view.@{ant-prefix}-picker-cell-selected .@{ant-prefix}-picker-cell-inner,
+.@{ant-prefix}-picker-cell-in-view.@{ant-prefix}-picker-cell-range-start .@{ant-prefix}-picker-cell-inner,
+.@{ant-prefix}-picker-cell-in-view.@{ant-prefix}-picker-cell-range-end .@{ant-prefix}-picker-cell-inner {
+  color: @ac-accent-ink;
+}
+
+.@{ant-prefix}-dropdown-menu-dark .@{ant-prefix}-dropdown-menu-item-selected {
+  &,
+  &:hover,
+  > a {
+    color: @ac-accent-ink;
+  }
+}
+
+.@{ant-prefix}-tag-checkable-checked,
+.@{ant-prefix}-tag-checkable:active {
+  color: @ac-accent-ink;
+}
+
+/* The switch's label sits inside the track, and the track is the accent once it
+ * is on. Unchecked it is a grey track and white is right there, so only the
+ * checked state is named. */
+.@{ant-prefix}-switch-checked .@{ant-prefix}-switch-inner {
+  color: @ac-accent-ink;
+}
+
+/* A dark menu's selected item, and a horizontal dark menu's item under the
+ * pointer. Both take the accent as their ground, and neither takes its type from
+ * a variable that could be flipped: `@menu-dark-highlight-color` is one value
+ * doing two jobs — the type on the accent ground here, and the type on a
+ * TRANSPARENT ground for every other hover in the same menu. One of those wants
+ * dark and the other wants light, so the variable cannot serve both and the rule
+ * has to be written. (`@menu-dark-selected-item-text-color` and its icon twin do
+ * only the selected job and could have been variables, but splitting one item's
+ * type across a variable and a rule is worse to read than putting it in one
+ * place.)
+ *
+ * Everything inside the item is named rather than just the item: Ant colours the
+ * anchor, the icon and the label beside it in separate rules, all at three
+ * classes, so an override that names only the item loses to each of them. */
+.@{ant-prefix}-menu.@{ant-prefix}-menu-dark .@{ant-prefix}-menu-item-selected,
+.@{ant-prefix}-menu-submenu-popup.@{ant-prefix}-menu-dark .@{ant-prefix}-menu-item-selected,
+.@{ant-prefix}-menu-dark.@{ant-prefix}-menu-horizontal > .@{ant-prefix}-menu-item:hover {
+  &,
+  a,
+  span,
+  .@{iconfont-css-prefix} {
+    color: @ac-accent-ink;
+  }
+}
+
+/* A directory tree's selected row. The accent is painted by a `::before` behind
+ * the row, so the ground and the type are two rules by construction — this is the
+ * clearest case of what the note above the list describes.
+ *
+ * The wrapper is named twice on purpose: Ant sets its colour once at three
+ * classes and again at four (`.ant-tree-node-content-wrapper.ant-tree-node-selected`),
+ * and an override that matches only the first is beaten by the second. */
+.@{ant-prefix}-tree.@{ant-prefix}-tree-directory .@{ant-prefix}-tree-treenode-selected {
+  .@{ant-prefix}-tree-switcher,
+  .@{ant-prefix}-tree-node-content-wrapper,
+  .@{ant-prefix}-tree-node-content-wrapper.@{ant-prefix}-tree-node-selected {
+    color: @ac-accent-ink;
+  }
+}

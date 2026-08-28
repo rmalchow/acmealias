@@ -1,0 +1,43 @@
+/* The staff console's theme: the shared brand build, in amber.
+ *
+ * THE DIFFERENCE IS THE POINT. A member of staff has both consoles open, and two
+ * consoles that look identical is how somebody suspends the wrong account. That
+ * used to be expressed by one hand-painted bar sitting on top of a theme that
+ * was otherwise byte-identical to the customer's — so everything the bar did not
+ * cover (every primary button, every link, every focus ring) was the customer
+ * console's colour. Now the accent itself is amber, which means the difference
+ * reaches the parts of the screen a person is actually looking at while they
+ * work: the button they are about to press is amber, not green.
+ *
+ * Ground, surfaces, lines and type are NOT changed. This is the same product
+ * seen by different people, not a second product.
+ *
+ * #faad14 is the amber the staff shell already used, kept to the value. It is a
+ * near neighbour of `@warning-color` (Ant's gold-6, ~#d69417 once mixed into
+ * this ground), and that is worth being awake about: on this console the accent
+ * and a warning are the same hue. It is tolerable because they never take the
+ * same form — the accent is only ever a filled button or an active underline,
+ * and a warning is only ever type or a bordered tint. The alternative was to
+ * retune `@warning-color` to orange here, and it lost: the same warning would
+ * then be two different colours depending on which console you read it in,
+ * which is a worse thing to have than two ambers that never appear as the same
+ * shape.
+ *
+ * The decision behind the Less build, and the rule that white type may never sit
+ * on the accent, are in projects/shared/src/theme/brand.less. Amber needs that
+ * rule as much as green does: white on #faad14 is 2.05:1, near-black is 10.19:1.
+ *
+ * The values are stated AFTER the import because Less takes the last declaration
+ * in a scope. */
+@import '../../shared/src/theme/brand.less';
+
+@ac-accent: #faad14;
+@ac-accent-bright: #ffc53d;
+
+:root {
+  /* The bar's own ground: the brand's black with the accent stirred into it, so
+   * the strip along the top of the window is amber-cast before a single word of
+   * it is read. Opaque rather than a translucent amber over `--ac-ground`,
+   * because chrome that the page shows through stops reading as chrome. */
+  --ac-staff-bar: #1f1a0e;
+}

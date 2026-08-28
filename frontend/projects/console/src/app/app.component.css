@@ -1,99 +1,44 @@
-/* The shell: a bar whose CONTENTS are constrained to the same width as the page below it
- * (.ac-page), while the bar itself spans the window — so the brand sits directly above the page
- * heading and the bar's bottom edge still reaches both window edges. */
-.shell-bar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  height: 3rem;
-  background: #1f1f1f;
-  border-bottom: 1px solid #303030;
-}
+/* What the CUSTOMER console adds to the shared shell.
+ *
+ * The bar, the wordmark, the mark's box, the navigation and the page's measure are all in
+ * projects/shared/src/lib/ui/shell.component.ts now, worn by both consoles. This file used to
+ * hold a second copy of every one of them, and the copy is how the active-nav underline came to
+ * be a hand-pasted `#177ddc` that no theme change could reach. What is left here is the two
+ * pieces of chrome only a customer sees.
+ */
 
-.bar-inner {
+/* The bar's right-hand group. It no longer carries a `margin-inline-start: auto` to push itself
+ * over — the shell's bar is `space-between`, so the mark and this group are at the window's two
+ * edges by the frame's own rule rather than by a margin one of the children happens to set. */
+.identity {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
-  height: 100%;
+  gap: 0.25rem;
 }
 
-/* The product name is the wordmark, so it is set in the wordmark's face: Barlow Condensed at
- * weight 700, the same cut as `material/word.svg`. Running text stays Barlow. */
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  font-family: "Barlow Condensed", Barlow, sans-serif;
-  font-weight: 700;
-  font-size: 1.15rem;
-  letter-spacing: 0.01em;
-  color: rgb(255 255 255 / 85%);
-  text-decoration: none;
-}
-
-/* The mark sits in a box of its own rather than floating against the bar. The logo is a stroked
- * outline with no fill, so at bar size it needs a ground to read against — and the box is what
- * gives the corner a fixed shape whatever the mark inside it becomes. */
-.brand-box {
-  display: grid;
-  place-items: center;
-  inline-size: 1.85rem;
-  block-size: 1.85rem;
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 4px;
-  background: rgb(255 255 255 / 4%);
-}
-
-.brand-box img {
-  inline-size: 1.05rem;
-  block-size: auto;
-  display: block;
-}
-
-nav {
-  display: flex;
-  gap: 1.25rem;
-  height: 100%;
-  align-items: center;
-}
-
-nav a {
-  color: rgb(255 255 255 / 65%);
-  text-decoration: none;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  border-bottom: 2px solid transparent;
-}
-
-nav a:hover {
-  color: rgb(255 255 255 / 85%);
-}
-
-/* The current screen, marked on the bar rather than only in the breadcrumb. */
-nav a.active {
-  color: #177ddc;
-  border-bottom-color: #177ddc;
-}
-
-/* The switcher carries the auto margin that pushes this group to the right — it is the first of
- * them now, and it is always present (design C12), so the bar's right-hand group starts there
- * whether or not there is a choice to make. */
 .account {
   margin-inline-start: 0.25rem;
 }
 
 /* Warned before zero, not at it (task 6.10): a strip under the bar rather than a toast, because
- * a toast is gone by the time the person is in a position to act on it. */
+ * a toast is gone by the time the person is in a position to act on it.
+ *
+ * Two elements rather than one, for the same reason the bar has two: the TINT spans the window,
+ * so the strip reads as a condition of the session, while the TEXT is held to `.ac-page` so its
+ * first word sits on the same left edge as the navigation and the page heading below it. Padding
+ * alone would have done that only until the window grew past the page's measure. */
 .low-balance {
+  padding-block: 0.5rem;
+  background: var(--ac-warn-soft);
+  border-bottom: 1px solid var(--ac-warn-line);
+  color: var(--ac-warn);
+  font-size: 0.875rem;
+}
+
+.low-balance-inner {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem var(--ac-page-gutter);
-  background: rgb(250 173 20 / 12%);
-  border-bottom: 1px solid rgb(250 173 20 / 35%);
-  color: var(--ac-warn);
-  font-size: 0.875rem;
 }
 
 .low-balance a {

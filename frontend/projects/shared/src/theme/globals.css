@@ -1,0 +1,132 @@
+/* The global stylesheet both consoles load, and the reason there is only one of it.
+ *
+ * There used to be two — projects/console/src/styles.css and
+ * projects/admin/src/styles.css — and they were byte-identical, admin's included
+ * down to the comment describing itself as the customer console. Two copies of a
+ * file that must not differ is a file that will differ; each console's styles.css
+ * now imports this and adds only what is genuinely its own.
+ *
+ * The COLOURS are not here. They come from the compiled theme
+ * (projects/shared/src/theme/brand.less), which emits them as `--ac-*` custom
+ * properties on `:root`, because the accent differs between the two consoles and
+ * a token defined in a plain stylesheet could not follow it.
+ *
+ * Load order, set in angular.json: theme.less, then this. Later wins.
+ */
+
+/* The faces, bundled rather than fetched: the compiled output is embedded in the
+ * Go binary and has to render on a host with no route to the internet. Barlow is
+ * the brand face — material/word.svg is set in it — and the marketing site
+ * serves copies of these same .woff2 files, so the three surfaces render in the
+ * same metal. Barlow Condensed is the wordmark's cut and is used only where the
+ * product name is set, never for running text. */
+@import "@fontsource/barlow/300.css";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow-condensed/400.css";
+@import "@fontsource/barlow-condensed/700.css";
+
+html,
+body {
+  height: 100%;
+}
+
+/* The face and the ground both arrive from the theme (`@font-family`,
+ * `@body-background`), so neither is repeated here. What is here is the LIGHT.
+ *
+ * Three faint washes over the black — an accent one from the top left, a cool
+ * specular under the first screenful, a vignette that keeps the corners properly
+ * black. It is the sign-in page's lighting, transcribed from
+ * development/authentik/branding/custom.css, and it is what makes a console tab
+ * and an auth.localhost tab look like two rooms in one building.
+ *
+ * The two accent-tinted ones come from the theme as `--ac-glow` and
+ * `--ac-glow-far` rather than being written here, because this file is loaded
+ * unchanged by both consoles and the accent is the one thing that differs between
+ * them: written out, the staff console was lit green while everything in it was
+ * amber. The specular stays a fixed cool white — it is a highlight, not a hue.
+ *
+ * A gradient rather than the marketing site's brand/background.jpg: the site can
+ * serve an image from its own directory, and neither console ships an assets
+ * folder to put one in. Fixed attachment for the same reason the site gives —
+ * the light belongs to the window, not to the document, so a long table does not
+ * scroll out of it into an unlit page. */
+body {
+  margin: 0;
+  background-image:
+    radial-gradient(70rem 45rem at 12% -12%, var(--ac-glow), transparent 68%),
+    radial-gradient(45rem 30rem at 50% 2%, rgb(190 225 255 / 6%), transparent 66%),
+    radial-gradient(90rem 70rem at 50% 120%, var(--ac-glow-far), transparent 60%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* The page frame. One fixed width for the whole console, shared by the header
+ * bar's contents and by every screen, so a heading never jumps sideways between
+ * two screens. `--ac-page-width` is declared once, in the theme. */
+.ac-page {
+  width: 100%;
+  max-width: var(--ac-page-width);
+  margin-inline: auto;
+  padding-inline: var(--ac-page-gutter);
+  box-sizing: border-box;
+}
+
+/* Screens render <app-page-header> first and nothing else sets a top margin: that is what keeps
+ * the first row of real content at the same y coordinate on every screen. */
+main {
+  display: block;
+  padding-block: 1.5rem 4rem;
+}
+
+/* The filter row above every list. Wraps rather than scrolls — a narrow window should reflow the
+ * filters, never hide one. */
+.ac-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.ac-filters .ac-grow {
+  flex: 1 1 18rem;
+  max-width: 26rem;
+}
+.ac-filters .ac-spacer {
+  margin-left: auto;
+}
+
+.ac-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  word-break: break-all;
+}
+.ac-error {
+  color: var(--ac-error);
+  margin: 0.5rem 0;
+}
+.ac-hint {
+  color: var(--ac-muted);
+  font-size: 0.8125rem;
+}
+.ac-nowrap {
+  white-space: nowrap;
+}
+
+/* The marketing site gives bare `code` an accent-coloured well of its own. That
+ * is NOT copied here, and the reason is worth keeping: the console's `<code>`
+ * usually already sits inside a well — the revealed API key, the CNAME in the
+ * domain-help dialog — so a second border around it reads as a box in a box.
+ * `.ac-mono` is what those wells use, and it sets the face without the chrome. */
+
+/* Every "New …" is an nz-modal; they all lay their fields out the same way, so a two-field form
+ * and a five-field form read as the same dialog. */
+.ac-modal-form nz-form-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Tables carry the console. Give them room to breathe under the filter row and keep the pager
+ * visually attached to the table it pages. */
+.ac-table {
+  margin-bottom: 1.5rem;
+}

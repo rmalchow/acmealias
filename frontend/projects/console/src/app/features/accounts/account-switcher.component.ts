@@ -83,11 +83,15 @@ import { AccountsService } from './accounts.service';
   `,
   styles: [
     `
+      /* No 'margin-inline-start: auto' any more. This used to be what pushed the whole
+       * right-hand group of the bar over, which made the bar's layout depend on a margin set by
+       * the first component that happened to sit in it — remove the switcher and the user menu
+       * drifted to the middle. The shared shell lays its bar out with 'space-between', so the
+       * group is at the window's edge whatever is in it. */
       .switcher {
         display: flex;
         align-items: center;
         gap: 0.25rem;
-        margin-inline-start: auto;
       }
       /* The select and the inert label occupy the same box, so the bar does not move when a
        * second account arrives. */

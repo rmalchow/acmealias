@@ -137,9 +137,9 @@ export interface DomainHelpData {
         display: block;
         margin-bottom: 0.75rem;
         padding: 0.75rem;
-        background: #141414;
-        border: 1px solid #303030;
-        border-radius: 2px;
+        background: var(--ac-ground);
+        border: 1px solid var(--ac-line);
+        border-radius: 4px;
       }
       .found {
         color: var(--ac-error);

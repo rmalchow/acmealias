@@ -36,7 +36,7 @@
               }
             ],
             "styles": [
-              "./node_modules/ng-zorro-antd/ng-zorro-antd.dark.min.css",
+              "projects/console/src/theme.less",
               "projects/console/src/styles.css"
             ],
             "scripts": []
@@ -95,7 +95,7 @@
               }
             ],
             "styles": [
-              "./node_modules/ng-zorro-antd/ng-zorro-antd.dark.min.css",
+              "projects/console/src/theme.less",
               "projects/console/src/styles.css"
             ],
             "scripts": []
@@ -139,7 +139,7 @@
               }
             ],
             "styles": [
-              "./node_modules/ng-zorro-antd/ng-zorro-antd.dark.min.css",
+              "projects/admin/src/theme.less",
               "projects/admin/src/styles.css"
             ],
             "scripts": []
@@ -198,7 +198,7 @@
               }
             ],
             "styles": [
-              "./node_modules/ng-zorro-antd/ng-zorro-antd.dark.min.css",
+              "projects/admin/src/theme.less",
               "projects/admin/src/styles.css"
             ],
             "scripts": []
