@@ -94,26 +94,29 @@ describe('DomainEditorComponent', () => {
     return fixture;
   }
 
-  it('offers the counterpart control unticked, naming the wildcard it would add', () => {
+  it('offers the wildcard control unticked, naming the wildcard it would add', () => {
     const fixture = withName('example.com');
-
     expect(fixture.componentInstance.includeWildcard).toBeFalse();
-    expect(fixture.nativeElement.querySelector('input[type=checkbox]').checked).toBeFalse();
-    expect(fixture.componentInstance.counterpartLabel()).toBe(
+    expect(fixture.componentInstance.wildcardLabel()).toBe(
       'Also add the wildcard *.example.com',
     );
-    expect(fixture.nativeElement.textContent).toContain('Also add the wildcard *.example.com');
   });
 
-  it('mirrors the control for a wildcard, naming the apex it would add', () => {
-    const fixture = withName('*.example.com');
-
-    expect(fixture.componentInstance.counterpartLabel()).toBe('Also add the apex example.com');
-    expect(fixture.nativeElement.textContent).toContain('Also add the apex example.com');
+  // A pasted wildcard is ABSORBED rather than refused: the star moves to the checkbox and the
+  // field keeps the plain name. Refusing it would reject exactly what somebody has in their
+  // certificate configuration, at the moment they are trying to give us the right answer.
+  it('moves a pasted wildcard into the checkbox and says it did', () => {
+    const fixture = withName('example.com');
+    const c = fixture.componentInstance;
+    c.onName('*.shop.example.com');
+    expect(c.name).toBe('shop.example.com');
+    expect(c.includeWildcard).toBeTrue();
+    expect(c.absorbed()).toBeTrue();
+    expect(c.wildcardLabel()).toBe('Also add the wildcard *.shop.example.com');
   });
 
-  it('names the counterpart of a specific host, not the registrable domain', () => {
-    expect(withName('shop.example.com').componentInstance.counterpartLabel()).toBe(
+  it('names the wildcard of a specific host, not the registrable domain', () => {
+    expect(withName('shop.example.com').componentInstance.wildcardLabel()).toBe(
       'Also add the wildcard *.shop.example.com',
     );
   });

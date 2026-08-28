@@ -6,7 +6,7 @@ import { NzCheckboxModule } from 'ng-zorro-antd/checkbox';
 import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
-import { ApiService, DomainCreateRequest, DomainCreated, WILDCARD_NOTES, apiErrorMessage, counterpartDomain, domainNameProblem, normalizeDomain } from '@acme/shared';
+import { ApiService, DomainCreateRequest, DomainCreated, WILDCARD_NOTES, apiErrorMessage, wildcardOf, domainNameProblem, normalizeDomain } from '@acme/shared';
 export interface DomainCreateData {
   projectId: string;
 }
@@ -43,9 +43,10 @@ export interface DomainCreateData {
         >
           <input
             nz-input
+            [ngModel]="name"
+            (ngModelChange)="onName($event)"
             name="name"
-            [(ngModel)]="name"
-            placeholder="shop.example.com or *.example.com"
+            placeholder="shop.example.com"
             autocomplete="off"
           />
         </nz-form-control>
@@ -57,8 +58,14 @@ export interface DomainCreateData {
                nz-checkbox renders its own <input> inside this label and owns the association; the
                rule cannot see through the directive. -->
           <label nz-checkbox name="includeWildcard" [(ngModel)]="includeWildcard">
-            {{ counterpartLabel() }}
+            {{ wildcardLabel() }}
           </label>
+          @if (absorbed()) {
+            <p class="hint absorbed">
+              You typed a wildcard. It moved to the box above — the name and its wildcard share one
+              delegation, so this adds both and asks nothing more of your DNS.
+            </p>
+          }
           <p class="hint">
             A wildcard covers every host exactly one label under the domain, and needs its own
             address records in the DNS plan the customer publishes.
@@ -156,21 +163,52 @@ export class DomainEditorComponent {
    */
   includeWildcard = false;
 
+  /** True when a pasted `*.` was moved into the checkbox, so the page can say it happened. */
+  readonly absorbed = signal(false);
+
   /** Recomputed on every render off the live value — cheap, and never stale. */
   clientProblem(): string | null {
     return this.name.trim() ? domainNameProblem(this.name) : null;
   }
 
   /**
-   * The label names the exact name the box would add, so the operator never has to work the
-   * option's effect out. Before anything is typed it states the rule instead of naming `*.`.
+   * A pasted wildcard is ABSORBED, not refused.
+   *
+   * The field used to accept either form, and the checkbox added "the counterpart" — the wildcard
+   * of a plain name, the apex of a wildcard. That is four inputs for three outcomes, because
+   * `example.com` + checkbox and `*.example.com` + checkbox are the same request written two ways,
+   * and the checkbox had to rename itself depending on what was typed to stay honest.
+   *
+   * So the field takes a plain name and the box means one thing. But refusing `*.example.com` would
+   * be worst of all: it is exactly what somebody has in their certificate configuration and will
+   * paste, and rejecting it teaches them the field is fussy at the moment they are trying to give
+   * us the right answer. It is absorbed instead — the star moves to the checkbox, which ticks — and
+   * `absorbed` makes the page SAY so, because silently rewriting what somebody typed is worse than
+   * refusing it.
+   *
+   * WILDCARD-ONLY is what this gives up, and it is deliberate. The API still accepts a bare
+   * `*.example.com`, so the CLI and a program can still ask for one; the console cannot, because
+   * offering a third arrangement to save one `domains` row costs every customer a decision they do
+   * not have the context to make. The two names share one alias and one CNAME, so the row is the
+   * whole of what is saved.
    */
-  counterpartLabel(): string {
+  onName(value: string): void {
+    const normalized = normalizeDomain(value);
+    if (normalized.startsWith('*.')) {
+      this.name = value.replace(/^\s*\*\./, '');
+      this.includeWildcard = true;
+      this.absorbed.set(true);
+      return;
+    }
+    this.name = value;
+    if (!normalized) this.absorbed.set(false);
+  }
+
+  /** Names the exact name the box would add, so nobody has to work the option's effect out. */
+  wildcardLabel(): string {
     const typed = normalizeDomain(this.name);
-    if (!typed) return 'Also add the counterpart of this name';
-    return typed.startsWith('*.')
-      ? `Also add the apex ${counterpartDomain(typed)}`
-      : `Also add the wildcard ${counterpartDomain(typed)}`;
+    if (!typed) return 'Also add the wildcard for this name';
+    return `Also add the wildcard ${wildcardOf(typed)}`;
   }
 
   submit(): void {

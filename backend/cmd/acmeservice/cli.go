@@ -296,7 +296,7 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 		project := fs.String("project", "", "project reference")
 		name := fs.String("name", "", "domain name")
 		includeWildcard := fs.Bool("include-wildcard", false,
-			"also create the name's counterpart: the wildcard of a plain name, the base name of a wildcard")
+			"also add *.<name>, which shares one delegation with it")
 		fs.Parse(args)
 		return adminctl.DomainCreate(ctx, db, sc, out, cfg.Zone, cfg.AliasUseDomain, *project, *name, *includeWildcard)
 	case "domain list":

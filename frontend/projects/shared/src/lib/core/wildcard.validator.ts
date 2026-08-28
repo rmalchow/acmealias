@@ -22,18 +22,23 @@ export function stripLeadingWildcard(name: string): string {
 }
 
 /**
- * The other form of a name: the wildcard of a name that is not one, the base name of a name
- * that is — `example.com` <-> `*.example.com`, `shop.example.com` <-> `*.shop.example.com`.
- * Mirrors `dnsname.Counterpart`. Derivation only: the counterpart of a valid name can be
- * invalid (`co.uk` -> `*.co.uk`), which is why the server validates both and refuses the whole
- * request if either fails.
+ * The wildcard for a name: `example.com` -> `*.example.com`, `shop.example.com` ->
+ * `*.shop.example.com`. A name that is already a wildcard is returned without its star, which is
+ * what makes it safe to call on whatever is in the field.
+ *
+ * It was called `counterpartDomain`, and "counterpart" is the reason: it is a word that means
+ * nothing to somebody adding a domain, and it made the checkbox beside it unreadable. The concept
+ * it named — "the other form, whichever way round you started" — is gone anyway, because the field
+ * no longer holds a wildcard.
+ *
+ * Derivation only. The wildcard of a valid name can be invalid (`co.uk` -> `*.co.uk`), which is why
+ * the server validates both and refuses the whole request if either fails.
  */
-export function counterpartDomain(name: string): string {
+export function wildcardOf(name: string): string {
   const n = normalizeDomain(name);
   return n.startsWith('*.') ? n.slice(2) : '*.' + n;
 }
 
-/** The ACME challenge name a domain validates through. The `*.` label is stripped, not included. */
 export function challengeFqdn(name: string): string {
   return '_acme-challenge.' + stripLeadingWildcard(normalizeDomain(name));
 }
