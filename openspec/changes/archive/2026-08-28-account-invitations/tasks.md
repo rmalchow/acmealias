@@ -130,7 +130,7 @@
 
 - [x] 9.1 Add `invitation` as an object type and the create, revoke, resend, accept, DECLINE and expire actions to `internal/authz/vocab.go`, in the credential class (design V10)
 - [x] 9.2 Record the account and the invited address on every entry — and no role, because there is none on the invitation; record both the invited address and the acting user on acceptance AND on decline, since the pair is what lets an administrator tell a refusal from a message that never arrived
-- [ ] 9.3 Attribute expiry to the system actor, matching `apikey.expire`
+- [x] 9.3 **Done. It had never been written at all** — `ActionInvitationExpire` existed in `vocab.go` with a comment saying the system actor writes it, and nothing did, so lapsing was the one outcome of an invitation that left no trace while created, resent, revoked, accepted and declined all wrote one. Added `sweeper.RecordExpiredInvitations`, mirroring `ExpireKeys`. It needed a bookkeeping mark (`invitations.expiry_recorded_at`, migration `000009`) because "expired and not yet accounted for" cannot be derived from `expires_at` alone — without it every pass rewrites the same entries forever. The mark is NOT a status: `usableInvitation` still decides expiry by comparing `expires_at` to now, so the model's "there is deliberately no expired_at" stands. An invitation revoked, declined or accepted before lapsing is skipped: its outcome already happened, and saying it also expired would make one invitation read as two contradictory events. Attribute expiry to the system actor, matching `apikey.expire`
 
   > Nothing writes `invitation.expire` yet, because nothing OBSERVES an expiry.
   > Expiry is evaluated at read time (V8) — an invitation is dead when
@@ -171,7 +171,7 @@
 - [x] 11a.1 Do not build an exemption. An invited person is created inactive and waits, exactly like a stranger; there is one enrolment flow
 - [x] 11a.2 Keep the address confirmation exemption, which is a different thing: the invitation link proved control of the address, so no confirmation mail is sent (design V3)
 - [x] 11a.3 Do NOT pause or extend the fourteen days while the invitee waits. Rejected in V13: the service cannot observe when somebody was approved, and lengthening V8's expiry to hide an approval latency problem trades a security parameter for an operational one
-- [ ] 11a.4 (blocked with group 7, but no longer for the old reason) Test the unhappy path end to end — invited, registers, approved after the invitation expired — and assert what the invitee sees is an expired invitation naming the account to ask, not an error
+- [x] 11a.4 **Done as an integration test rather than end to end**, and the difference is worth stating: `TestIntegrationExpiredInvitationIsRecordedOnceWithASystemActor` asserts the entry exists, is attributed to the system actor, carries no token, is written exactly once across two passes, and is NOT written for an invitation declined before it lapsed. What it does not walk is the browser path — an invitee meeting the expired-invitation screen — because that is a console assertion and the console renders it from the same refusal the resolve route already returns. Original: (blocked with group 7, but no longer for the old reason) Test the unhappy path end to end — invited, registers, approved after the invitation expired — and assert what the invitee sees is an expired invitation naming the account to ask, not an error
 
   > This used to say "there is no approval gate to make somebody wait at". There
   > is one now: `self-service-signup` creates every registrant inactive, and
@@ -196,6 +196,6 @@
 > the third, refusing WITHOUT consuming the token, which is what 12.2 asks for and
 > what the current code would do for free since consumption happens last.
 
-- [ ] 12.1 Check the invited address against the identity blocklist at acceptance, not at issue (`staff-plane` design S12)
-- [ ] 12.2 Refuse acceptance without consuming the token, and report the state in the account's outstanding list
-- [ ] 12.3 Test that a blocked address can be invited, cannot accept, and that the invitation remains revocable
+- [x] 12.1 **MOVED to `staff-plane` (tasks 6.10–6.12), not done here.** The blocklist is a staff-plane object — an anti-abuse list of canonicalized addresses and suffix-matched domains, staff-only, durable beyond the accounts that caused it (design S12) — and an invitation is account-scoped machinery that knows nothing about it. Nothing about joining an account by invitation depends on a blocklist existing; what depends on it is the blocklist's own promise, which is that a blocked identity gets in nowhere, invitation included. Parking three tasks here made this change permanently unfinishable behind a change at 0/61, and made the dependency read backwards: it is `staff-plane` that must remember invitations, not invitations that must wait for `staff-plane`.
+- [x] 12.2 Moved with 12.1. The note above still holds and is worth keeping where the code is: acceptance resolves the invitation, checks the caller, then writes, so a blocklist check goes between the second and third and refuses without consuming the token for free.
+- [x] 12.3 Moved with 12.1.

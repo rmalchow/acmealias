@@ -1,3 +1,36 @@
+> **Archived unimplemented — absorbed by `domain-diagnostics`.**
+>
+> Nothing here was built: there was never an `internal/certobserve` package or a
+> `certificate_observations` table. What was wrong with it was not the mechanism
+> but the surface. It designed certificate observation as a screen of its own —
+> a per-load-balancer certificate view, per-address history, an uncovered-domains
+> report and an approaching-expiry report — and once a domain's row carries a
+> status dot per record type, three of those four collapse into one dot and its
+> dialog. "Covered by no certificate" is the dot showing red; "expiring soon" is
+> the same dot showing amber. Building both would have put the same facts in two
+> places for a customer to reconcile.
+>
+> What survives, under new numbers in `domain-diagnostics/design.md`:
+>
+> - **H1 → G14**, unchanged. Nothing acts on an observation, and reachability is
+>   deliberately not reported.
+> - **H2 → G6, inverted.** H2 probed once per node address and read the covered
+>   names out of the certificate, rejecting a per-domain matrix on cost. G6 probes
+>   per domain with the domain as the server name: the cost argument assumed every
+>   domain is observed, and observation is now explicitly opt-in per domain. The
+>   inversion also removes H2's accepted limitation, since a server selecting a
+>   certificate by SNI is now asked the right question.
+> - **H3 → G11**, unchanged. A failed handshake is a recorded observation, not an
+>   omitted row.
+> - **H4 → G1**, dissolved. The two derived reports become states of the dot.
+> - **H5 → G13, G16**, unchanged in substance: an hours-scale cadence, history kept
+>   longer than it is dense, downsampled to one observation per day beyond a
+>   full-resolution window.
+> - **H6 → G17, replaced.** `node.observed` becomes `domain.observed`, because the
+>   thing the customer switches on is a domain.
+>
+> Its open questions were carried across rather than answered here.
+
 ## Why
 
 ### The challenge history opens a question it cannot close

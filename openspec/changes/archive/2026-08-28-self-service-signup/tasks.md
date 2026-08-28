@@ -66,7 +66,7 @@
   > A `static` prompt field on the last stage. Verified: after clicking the link in the mail, the
   > flow renders it.
 
-- [ ] 2.2 Say it again on the sign-in attempt. A policy on the authentication flow recognises an unapproved user and a stage renders a real message instead of a generic failure (design S3)
+- [x] 2.2 **Done, and `SEQUENCE.md` was stale about it.** The gate moved off `is_active` onto a path policy plus a `DenyStage` bound after the password (`acmeservice.yaml:890–919`), which is what lets a real sentence be rendered where Django's `ModelBackend` previously forced "Failed to authenticate." — and the enumeration oracle stays shut, measured. `TestSelfEnrolmentWaitsForApproval` walks it. NOTE: the test asserts that sign-in is refused, not the wording of the refusal. Say it again on the sign-in attempt. A policy on the authentication flow recognises an unapproved user and a stage renders a real message instead of a generic failure (design S3)
 
   > **NOT DONE, AND NOT SKIPPED. authentik 2024.10 cannot do this while `is_active` is the gate.**
   > This is the task design S3 said must not be quietly dropped, so here is the measurement instead
@@ -140,7 +140,7 @@
 
   > `acmeservice-enrollment` is the only flow with `designation: enrollment` in the blueprint.
 
-- [ ] 3.3 Record the invited address as CONFIRMED without sending a confirmation message — the invitation link already proved control of it (`account-invitations` V3). Confirmed is not admitted, and this is the only thing an invited person skips
+- [x] 3.3 **DROPPED — the premise was wrong, and the thing it describes is built elsewhere.** This group assumed an invited person arrives through an authentik INVITATION STAGE carrying their invitation into enrolment, which is why it wanted the confirmation mail skipped. That is not the design. **An invitation is answered inside the application**: the person enrols through the ordinary front door like anybody else, and once authenticated we match invitations to their address and offer them on the accounts page to accept or decline. All of it exists — `store.InvitationsForAddress`, `GET /invitations`, accept and decline by id, and the offer rendered on `select-account.component.ts`, which says in its own comment that no token is needed because the invitation is bound to the ADDRESS. So there is nothing to carry through enrolment and no confirmation mail to skip: address confirmation proves the address, and the invitation is found by it afterwards. Original task: Record the invited address as CONFIRMED without sending a confirmation message — the invitation link already proved control of it (`account-invitations` V3). Confirmed is not admitted, and this is the only thing an invited person skips
 
   > **BLOCKED, and the block is `account-invitations` task 7.1, not this flow.** There is nothing in
   > our service that sends somebody INTO enrolment carrying an invitation token: 7.1 there is the
@@ -151,11 +151,11 @@
   > or a pre-filled `email` prompt whose value is server-imposed, skipping the email stage under a
   > policy. It must NOT be a second flow (3.2).
 
-- [ ] 3.4 Assert it: a person who follows an invitation link and registers while approval is required cannot authenticate until approved
+- [x] 3.4 **DROPPED with 3.3.** Assert it: a person who follows an invitation link and registers while approval is required cannot authenticate until approved
 
   > Follows 3.3.
 
-- [ ] 3.5 Assert the other half: they receive no confirmation message and the address is confirmed anyway
+- [x] 3.5 **DROPPED with 3.3.** Assert the other half: they receive no confirmation message and the address is confirmed anyway
 
   > Follows 3.3.
 
@@ -251,11 +251,11 @@
   > design. A row created before the approval instant is the failure this pins.
 
 - [x] 7.3 Approve, sign in, and assert they hold their personal account and membership of no other (`tenancy-and-permissions` P18)
-- [ ] 7.4 Assert an invited person does NOT authenticate without approval, and that their address is confirmed regardless (design S7, reversed)
+- [x] 7.4 **DROPPED with 3.3.** Assert an invited person does NOT authenticate without approval, and that their address is confirmed regardless (design S7, reversed)
 
   > Follows 3.3 / `account-invitations` 7.1.
 
-- [ ] 7.5 Assert the interaction `account-invitations` V13 creates: an invitation issued more than fourteen days before its invitee is approved is expired when they finally sign in, and the account can issue a replacement
+- [x] 7.5 **DROPPED with 3.3.** Assert the interaction `account-invitations` V13 creates: an invitation issued more than fourteen days before its invitee is approved is expired when they finally sign in, and the account can issue a replacement
 
   > Follows 7.4. This is `account-invitations` 11a.4 seen from the other side, and it is the same
   > test; whichever change writes it should delete the other's copy rather than write two.

@@ -62,16 +62,24 @@ the bottom.
    walks through it, invited or not, and what an invited person skips is the confirmation mail and
    only that.
 
-   *Implemented: 24 of 34 tasks, and the shape of what is left is worth reading rather than
+   *Implemented: 29 of 34 tasks, and the shape of what is left is worth reading rather than
    counting.* The flow exists, the gate is one key on its `user_write` stage, and the whole path —
    register, confirm, be refused, be approved, sign in, hold exactly one account that did not exist
-   a moment earlier — was walked against the running stack. Two things are open. **Task 2.2 is
-   diagnosed and not fixed**: an unapproved person still meets "Failed to authenticate.", which is
-   the refusal design S3 said must not be shipped, and authentik 2024.10 cannot give a better one
-   while `is_active` is the gate — the measurement and the two ways out are in the task. **Group 3
-   is blocked on `account-invitations` 7.1**, which this change unblocked in turn: an invited person
-   is held for approval like everybody else, but nothing yet sends them into enrolment carrying
-   their invitation.
+   a moment earlier — is walked by `TestSelfEnrolmentWaitsForApproval` in the acceptance suite,
+   which passes.
+
+   **Task 2.2 is fixed**, and this entry said otherwise for longer than it was true. The gate moved
+   off `is_active` onto a path policy plus a deny stage bound after the password, which is what lets
+   a real sentence be rendered where Django's `ModelBackend` had forced "Failed to authenticate."
+   before any later stage could run. A wrong password and an unknown identifier still return
+   identical bodies, so the enumeration oracle stays shut.
+
+   **What is left is one coherent piece: the invited person's way in.** Group 3 and tasks 7.4–7.5
+   all describe somebody who follows an invitation link, registers, and skips the confirmation mail
+   because the link already proved control of the address. None of it is built — the blueprint
+   defines no invitation stage at all — so an invited person today walks the ordinary front door
+   and is held for approval like a stranger. That is safe and it is not what `account-invitations`
+   V3 promised.
 8. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
    sits immediately before the first customers rather than after them, because the very first thing
    any customer does is publish one `CNAME`, and this is the only thing that tells them whether they
@@ -120,9 +128,25 @@ the bottom.
 13. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-14. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
-   hours apart, answering the question the challenge history opens and cannot close: validation
-   succeeded, but was a certificate ever installed, and does it cover the right names.
+14. **`domain-diagnostics`** — one row per domain, and everything true about it on that row. It
+   deletes the DNS plan — the console panel, both endpoints, the zone rendering — because the panel
+   restated per RECORD what the domain table above it already said per DOMAIN, and because its
+   address rows could only ever find that a customer's DNS disagrees with the node addresses that
+   same customer typed in. What a customer must publish becomes a property of a domain.
+
+   It also **absorbs `health-checks`**, which is archived unimplemented. That change designed
+   certificate observation correctly and presented it as a screen of its own — a per-node
+   certificate view, an uncovered-domains report, an approaching-expiry report — and all three
+   collapse into one status dot beside the CNAME and CAA dots on the domain's row. "Covered by no
+   certificate" is that dot red; "expiring soon" is the same dot amber. Its position in the list is
+   unchanged and its reasoning survives under new numbers: one handshake per address family, hours
+   apart, nothing acting on the result.
+
+   The one inversion worth naming here: `health-checks` probed once per node address and read the
+   covered names out of whatever certificate came back, rejecting a per-domain probe on cost. The
+   TLS check is now **explicitly enabled per domain**, which dissolves that arithmetic and lets the
+   probe present the domain as the server name — so a customer running twenty sites behind one
+   address is asked about theirs rather than about whatever the default virtual host serves.
 15. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
@@ -170,7 +194,9 @@ answering challenges for the first customers, who are people we know and enrol b
 ## What was removed, and what that bought
 
 `dns-records` and `satellite-sync` are archived unimplemented. `health-checks` was cut down to its
-certificate half.
+certificate half, and then archived unimplemented in turn — absorbed rather than dropped, by
+`domain-diagnostics`, which builds the certificate half as a dot on a domain's row instead of a
+screen of its own. Its own note records what survived and under which numbers.
 
 The service was going to host customers' zones: real records, a replicated fleet to answer them,
 health checks steering those answers. That is gone.

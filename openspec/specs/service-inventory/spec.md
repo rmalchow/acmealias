@@ -5,12 +5,13 @@ TBD - created by archiving change add-acme-alias-service. Update Purpose after a
 ## Requirements
 ### Requirement: The inventory is projects, load balancers and domains
 
-The service SHALL store projects; each project SHALL own zero or more load balancers; each
-load balancer SHALL own zero or more nodes with their addresses and zero or more domains.
-Each load balancer SHALL belong to exactly one project, and each domain SHALL belong to
-exactly one load balancer.
+The service SHALL store accounts; each account SHALL own zero or more projects; each project SHALL
+own zero or more load balancers; each load balancer SHALL own zero or more nodes with their
+addresses and zero or more domains. Each project SHALL belong to exactly one account, each load
+balancer SHALL belong to exactly one project, and each domain SHALL belong to exactly one load
+balancer.
 
-Deleting a project or a load balancer that still owns children SHALL be refused.
+Deleting an account, a project or a load balancer that still owns children SHALL be refused.
 
 A read that reports the number of domains of a load balancer SHALL load those domains.
 
@@ -28,6 +29,11 @@ A read that reports the number of domains of a load balancer SHALL load those do
 
 - **WHEN** the load balancers of a project are listed and one of them owns two domains
 - **THEN** that load balancer reports two domains and not zero
+
+#### Scenario: Every object reports the account that owns it
+
+- **WHEN** a load balancer, node, domain or alias is read
+- **THEN** the account it reports is the account of the project containing it
 
 ### Requirement: Domain names are normalized and validated
 
@@ -130,9 +136,10 @@ same challenge name.
 
 ### Requirement: An alias is one label in the served zone per challenge name
 
-The service SHALL store an alias for each distinct challenge name, consisting of a single label
-within the served zone. Challenge names and alias labels SHALL each be unique across the
-service. Several domains MAY share one alias.
+The service SHALL store an alias for each distinct challenge name within an account, consisting of a
+single label within the served zone. Challenge names SHALL be unique within an account. Alias labels
+SHALL be unique across the service, because the served zone is shared by every account. Several
+domains MAY share one alias.
 
 An alias label SHALL be a single DNS label of lowercase letters, digits and hyphens, not
 beginning or ending with a hyphen, and at most 63 octets.
@@ -156,6 +163,16 @@ the request rather than refuse it.
 
 - **WHEN** `example.com` and `*.example.com` are added to the same load balancer
 - **THEN** exactly one alias exists for `_acme-challenge.example.com` and both domains reference it
+
+#### Scenario: Two accounts holding one name get two aliases
+
+- **WHEN** `shop.example.com` is added in one account and in another
+- **THEN** each account has its own alias with its own label, and neither is visible to the other
+
+#### Scenario: A derived label colliding across accounts is resolved
+
+- **WHEN** labels are derived from the challenge name and the same domain is added in two accounts
+- **THEN** the second alias is given another valid label and the domain is created
 
 #### Scenario: A generated label does not disclose its domain
 
@@ -190,12 +207,18 @@ the request rather than refuse it.
 ### Requirement: An alias belongs to exactly one load balancer
 
 The service SHALL refuse to create a domain whose derived challenge name already has an alias
-owned by a different load balancer, and SHALL name the conflicting load balancer in the error.
+owned by a different load balancer **of the same account**, and SHALL name the conflicting load
+balancer in the error. An alias owned by another account SHALL NOT conflict and SHALL NOT be named.
 
 #### Scenario: Conflicting ownership is refused
 
-- **WHEN** `*.example.com` is added to one load balancer while `example.com` on another load balancer already owns the alias for `_acme-challenge.example.com`
+- **WHEN** `*.example.com` is added to one load balancer while `example.com` on another load balancer of the same account already owns the alias for `_acme-challenge.example.com`
 - **THEN** the request is refused with an error naming the owning load balancer
+
+#### Scenario: Another account's alias does not conflict
+
+- **WHEN** a domain is added whose challenge name already has an alias in a different account
+- **THEN** the request succeeds and the error names nothing
 
 ### Requirement: Removing a domain revokes its challenge writes
 
@@ -445,4 +468,87 @@ be refused unless it belongs to the address family of the field it is supplied f
 
 - **WHEN** an IPv6 address is supplied as the node's IPv4 address
 - **THEN** the request is refused
+
+### Requirement: A domain name is unique within an account and not across the service
+
+The service SHALL permit the same domain name to exist in more than one account, and SHALL refuse a
+second domain of the same name within one account.
+
+The service SHALL rely on the challenge alias record the domain owner publishes as the proof of
+control, and SHALL NOT arbitrate between accounts claiming the same name.
+
+#### Scenario: The same name in two accounts is permitted
+
+- **WHEN** `shop.example.com` is added in one account and then in another
+- **THEN** both are created
+
+#### Scenario: The same name twice in one account is refused
+
+- **WHEN** `shop.example.com` is added twice in one account
+- **THEN** the second request is refused
+
+#### Scenario: Only the account whose alias is published can validate
+
+- **WHEN** two accounts hold `shop.example.com` and the alias record published in the wider internet points at one account's label
+- **THEN** challenges presented for that name succeed only for that account
+
+### Requirement: Creating a project requires the account's unrestricted role
+
+The service SHALL permit the creation and deletion of a project only to a member of the unrestricted
+role of the account that owns it. This SHALL NOT be expressible as a grant, and no other permission
+SHALL confer it.
+
+#### Scenario: An unrestricted member creates a project
+
+- **WHEN** a member of the account's unrestricted role creates a project
+- **THEN** it is created and owned by that account
+
+#### Scenario: Any other member is refused
+
+- **WHEN** a member who is not in that role creates a project
+- **THEN** the request is refused, whatever other authority they hold
+
+#### Scenario: A created project is reachable by its creator
+
+- **WHEN** a member of the unrestricted role creates a project
+- **THEN** they may act on it, as that role covers every object of the account
+
+### Requirement: A domain is offline until its delegation has been seen, and then stays online
+
+A domain SHALL begin offline when added, and SHALL become active the first time a
+check observes its delegation.
+
+The service SHALL check domains that have never been activated repeatedly, and
+SHALL NOT stop checking them.
+
+An active domain SHALL be checked occasionally thereafter, and a failed check
+SHALL NOT return it to being offline.
+
+Where two domains share one delegation, an observation of that delegation SHALL
+activate both.
+
+#### Scenario: A new domain begins offline
+
+- **WHEN** a domain is added
+- **THEN** it is not active
+
+#### Scenario: Seeing the delegation activates it
+
+- **WHEN** a check observes the delegation of an inactive domain
+- **THEN** it becomes active
+
+#### Scenario: A domain is not given up on
+
+- **WHEN** a domain's delegation has been absent for a long time
+- **THEN** it continues to be checked
+
+#### Scenario: Activation survives a failed check
+
+- **WHEN** an active domain's delegation cannot be observed
+- **THEN** it remains active
+
+#### Scenario: A shared delegation activates both domains
+
+- **WHEN** a name and its wildcard share one delegation and it is observed
+- **THEN** both become active
 

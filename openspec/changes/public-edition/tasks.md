@@ -39,6 +39,28 @@
 - [ ] 1.7 Assert by acceptance test that a self-enrolled person signs in, holds their personal account, and holds no membership of any other account (design U9, `tenancy-and-permissions` P18)
 - [ ] 1.8 Assert that no route or screen accepts a password and no credential material is stored
 
+## 1a. Mail that arrives, which is the part that fails silently
+
+Moved here from `transactional-email` group 2. That change owns the SENDER — one
+identity, one footer, one subject grammar, proved on the wire by an acceptance
+test. It cannot own DELIVERABILITY, because deliverability is records at a
+registrar and a message to a real mailbox, and the development stack sends to
+mailpit, which accepts everything, delivers nothing and evaluates no
+authentication. A green stack says nothing about any of this.
+
+It belongs here because the failure mode is silent and the audience is a
+stranger: a message that does not authenticate as the domain in its own `From`
+is filed as spam rather than bounced, nothing errors, and the first report is
+somebody saying they never got what we can see we sent. The DNS records are the
+long-lead item — do them before the first stranger, not after the first
+complaint.
+
+- [ ] 1a.1 Publish an SPF record authorising EVERY host that sends — the identity provider's and the service's are different machines (`transactional-email` T1)
+- [ ] 1a.2 Publish a DKIM key per sender and configure each to sign
+- [ ] 1a.3 Verify ALIGNMENT, not merely authentication: the domain that passes must be the domain in the visible sender. A message can pass both checks and still be filed as spam when neither aligns (`transactional-email` T1)
+- [ ] 1a.4 Publish a DMARC record, initially in a reporting mode, and read what it reports before tightening it
+- [ ] 1a.5 Send a real message to a mailbox at a large receiver and read its headers. This is the only way to find out what actually happens, and it costs ten minutes
+
 ## 2. The switches, and what they actually gate
 
 - [ ] 2.1 Correct the doc comment on `AllowAccountCreation` in `backend/internal/config/config.go`: it explains itself in terms of "creating a tenant", and after `personal-and-team-accounts` what it gates is buying a TEAM account. The enforcement is right; the explanation is stale (design U9)

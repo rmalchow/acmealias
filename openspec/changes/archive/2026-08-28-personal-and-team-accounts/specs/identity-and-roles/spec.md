@@ -1,4 +1,9 @@
-## MODIFIED Requirements
+<!-- ADDED, not MODIFIED: there is no requirement of this name in the main spec
+     to modify. The global role vocabulary this was written against was removed
+     by `tenancy-and-permissions`, so what remains is a new statement about which
+     account kinds hold roles at all. -->
+
+## ADDED Requirements
 
 ### Requirement: Roles are held by people only in team accounts
 
@@ -40,7 +45,8 @@ exception for this mechanism.
 into each new team account, with the same names and the same grants, editable by
 that account's owner. The `ACME_*_GROUP` settings are removed.
 
-### Requirement: Roles are global and fixed
-
-**Reason**: Roles are per-account data, created and edited inside a team account.
-There is no global role vocabulary once the internal edition is gone.
+<!-- "Roles are global and fixed" was listed here for removal as well. It had
+     already been removed by `tenancy-and-permissions`, which archived first and
+     replaced the global role vocabulary with per-account roles holding grants.
+     The block is dropped rather than kept, because a REMOVED delta naming a
+     requirement that is already gone aborts the archive. -->

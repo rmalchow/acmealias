@@ -31,22 +31,6 @@ unavailable dependency cannot prevent the service from starting.
 - **WHEN** the effective configuration is logged at startup
 - **THEN** the database password, the OpenID Connect client secret and API secrets are redacted
 
-### Requirement: The three HTTP surfaces are served on separate listeners
-
-The service SHALL serve the challenge API, the management API together with the console, and
-the health and metrics endpoints on three separately configurable listeners. No listener SHALL
-serve the routes of another.
-
-#### Scenario: Management route is absent from the challenge listener
-
-- **WHEN** a management path is requested on the challenge listener
-- **THEN** it is not served
-
-#### Scenario: Metrics are absent from both public listeners
-
-- **WHEN** the metrics path is requested on the challenge listener or the management listener
-- **THEN** it is not served
-
 ### Requirement: The console is served from the binary with a history fallback
 
 The service SHALL serve the compiled console from resources embedded in the binary, returning
@@ -189,4 +173,191 @@ port 53 without full root privileges.
 
 - **WHEN** the published image is run
 - **THEN** the process runs as a non-root user and binds the configured DNS port
+
+### Requirement: HTTP surfaces are separated by path prefix on one listener
+
+The service SHALL serve the public API, the internal administrative API, the third-party challenge
+protocol, and the health and metrics endpoints on one configurable listener, each under a distinct path
+prefix, and SHALL apply to each prefix the authentication and authorization appropriate to it.
+
+A path prefix SHALL NOT be reachable under the authentication of another.
+
+#### Scenario: Each prefix carries its own authentication
+
+- **WHEN** a request is made to a path prefix with a credential that prefix does not accept
+- **THEN** it is refused
+
+#### Scenario: An unknown management path is not the console
+
+- **WHEN** an unknown path under an API prefix is requested
+- **THEN** the response is a structured error and not the console document
+
+#### Scenario: Health and metrics remain distinguishable
+
+- **WHEN** the health, readiness and metrics paths are requested
+- **THEN** they are served without authentication and are separable by the reverse proxy from every other prefix
+
+### Requirement: The third-party challenge protocol keeps its existing paths
+
+The service SHALL serve the challenge protocol under a namespaced prefix and SHALL continue to serve it
+at the paths used before this change, so that a deployment already configured against the previous
+endpoint continues to work unchanged.
+
+#### Scenario: A previously configured client is unaffected
+
+- **WHEN** a client configured with the previous endpoint publishes a challenge value
+- **THEN** the request is served exactly as before
+
+#### Scenario: The namespaced prefix serves the same protocol
+
+- **WHEN** the same client is reconfigured to the namespaced prefix
+- **THEN** the request is served identically
+
+### Requirement: Satellites are served on their own mutually authenticated listener
+
+The service SHALL serve the satellite synchronisation surface on a listener separate from every other
+surface, requiring a client certificate verified against a configured authority.
+
+The service SHALL NOT accept a client identity presented as a forwarded header on that surface.
+
+#### Scenario: A satellite without a client certificate is refused
+
+- **WHEN** a connection is made to the satellite listener without a verified client certificate
+- **THEN** it is refused before any route is matched
+
+#### Scenario: The satellite surface is absent from the main listener
+
+- **WHEN** a satellite path is requested on the main listener
+- **THEN** it is not served
+
+#### Scenario: A forwarded identity is not honoured
+
+- **WHEN** a request to the satellite listener carries a header naming a client identity
+- **THEN** the header is ignored
+
+### Requirement: The public API is versioned and published; the administrative API is neither
+
+The service SHALL expose two management surfaces: a public API, carrying a version in its path and
+described by a machine-readable interface document served publicly; and an internal administrative API,
+carrying no version and no published description.
+
+The public API SHALL be the interface used by the console and by programmatic callers alike, with no
+operation available to the console that is absent from it.
+
+#### Scenario: The interface document describes the public API
+
+- **WHEN** the interface document is retrieved
+- **THEN** it describes the public API's operations, and no operation of the administrative API
+
+#### Scenario: The console uses no private operation
+
+- **WHEN** the console's requests are enumerated
+- **THEN** every one of them is an operation of the published public API
+
+#### Scenario: The administrative API is not published
+
+- **WHEN** the administrative API is searched for in the interface document
+- **THEN** it does not appear
+
+### Requirement: Configuration is layered, and the environment has the last word
+
+The service SHALL read its configuration from an optional base file and any
+number of optional overlay files, applied in a defined order, with environment
+variables applied last.
+
+Structures SHALL be merged key by key. A list SHALL replace the list it overlays
+rather than being appended to it.
+
+A missing overlay file SHALL NOT prevent start-up. A base file that was
+explicitly configured and cannot be read SHALL prevent it.
+
+The service SHALL report, at start-up, which layers it applied and which
+configured files were absent.
+
+#### Scenario: An overlay states only its differences
+
+- **WHEN** an overlay sets one value of many
+- **THEN** that value is used and every other value comes from beneath it
+
+#### Scenario: A list is replaced, not merged
+
+- **WHEN** a base file lists two values and an overlay lists one
+- **THEN** the effective configuration holds exactly the overlay's one
+
+#### Scenario: The environment wins
+
+- **WHEN** a value is set both in a file and in the environment
+- **THEN** the environment's value is used
+
+#### Scenario: An absent overlay is not an error
+
+- **WHEN** a configured overlay file does not exist
+- **THEN** the service starts and reports the file as absent
+
+#### Scenario: An absent configured base file is an error
+
+- **WHEN** a base file is explicitly configured and cannot be read
+- **THEN** the service does not start
+
+### Requirement: Configuration files may refer to the environment with a fallback
+
+The service SHALL resolve placeholders in configuration files. A placeholder
+names an environment variable and MAY supply a default, which SHALL be used when
+that variable is unset.
+
+Placeholders SHALL be resolved before the document is interpreted, so that a
+resolved value keeps the type the document gives it.
+
+A means of escaping the placeholder syntax SHALL exist, so that a literal value
+resembling a placeholder can be expressed.
+
+#### Scenario: A placeholder falls back to its default
+
+- **WHEN** a placeholder names an unset variable and supplies a default
+- **THEN** the default is used
+
+#### Scenario: A resolved value keeps its type
+
+- **WHEN** a placeholder supplying a number is resolved into a numeric field
+- **THEN** the value is a number and not a string
+
+#### Scenario: A secret has no default
+
+- **WHEN** a placeholder naming a secret has no default and the variable is unset
+- **THEN** the value is empty and the service refuses to start rather than running with it
+
+#### Scenario: The syntax can be escaped
+
+- **WHEN** a value contains an escaped placeholder
+- **THEN** it resolves to the literal text rather than to a variable
+
+### Requirement: The published contract is readable by a person
+
+The service SHALL serve a browsable rendering of its public API document at a stable path.
+
+The rendering SHALL require no credentials, matching the document it renders.
+
+#### Scenario: A stranger reads the API
+
+- **WHEN** an unauthenticated person opens the documentation path
+- **THEN** the public API document is presented in a readable form
+
+### Requirement: The documentation renders without reaching any other host
+
+Every asset the documentation page needs SHALL be served by this service.
+
+#### Scenario: An isolated deployment documents itself
+
+- **WHEN** the page is opened on a deployment with no route to the internet
+- **THEN** it renders completely
+
+### Requirement: A page that can send requests says what it will act on
+
+Where the documentation page can send authenticated requests, it SHALL name the account those
+requests will act in, before any is sent.
+
+#### Scenario: The reader knows whose data is at stake
+
+- **WHEN** a signed-in person opens the documentation page
+- **THEN** the account their requests would act in is named on the page
 

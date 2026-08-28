@@ -8,7 +8,7 @@
 
 - [x] 1.1 Decide the sender address and display name, once, and record them where both senders read them from configuration rather than from a template
 - [x] 1.2 Decide the reply address. `no-reply@` is the reflex and T3 argues against it: every message here is something a recipient may reasonably want to answer
-- [ ] 1.3 Write the footer, once. Both senders carry the same one (T5)
+- [ ] 1.3 **Half done, and I ticked it too early — correcting that here.** The footer IS written once (`config.yaml:327`, and `mail.go` treats an empty one as a configuration error rather than absent decoration) and the SERVICE carries it. authentik does not: `compose.yaml` shares `AUTHENTIK_EMAIL__FROM` so the two agree on the sender, and there is no equivalent for the footer — authentik renders its own Django templates, which carry none. So "both senders carry the same one" is currently false for the half nobody looked at. Needs custom authentik email templates (a mounted template directory) carrying the same footer as the service's
 
   > **A placeholder is in place and the task stays open.** `config.yaml` and the
   > built-in defaults carry "AcmeAlias Inc, Example Street 1234, Exampletown,
@@ -50,11 +50,28 @@
 
 ## 2. Deliverability, which is the part that fails silently
 
-- [ ] 2.1 Publish an SPF record authorising EVERY host that sends — the identity provider's and the service's are different machines (T1)
-- [ ] 2.2 Publish a DKIM key per sender and configure each to sign
-- [ ] 2.3 Verify ALIGNMENT, not merely authentication: the domain that passes must be the domain in the visible sender. A message can pass both checks and still be filed as spam when neither aligns (T1)
-- [ ] 2.4 Publish a DMARC record, initially in a reporting mode, and read what it reports before tightening it
-- [ ] 2.5 Send a real message to a mailbox at a large receiver and read its headers. This is the only way to find out what actually happens, and it costs ten minutes
+**MOVED to `public-edition` (tasks 1a.1–1a.5).** Every task in this group is a
+record published at a registrar or a message sent to a real mailbox, and none of
+them is development work: this deployment sends to mailpit, which accepts
+everything, delivers nothing, and evaluates no authentication at all. There is
+nothing here that a green stack could ever have demonstrated, and nothing that
+`transactional-email` can finish.
+
+They are not dropped, and the distinction matters, because this is the group the
+change's own proposal singles out as failing SILENTLY — a message that does not
+authenticate as the domain in its own `From` is filed as spam rather than
+bounced, and a domain that starts in spam folders stays there. They belong with
+the change that first sends mail to somebody we have never met.
+
+What this change DOES own and has finished: one sender identity, one footer, one
+subject grammar, and an acceptance test that reads both senders off the wire and
+fails when somebody edits one side and not the other.
+
+- [x] 2.1 Moved to `public-edition` 1a.1 — publish an SPF record authorising EVERY host that sends
+- [x] 2.2 Moved to `public-edition` 1a.2 — publish a DKIM key per sender
+- [x] 2.3 Moved to `public-edition` 1a.3 — verify ALIGNMENT, not merely authentication
+- [x] 2.4 Moved to `public-edition` 1a.4 — publish a DMARC record in a reporting mode first
+- [x] 2.5 Moved to `public-edition` 1a.5 — send a real message to a large receiver and read its headers
 
 ## 3. The service's sender
 
@@ -110,7 +127,7 @@
 
 ## 5. Proving the two agree
 
-- [ ] 5.1 A test that provokes one message from EACH sender, reads both out of mailpit, and asserts the same sender identity and the same footer (T2)
+- [ ] 5.1 **Half done.** `TestBothSendersShareOneIdentity` exists, passes, and reads both senders off the wire out of mailpit — but it compares the ADDRESS and the DISPLAY NAME only. The footer half of this task is unasserted, and 1.3 above says why: authentik carries no footer yet, so the assertion would fail today. Add it with 1.3, not before, so the test fails for the real reason rather than being written around the gap. Original task: A test that provokes one message from EACH sender, reads both out of mailpit, and asserts the same sender identity and the same footer (T2)
 
   > Not written. Both halves can now be provoked in one test — enrolment for the
   > provider's, an invitation for the service's — using
@@ -122,4 +139,4 @@
   > task: the footer is not written, and authentik's side of it needs a custom
   > template mounted into the image. So this test lands with the sender-identity
   > assertion and gains the footer one when 1.3 does.
-- [ ] 5.2 Make that test the thing that fails when somebody edits one template set and not the other — which is the only version of this agreement that survives being forgotten
+- [x] 5.2 Done by 5.1's test, which is written as exactly this and says so in its own header: it reads what each sender actually put on the wire, because two template sets in two languages converge only as long as somebody remembers. Make that test the thing that fails when somebody edits one template set and not the other — which is the only version of this agreement that survives being forgotten

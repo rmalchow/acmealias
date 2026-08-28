@@ -100,11 +100,15 @@ offer an on-demand verification whose per-record result is displayed.
 ### Requirement: The console manages API keys and reveals a secret only once
 
 The console SHALL let an authorized user create, list, restrict, rotate and revoke API keys for
-a load balancer. A newly created secret SHALL be displayed once, with an explicit
+a load balancer or a project. A newly created secret SHALL be displayed once, with an explicit
 acknowledgement before the display can be dismissed, and SHALL never be displayed again.
 
-Listings SHALL show the key identifier, display prefix, restrictions, expiry and last use, and
-SHALL NOT show the secret.
+Creating a key SHALL require choosing its anchor and the grants it carries. The console SHALL offer
+only grants the acting user itself holds, and SHALL show the authority a key confers wherever the
+key is listed.
+
+Listings SHALL show the key identifier, display prefix, anchor, grants, restrictions, expiry and
+last use, and SHALL NOT show the secret.
 
 #### Scenario: Secret is acknowledged before dismissal
 
@@ -114,16 +118,21 @@ SHALL NOT show the secret.
 #### Scenario: Secret is unavailable afterwards
 
 - **WHEN** the user reopens the key later
-- **THEN** only the identifier, prefix and metadata are shown
+- **THEN** only the identifier, prefix, anchor, grants and metadata are shown
+
+#### Scenario: Only grants the user holds are offered
+
+- **WHEN** a user opens the key creation dialog
+- **THEN** the grants offered are within the authority that user holds, and the service refuses any other if attempted directly
 
 #### Scenario: Node addresses are offered as restrictions
 
 - **WHEN** the user adds a source-address restriction to a key
 - **THEN** the addresses of the load balancer's nodes are offered as defaults
 
-#### Scenario: A read-only user cannot create a key
+#### Scenario: A user without the permission cannot create a key
 
-- **WHEN** a user holding only the `READ_ONLY` role opens the key panel
+- **WHEN** a user holding no grant permitting key creation opens the key panel
 - **THEN** no creation action is offered, and the service refuses one if attempted directly
 
 ### Requirement: The console shows live challenges and the audit trail
@@ -439,4 +448,360 @@ Where the load balancer has no node addresses, the dialog SHALL say so instead o
 
 - **WHEN** the load balancer has no node addresses
 - **THEN** the dialog states that there is nothing to pin the key to
+
+### Requirement: The console edits roles and their grants
+
+The console SHALL let a user holding the role-administration permission create, edit and delete
+roles of the account being acted in, and manage which people hold them.
+
+A grant SHALL be composed by choosing an object type, an object or a wildcard, an action, and
+whether it is inheritable. The console SHALL offer only what the acting user holds.
+
+The unrestricted role SHALL be presented as uneditable, and the console SHALL NOT offer removal of
+its last member.
+
+#### Scenario: A role is created with grants
+
+- **WHEN** an authorized user creates a role and adds a grant
+- **THEN** the role is stored with that grant and may be assigned
+
+#### Scenario: The unrestricted role is not editable
+
+- **WHEN** an authorized user opens the unrestricted role
+- **THEN** no action to change its grants or delete it is offered
+
+#### Scenario: Removing the last unrestricted member is not offered
+
+- **WHEN** the unrestricted role has one member and an authorized user opens it
+- **THEN** no action removing that member is offered, and the service refuses one if attempted directly
+
+#### Scenario: A user without the permission sees no editor
+
+- **WHEN** a user holding no role-administration grant opens the console
+- **THEN** no role editing is offered
+
+### Requirement: The console is told what the user may do per object
+
+The management interface SHALL report, for each object it returns in a listing or a read, the
+actions the acting subject may perform on that object. The console SHALL use that report to decide
+which controls to render.
+
+The report SHALL NOT be the enforcement point; the service SHALL check every request regardless of
+what was reported.
+
+#### Scenario: Controls follow the per-object answer
+
+- **WHEN** a user may edit one project and only read another
+- **THEN** editing controls are rendered for the first and not for the second
+
+#### Scenario: The report does not authorize
+
+- **WHEN** a request is made for an action the report did not offer
+- **THEN** the service refuses it
+
+#### Scenario: The answer accompanies the listing
+
+- **WHEN** a listing is read
+- **THEN** the permitted actions accompany each row without a further request per row
+
+### Requirement: The account picker always offers somewhere to work
+
+The console SHALL present the accounts a user may act in, and that list SHALL
+always include their personal account. The personal account SHALL be presented as
+a distinct entry rather than as one named account among the team ones.
+
+The picker SHALL be searchable, and SHALL be present but inert for a user with a
+single account, so that the navigation does not change shape when a second
+account is obtained. It SHALL be accompanied by an action that obtains a new team
+account, which SHALL lead to the same place as any other offer to obtain one.
+
+A suspended team account SHALL appear in the picker for its owner rather than
+being omitted, since the owner is the only person who can restore it.
+
+#### Scenario: A new user has somewhere to go
+
+- **WHEN** a user with no team accounts opens the picker
+- **THEN** their personal account is offered, and the picker offers nothing to switch to
+
+#### Scenario: Obtaining an account is reachable from the picker
+
+- **WHEN** a user opens the action beside the picker
+- **THEN** they are told what a team account is and offered a way to buy one
+
+#### Scenario: A suspended account is reachable by its owner
+
+- **WHEN** the owner of a suspended team account opens the picker
+- **THEN** it is listed and shown as suspended
+
+#### Scenario: A suspended account is not selectable by a member
+
+- **WHEN** a member who is not the owner attempts to select it
+- **THEN** selection is refused and the reason is that the account is suspended, not that they lack permission
+
+### Requirement: Navigation follows the selected account
+
+The console's navigation SHALL reflect the capabilities of the selected account,
+and SHALL change when the selection changes without requiring a reload.
+
+Navigation SHALL list only the screens the selected account has. Where an account
+kind lacks capabilities, the console SHALL offer a single affordance naming what
+would unlock them, rather than listing the absent screens.
+
+Within a screen, a control the caller merely lacks authority for SHALL remain
+visible and disabled, stating why.
+
+Where both refusals can occur, they SHALL NOT share wording: a refusal a grant
+would lift and a refusal only a different kind of account would lift do not share
+a remedy.
+
+#### Scenario: A personal account's navigation names the remedy once
+
+- **WHEN** a personal account is selected
+- **THEN** the navigation offers its projects and a single way to obtain a team account, and does not list the screens a team account would have
+
+#### Scenario: A control inside a screen is not removed
+
+- **WHEN** a caller lacks the grant for a control on a screen the account does have
+- **THEN** the control is shown, disabled, and states why
+
+#### Scenario: The two refusals do not share wording
+
+- **WHEN** a capability is unavailable because of the account kind
+- **THEN** it does not say the caller lacks permission
+
+#### Scenario: Switching accounts changes the navigation
+
+- **WHEN** the selection changes from a personal account to a team account
+- **THEN** the navigation updates without a reload
+
+#### Scenario: Lacking a grant does not remove a control
+
+- **WHEN** a user without the necessary grant views a screen whose account kind supports it
+- **THEN** the control is shown, disabled, and states why
+
+### Requirement: Settings holds what administers the account
+
+The console SHALL provide a Settings screen holding the administration of the
+account itself — its members, the roles they hold, and its credits — separately
+from the inventory the account contains.
+
+For a suspended team account, its owner SHALL be shown the balance and the means
+to add to it, and nothing else.
+
+#### Scenario: An owner can restore a suspended account
+
+- **WHEN** the owner selects a suspended team account
+- **THEN** they are shown the balance and a way to add credit, and no inventory screens
+
+#### Scenario: Credit is added and the account resumes
+
+- **WHEN** the owner completes a checkout for one of the offered amounts
+- **THEN** the balance reflects it and the account becomes usable without a new session
+
+### Requirement: A domain's delegation is checked and reported without being asked for
+
+The console SHALL check, for each domain of a load balancer, whether the records
+that domain needs are published, and SHALL do so when the screen is opened rather
+than only on request.
+
+Each record type SHALL be reported separately. The console SHALL NOT reduce them
+to a single verdict.
+
+The console SHALL distinguish, for a domain's delegation: that it has not been
+checked, that no record is published, that a record is published but does not
+match what is required, that it matches, and that the check could not be
+completed.
+
+In particular, a record that is absent and a record that is present but wrong
+SHALL NOT be reported alike, because the actions they call for are different.
+
+Where no resolver is available, every domain SHALL read as not checked, and this
+SHALL NOT be presented as a failure.
+
+A check SHALL NOT be stored, and a slow or failed lookup SHALL degrade only the
+domain it concerns.
+
+#### Scenario: A customer sees the state without asking
+
+- **WHEN** a load balancer with domains is opened
+- **THEN** each domain reports whether its delegation is published
+
+#### Scenario: Absent is distinguished from unchecked
+
+- **WHEN** a domain's delegation is absent
+- **THEN** it says no record is published, and not that it has never been checked
+
+#### Scenario: Wrong is distinguished from absent
+
+- **WHEN** a domain's delegation resolves to something other than what is required
+- **THEN** it says a record is published but does not match, and not that none exists
+
+#### Scenario: A wildcard and its apex share one delegation
+
+- **WHEN** a load balancer holds a name and its wildcard, which share one challenge name
+- **THEN** both report the state of the one delegation they share
+
+#### Scenario: No resolver is not a failure
+
+- **WHEN** the deployment has no verification resolver
+- **THEN** every domain reads as not checked and no error is shown
+
+### Requirement: CAA is reported by what it permits, not by whether it exists
+
+The console SHALL report a domain's CAA state as what the record set permits.
+The absence of a CAA record SHALL NOT be presented as a problem, and a CAA set
+that does not authorise this service SHALL be presented as one.
+
+#### Scenario: No CAA record is not a warning
+
+- **WHEN** a domain publishes no CAA record
+- **THEN** it is reported as carrying no restriction, and not as misconfigured
+
+#### Scenario: A blocking CAA set is surfaced
+
+- **WHEN** a domain's CAA set does not authorise this service
+- **THEN** it is reported as blocking issuance
+
+### Requirement: The console explains how to fix what it reports
+
+Where a domain's state requires action, the console SHALL offer an explanation of
+what the state means and what to publish to resolve it.
+
+That explanation SHALL contain the values for the domain in question rather than
+placeholders.
+
+#### Scenario: The fix names the customer's own record
+
+- **WHEN** a customer opens the explanation for an unpublished delegation
+- **THEN** it shows the exact record for that domain, including its own alias
+
+#### Scenario: A mismatched record shows what was found
+
+- **WHEN** a customer opens the explanation for a delegation that does not match
+- **THEN** it shows what was found alongside what is required
+
+#### Scenario: A blocking CAA is explained as a CAA fix
+
+- **WHEN** a customer opens the explanation for a blocking CAA set
+- **THEN** it describes authorising an issuer rather than publishing a delegation
+
+### Requirement: Each kind of key is managed where it belongs
+
+The console SHALL offer project keys on a project's own screen, and system keys in a team account's
+settings.
+
+#### Scenario: Project keys sit with the project
+
+- **WHEN** a person opens a project
+- **THEN** they can create and revoke that project's keys there
+
+#### Scenario: System keys sit with the roster
+
+- **WHEN** a person opens a team account's settings
+- **THEN** they can create and revoke system keys there, beside roles and members
+
+### Requirement: The address limit explains itself before it is chosen
+
+Where a project has no node addresses, the console SHALL say so where the address limit is offered,
+rather than presenting a control that would refuse everything.
+
+#### Scenario: A project with no nodes
+
+- **WHEN** the address limit is offered on a project holding no nodes
+- **THEN** the console reports that there are no addresses to permit yet
+
+### Requirement: The console manages an account's invitations
+
+The console SHALL let a member of the account's unrestricted role — its owner and its administrators —
+invite a person by email address, and revoke or re-send an outstanding invitation. It SHALL NOT ask for
+a role when inviting.
+
+Outstanding invitations SHALL be shown to every member of the account alongside its members, reporting
+the invited address and when the invitation was issued.
+
+A member who holds no role SHALL be listed as a member, marked as having none, and the console SHALL
+offer assigning one to a member of the unrestricted role.
+
+The console SHALL NOT offer these actions to a member who is not in the unrestricted role.
+
+#### Scenario: An administrator invites somebody
+
+- **WHEN** a member of the unrestricted role enters an address
+- **THEN** an invitation is issued and appears among the account's outstanding invitations
+
+#### Scenario: Inviting does not ask for a role
+
+- **WHEN** a member of the unrestricted role opens the invitation form
+- **THEN** it asks for an address and offers no choice of role
+
+#### Scenario: Every member sees who is pending
+
+- **WHEN** a member holding no grants opens the account's members
+- **THEN** outstanding invitations are listed alongside the members
+
+#### Scenario: A member with no role is visible as one
+
+- **WHEN** a person who has accepted an invitation has not yet been given a role
+- **THEN** they are listed among the members, marked as holding no role, and a role can be assigned to them
+
+#### Scenario: Other members are not offered the actions
+
+- **WHEN** a member who is not in the unrestricted role opens the account's members
+- **THEN** no action inviting, revoking or re-sending is offered, and the service refuses one if attempted directly
+
+### Requirement: The console renders the invitation offer to a user who belongs to nothing
+
+The console SHALL render the invitation offer for a session with no account selected, naming the account
+and requiring an explicit action to accept. It SHALL NOT name a role, because the invitation offers
+none.
+
+Where no user holds the invited address the console SHALL offer registration; where one does it SHALL
+offer sign-in. Where the authenticated user is not the invited one, the console SHALL report that the
+invitation is not for them and SHALL show the invited address only partially masked.
+
+An expired or revoked invitation SHALL be reported as such, with no action offered other than to ask the
+account for a new one.
+
+#### Scenario: The offer states what is being joined
+
+- **WHEN** an invited person opens the link
+- **THEN** the account is named, and accepting requires an explicit action
+
+#### Scenario: A person without a user is offered registration
+
+- **WHEN** an invited person with no user opens the link
+- **THEN** registration is offered, and after it the offer is presented
+
+#### Scenario: The wrong signed-in user is told so
+
+- **WHEN** a user who is not the invited one opens the link while signed in
+- **THEN** the console reports the invitation is not for them and shows the invited address partially masked
+
+#### Scenario: The console continues into the joined account
+
+- **WHEN** an invited person accepts
+- **THEN** the console continues in the account they joined rather than returning to the empty state
+
+### Requirement: An account a member holds no role in explains itself
+
+The console SHALL, for a member of an account who holds no role in it, report on every account-scoped
+screen that they hold no role and that an administrator must assign one, rather than presenting the
+screen's ordinary empty state.
+
+The account SHALL remain selectable by such a member.
+
+#### Scenario: An empty account is not mistaken for an empty product
+
+- **WHEN** a member holding no role opens a screen listing the account's inventory
+- **THEN** the console reports that they hold no role in the account and that an administrator must assign one
+
+#### Scenario: Selection still works
+
+- **WHEN** a member holding no role selects the account
+- **THEN** the selection succeeds
+
+#### Scenario: Being given a role restores the ordinary screens
+
+- **WHEN** a member holding no role is assigned one
+- **THEN** the account-scoped screens render what that role permits
 

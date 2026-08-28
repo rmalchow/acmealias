@@ -85,86 +85,6 @@ state-changing management request, and SHALL reject requests without it.
 - **WHEN** a state-changing management request is made with a valid session cookie but no matching token header
 - **THEN** the service responds with a client error and performs no change
 
-### Requirement: Group claims are mapped to roles by configuration
-
-The service SHALL read the group membership of the authenticated user from a configurable claim
-of the identity token, and SHALL derive roles by comparing those groups against one configuration
-setting per role, each naming the group that grants it. The mapping SHALL NOT be stored in the
-database and SHALL NOT be modifiable through the management API.
-
-A user's roles SHALL be the union of every role whose configured group appears in their groups
-claim. A role whose setting is unset SHALL be held by nobody.
-
-#### Scenario: Configured group grants its role
-
-- **WHEN** a user's groups include the group named by a role's setting
-- **THEN** the user holds that role
-
-#### Scenario: Roles are additive
-
-- **WHEN** a user's groups include the groups configured for two different roles
-- **THEN** the user holds both, and may do anything either permits
-
-#### Scenario: Unset role is held by nobody
-
-- **WHEN** no group is configured for a role
-- **THEN** no user holds that role
-
-#### Scenario: Mapping is not editable at runtime
-
-- **WHEN** any management route is searched for an operation that changes the group-to-role mapping
-- **THEN** no such operation exists
-
-#### Scenario: Authenticated user with no mapped group is told why
-
-- **WHEN** a user authenticates successfully but is in none of the configured groups
-- **THEN** access is refused and the response reports the groups that were observed
-
-### Requirement: Roles are global and fixed
-
-The service SHALL provide exactly four roles — `ADMIN`, `CONFIG_ADMIN`, `KEY_ROTATION` and
-`READ_ONLY` — and SHALL enforce them on every management operation, server-side. No role SHALL be
-scoped to a subset of projects.
-
-| Operation | `ADMIN` | `CONFIG_ADMIN` | `KEY_ROTATION` | `READ_ONLY` |
-| --- | --- | --- | --- | --- |
-| Create or delete projects | yes | no | no | no |
-| Create, edit or delete load balancers, nodes and domains | yes | yes | no | no |
-| Create or revoke API keys | yes | yes | yes | no |
-| See a key secret at creation | yes | yes | yes | no |
-| View the DNS plan and run verification | yes | yes | yes | yes |
-| View the inventory and the audit log | yes | yes | yes | yes |
-
-#### Scenario: Only an administrator creates a project
-
-- **WHEN** a user holding `CONFIG_ADMIN` but not `ADMIN` attempts to create a project
-- **THEN** the request is refused
-
-#### Scenario: Key rotation may not change the inventory
-
-- **WHEN** a user holding only `KEY_ROTATION` attempts to create a domain
-- **THEN** the request is refused
-
-#### Scenario: Key rotation may create a key
-
-- **WHEN** a user holding only `KEY_ROTATION` creates an API key
-- **THEN** the request succeeds and the secret is returned once
-
-#### Scenario: Read-only cannot change the inventory
-
-- **WHEN** a user holding only `READ_ONLY` attempts to create a domain
-- **THEN** the request is refused
-
-#### Scenario: Every role may read
-
-- **WHEN** a user holding only `READ_ONLY` requests the inventory, a DNS plan or the audit log
-- **THEN** the request succeeds
-
-#### Scenario: Server enforces independently of the client
-
-- **WHEN** a request is made directly to a management route without the console
-- **THEN** the same role check is applied
-
 ### Requirement: Role changes take effect on sign-in, and sessions are the immediate lever
 
 A change to a user's group membership SHALL take effect at their next sign-in, and SHALL be
@@ -206,4 +126,288 @@ the affected object, the action and the time. Records SHALL NOT contain key secr
 
 - **WHEN** an `ADMIN` revokes another user's session
 - **THEN** an audit record names the administrator, the subject whose session was ended, and the time
+
+### Requirement: Administering roles is itself a permission
+
+The service SHALL require a permission to create, edit or delete a role, and to change a person's
+memberships. That permission SHALL be grantable like any other, and SHALL confer authority only
+within the account holding it.
+
+A subject administering roles SHALL be bound by the rule that it may grant only what it holds.
+
+#### Scenario: Role administration is refused without the permission
+
+- **WHEN** a member without the role-administration permission creates or edits a role
+- **THEN** the request is refused
+
+#### Scenario: Role administration does not cross accounts
+
+- **WHEN** a member holding the role-administration permission in one account edits a role of another
+- **THEN** the request is refused
+
+#### Scenario: A role cannot be given authority its author lacks
+
+- **WHEN** a member holding the role-administration permission adds a grant it does not itself hold
+- **THEN** the request is refused
+
+### Requirement: Seeded roles reproduce the previous authority exactly
+
+When the schema is migrated the service SHALL create, in the single account, one role for each of
+the four previously fixed roles, bearing the same name and holding grants conferring the same
+authority the permission matrix conferred before the migration.
+
+#### Scenario: A seeded role confers what its predecessor conferred
+
+- **WHEN** an operator whose groups map to a seeded role performs an operation that role permitted before the migration
+- **THEN** the operation is permitted
+
+#### Scenario: A seeded role confers nothing more
+
+- **WHEN** that operator performs an operation the role did not permit before the migration
+- **THEN** the request is refused
+
+#### Scenario: Seeded roles are ordinary records
+
+- **WHEN** a member holding the role-administration permission inspects the seeded roles
+- **THEN** they are listed with their grants, and all but the unrestricted role may be edited
+
+### Requirement: Roles are held by people only in team accounts
+
+Roles and memberships SHALL exist only in team accounts. A personal account SHALL
+hold no roles, no memberships and no invitations, and requests for them SHALL be
+refused rather than answered with an empty collection, so that a client can tell
+"there are none" from "there cannot be any".
+
+The grant model SHALL remain in force in every account, including personal ones,
+where it scopes API keys. The subset rule SHALL apply to a key's grants
+regardless of the account's kind.
+
+#### Scenario: A personal account has no roles
+
+- **WHEN** roles or members are requested for a personal account
+- **THEN** the request is refused, and the refusal distinguishes this from an empty account
+
+#### Scenario: Keys are still scoped in a personal account
+
+- **WHEN** an API key is created in a personal account with grants narrower than its creator holds
+- **THEN** it is created and its grants are enforced
+
+#### Scenario: The subset rule does not depend on the account kind
+
+- **WHEN** an API key is created in a personal account with grants exceeding its creator's
+- **THEN** it is refused
+
+### Requirement: An API key is of one of two kinds
+
+An API key SHALL be either a project key, bound to one project, or a system key, holding a role.
+
+Both kinds SHALL be authorized by the same mechanism as any other subject. Neither SHALL introduce a
+decision path of its own.
+
+#### Scenario: A project key reaches its project
+
+- **WHEN** a project key is presented for an operation on its own project
+- **THEN** it is permitted, as its kind allows
+
+#### Scenario: A project key reaches nothing else
+
+- **WHEN** a project key is presented for an operation on another project
+- **THEN** it is refused
+
+#### Scenario: A system key acts as its role
+
+- **WHEN** a system key is presented for an operation
+- **THEN** it is permitted exactly where a member holding the same role would be
+
+### Requirement: A project key does not outlive its project
+
+Deleting a project SHALL delete the keys bound to it.
+
+#### Scenario: The project goes and takes its keys
+
+- **WHEN** a project holding keys is deleted
+- **THEN** those keys no longer exist and no longer authenticate
+
+### Requirement: A system key exists only where roles do
+
+A system key SHALL NOT be creatable in a personal account.
+
+The refusal SHALL report that such a key cannot exist there, distinguishably from a refusal of
+permission.
+
+#### Scenario: A personal account has no system keys
+
+- **WHEN** a system key is requested in a personal account
+- **THEN** it is refused as impossible rather than as forbidden
+
+#### Scenario: A personal account still has project keys
+
+- **WHEN** a project key is created in a personal account
+- **THEN** it is created and works
+
+### Requirement: A system key's role cannot be deleted from under it
+
+Deleting a role held by a system key SHALL be refused.
+
+A system key whose role is absent SHALL authorize nothing.
+
+#### Scenario: The role is defended
+
+- **WHEN** a role held by a system key is deleted
+- **THEN** the deletion is refused and names what holds it
+
+#### Scenario: An absent role grants nothing
+
+- **WHEN** a system key's role cannot be resolved
+- **THEN** the key authorizes nothing
+
+### Requirement: A person may register themselves
+
+The service's identity provider SHALL offer an unauthenticated person a way to create their own user,
+reachable from the sign-in form.
+
+The address given SHALL be verified before that person can authenticate, and the verification SHALL be
+proof of control of the address rather than a declaration of it.
+
+#### Scenario: A stranger can begin
+
+- **WHEN** an unauthenticated person reaches the sign-in form
+- **THEN** they are offered a way to register
+
+#### Scenario: An unverified address does not authenticate
+
+- **WHEN** a person completes registration without proving control of the address
+- **THEN** they cannot authenticate
+
+### Requirement: A self-registered person cannot authenticate until they are approved
+
+Where approval is required, a person who registers themselves SHALL NOT be able to authenticate until
+somebody approves them.
+
+An unapproved person SHALL be told that their registration is awaiting review. They SHALL NOT be given
+a refusal indistinguishable from a wrong password.
+
+#### Scenario: A registered person waits, and knows it
+
+- **WHEN** an unapproved person attempts to sign in
+- **THEN** they are refused, and are told their registration is under review
+
+#### Scenario: Approval admits them
+
+- **WHEN** they are approved and sign in
+- **THEN** they hold their own account and are an ordinary customer
+
+### Requirement: The service holds nothing for a person who has not been admitted
+
+No account SHALL be created for a person who has not been approved.
+
+#### Scenario: Registration writes nothing to the service
+
+- **WHEN** a person registers themselves while approval is required
+- **THEN** the service holds no account for them until they first sign in
+
+### Requirement: Whether approval is required is configurable, and is applied when a person registers
+
+Whether a self-registered person requires approval SHALL be a matter of configuration, applied when
+they register.
+
+Changing it SHALL NOT change whether a person who has already registered may authenticate.
+
+#### Scenario: Opening the door does not release those behind it
+
+- **WHEN** approval ceases to be required
+- **THEN** people who registered while it was required still cannot authenticate until approved
+
+#### Scenario: Closing the door does not lock out those already admitted
+
+- **WHEN** approval becomes required
+- **THEN** everybody who could already authenticate still can
+
+### Requirement: An invitation confirms an address; it does not admit a person
+
+A person who becomes a user by following an invitation link SHALL have the invited address recorded as
+confirmed without a confirmation message being sent.
+
+That person SHALL NOT thereby be exempt from approval: while approval is required, they SHALL NOT be
+able to authenticate until approved.
+
+The service SHALL NOT provide a second enrolment path that creates users already approved.
+
+#### Scenario: An invited person's address needs no confirmation
+
+- **WHEN** a person registers by following an invitation link
+- **THEN** the invited address is recorded as confirmed and no confirmation message is sent
+
+#### Scenario: An invited person still waits
+
+- **WHEN** a person registers by following an invitation link while approval is required
+- **THEN** they cannot authenticate until approved
+
+#### Scenario: There is one enrolment path
+
+- **WHEN** the enrolment paths are enumerated
+- **THEN** none of them creates a user that is approved on creation while approval is required
+
+### Requirement: An invitation link proves control of the address it was sent to
+
+The service SHALL treat following an invitation link as proof of control of the address the invitation
+names, equivalent to following a confirmation token sent to that address.
+
+A user created through an invitation SHALL have the invited address recorded as confirmed, and the
+service SHALL NOT require a further confirmation of that address.
+
+Registration reached by any other means SHALL be unchanged and SHALL still require confirmation.
+
+#### Scenario: Signing up through an invitation needs no confirmation
+
+- **WHEN** a person with no user follows an invitation link and registers
+- **THEN** the user is created with the invited address confirmed, and no confirmation message is sent
+
+#### Scenario: The new user proceeds directly to the offer
+
+- **WHEN** a user has been created through an invitation link
+- **THEN** they are asked whether to accept the invitation, without an intervening confirmation step
+
+#### Scenario: Ordinary registration is unaffected
+
+- **WHEN** a person registers without an invitation
+- **THEN** the address is unconfirmed and confirmation is required as before
+
+#### Scenario: The proof extends to no other address
+
+- **WHEN** a user is created through an invitation link
+- **THEN** only the invited address is recorded as confirmed
+
+#### Scenario: Confirming the address does not admit the person
+
+- **WHEN** a user is created through an invitation link while registrations require approval
+- **THEN** the address is confirmed and the user still cannot authenticate until approved
+
+### Requirement: A membership may hold no role, and confers nothing while it does
+
+The service SHALL permit a membership that names no role.
+
+A subject whose memberships name no role SHALL hold no grant and SHALL be unrestricted in no account,
+and every authorization decision for it SHALL be a refusal.
+
+Such a membership SHALL still make its holder a member: the account SHALL be selectable by them and
+SHALL appear among the accounts they belong to.
+
+A role SHALL be assignable to such a membership afterwards, after which it confers what that role
+confers.
+
+#### Scenario: A roleless member is authorised for nothing
+
+- **WHEN** a member holding no role attempts any account-scoped operation
+- **THEN** it is refused, and no object of the account is returned to them
+
+#### Scenario: A roleless member is still a member
+
+- **WHEN** a member holding no role lists the accounts they belong to
+- **THEN** the account appears, and they may select it
+
+#### Scenario: Assigning a role takes effect
+
+- **WHEN** a role is assigned to a member who held none
+- **THEN** the member holds what that role confers
 

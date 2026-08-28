@@ -52,23 +52,38 @@ Audit entries SHALL NOT contain a key secret or the stored hash of one, in any f
 
 Each entry SHALL identify the actor as one of: an authenticated human, a command-line invocation, or
 the service itself. For a human actor the entry SHALL record the subject identifier, the display
-name, the group membership observed at sign-in, and the roles resolved from that membership at the
-time of the action.
+name, the group membership observed at sign-in, and the roles held in the acting account at the time
+of the action.
 
-#### Scenario: Human action records resolved roles
+Recorded roles SHALL be the names the roles bore at that moment, retained as written rather than as
+references, so that renaming or deleting a role does not alter what an entry reports.
+
+Each entry SHALL record the account it occurred in.
+
+#### Scenario: Human action records held roles
 
 - **WHEN** a user creates a domain
-- **THEN** the entry records their subject, display name, groups and the roles they held at that moment
+- **THEN** the entry records their subject, display name, groups and the roles they held in that account at that moment
 
 #### Scenario: Roles are not re-resolved on read
 
 - **WHEN** the group-to-role configuration changes after an entry was written
 - **THEN** the entry continues to report the roles that were in effect when the action occurred
 
+#### Scenario: A renamed role does not alter past entries
+
+- **WHEN** a role is renamed or deleted after an entry naming it was written
+- **THEN** the entry continues to report the name the role bore at the time
+
 #### Scenario: Non-human actors are distinguishable
 
 - **WHEN** a change is made by a command-line invocation or by an automatic process
 - **THEN** the entry identifies which, and is distinguishable from a console action
+
+#### Scenario: An entry names the account it occurred in
+
+- **WHEN** any recorded action is read
+- **THEN** the entry reports the account the action acted in
 
 ### Requirement: Entries survive the objects they describe
 
@@ -132,4 +147,92 @@ may read the inventory SHALL be able to read the audit trail.
 
 - **WHEN** a user holding only the read-only role requests audit entries
 - **THEN** the entries are returned
+
+### Requirement: Changes to roles, grants and memberships are recorded
+
+The service SHALL record the creation, modification and deletion of a role, of the grants a role or
+an API key holds, and of a person's memberships, as distinct actions in the audit vocabulary, with
+the state before and after the change.
+
+An entry recording a grant SHALL record it in full — object type, object identifier or selector,
+action, and whether it is inheritable — so that the authority conferred is readable from the entry
+alone.
+
+#### Scenario: Granting is attributable
+
+- **WHEN** a grant is added to a role
+- **THEN** an entry names the acting subject, the role and the grant in full
+
+#### Scenario: Membership changes are attributable
+
+- **WHEN** a person is added to or removed from a role
+- **THEN** an entry names the acting subject, the person and the role
+
+#### Scenario: A refused escalation is distinguishable from a change
+
+- **WHEN** a grant is refused because it exceeds the writer's own authority
+- **THEN** no entry records a change, and the refusal is recorded in the log
+
+### Requirement: The audit trail is confined to the account that reads it
+
+A read of the audit trail SHALL return only entries recorded in the account the request acts in.
+
+#### Scenario: Another account's entries are not returned
+
+- **WHEN** a member of one account reads the audit trail while other accounts hold entries
+- **THEN** only entries of that account are returned
+
+### Requirement: The invitation lifecycle is recorded
+
+The service SHALL record the issuing, revocation, re-sending, acceptance, decline and expiry of an
+invitation as distinct actions, each naming the account and the invited address.
+
+An entry for an acceptance SHALL name both the invited address and the accepting user, so that the record
+evidences that the person who joined is the person who was invited.
+
+An entry recording an expiry SHALL identify the service itself as the actor.
+
+#### Scenario: Issuing is attributable
+
+- **WHEN** an invitation is issued
+- **THEN** an entry names the issuing user and the invited address
+
+#### Scenario: Acceptance evidences who joined
+
+- **WHEN** an invitation is accepted
+- **THEN** an entry names both the invited address and the user that accepted
+
+#### Scenario: Expiry is not attributed to a person
+
+- **WHEN** an invitation expires
+- **THEN** an entry records it with the service as the actor
+
+#### Scenario: Revocation and re-sending are distinguishable
+
+- **WHEN** an invitation is revoked, and another is re-sent
+- **THEN** the two entries record different actions
+
+#### Scenario: A decline is distinguishable from an expiry
+
+- **WHEN** an invitation is declined, and another expires unanswered
+- **THEN** the two entries record different actions, and the decline names the user that declined
+
+### Requirement: An invitation entry never contains its token
+
+The service SHALL exclude an invitation's token, and any stored form of it, from every audit entry.
+
+#### Scenario: The token is absent from the record
+
+- **WHEN** any entry describing an invitation is read
+- **THEN** it contains neither the token nor a stored form of it
+
+### Requirement: Refused invitation issues are recorded
+
+The service SHALL record an invitation refused for exceeding a rate limit, identifying the acting user
+and that a limit was reached.
+
+#### Scenario: A rate-limited attempt leaves a trace
+
+- **WHEN** an invitation is refused because a rate limit was reached
+- **THEN** the refusal is recorded with the acting user, and no invitation is created
 

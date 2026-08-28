@@ -66,6 +66,9 @@
 - [ ] 6.7 Check identity entries at registration, sign-in and invitation acceptance; refuse acceptance with a message naming the address
 - [ ] 6.8 Make entry addition non-retroactive: flag matching existing accounts and zones for review, with enforcement as a separate action
 - [ ] 6.9 Restrict blocklist reads to the staff plane and give entries a stated retention
+- [ ] 6.10 Check an invited address against the identity blocklist AT ACCEPTANCE, not at issue (design S12; moved here from `account-invitations` 12.1). At issue is the wrong moment: the address is a stranger's, the inviter is not the person being judged, and refusing there tells an account holder something about a third party. At acceptance the person is present and authenticated
+- [ ] 6.11 Refuse that acceptance WITHOUT consuming the token, and report the state in the account's outstanding invitation list. `store.AcceptInvitation` already resolves, then checks the caller, then writes — a check between the second and third gets non-consumption for free
+- [ ] 6.12 Test that a blocked address can be invited, cannot accept, and that the invitation remains revocable by the account that issued it
 - [ ] 6.10 Tests: suspend/restore round-trips a customer-disabled zone as disabled; a suspension opens no access grant; a suffix entry catches a subdomain; adding an entry serves an existing matching zone unchanged
 - [ ] 6.11 Document the abuse response commitment of twelve hours alongside the operation; it is published on the public site by `public-edition` tasks 7.6 and U11
 
