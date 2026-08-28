@@ -3,7 +3,7 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
-import { Account } from '@acme/shared';
+import { Account, accountLabel } from '@acme/shared';
 import { AccountSwitcherComponent } from './account-switcher.component';
 import { AccountsService } from './accounts.service';
 
@@ -61,22 +61,15 @@ describe('AccountSwitcherComponent', () => {
     expect(fixture.nativeElement.querySelector('.ant-select-show-search')).not.toBeNull();
   });
 
-  // The personal account is "Personal", never its stored name — which is derived from the owner's
-  // address, and would put the signed-in person's identity beside the user menu that already says
-  // it: the same word twice, a centimetre apart, one of them pretending to be a workspace's name.
-  //
-  // Asserted on the naming function rather than on the option list: ng-zorro keeps a select's
-  // options in an overlay that does not exist until the control is opened, so a DOM assertion on a
-  // closed select reads the placeholder and passes or fails for reasons that have nothing to do
-  // with this rule. The rendered path is covered by the single-account case below, which has no
-  // overlay.
-  it('calls a personal account Personal and leaves a team account named', () => {
+  // The naming rule itself lives in shared (accountLabel) and is asserted with it. What this pins
+  // is that the switcher USES it — the failure being a component that grows its own copy back and
+  // then disagrees with the picker sitting on the same page.
+  it('names accounts through the shared rule', () => {
     const fixture = render(team(1));
-    const c = fixture.componentInstance as unknown as {
-      label(a: { kind: string; name: string }): string;
-    };
-    expect(c.label({ kind: 'personal', name: 'dana@corp.example' })).toBe('Personal');
-    expect(c.label({ kind: 'team', name: 'Acme Ltd' })).toBe('Acme Ltd');
+    const c = fixture.componentInstance as unknown as { label: typeof accountLabel };
+    expect(c.label).toBe(accountLabel);
+    expect(c.label({ kind: 'personal', name: 'dana@corp.example' } as Account)).toBe('Personal');
+    expect(c.label({ kind: 'team', name: 'Acme Ltd' } as Account)).toBe('Acme Ltd');
   });
 
 });

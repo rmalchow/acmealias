@@ -360,6 +360,35 @@ export interface Account {
 }
 
 /**
+ * What an account is CALLED in the interface.
+ *
+ * A personal account is "Personal", never its stored name. That name is derived from its owner's
+ * address, so rendering it puts the signed-in person's identity beside a user menu that already
+ * says it — the same word twice, a centimetre apart, one of them pretending to be the name of a
+ * workspace somebody chose. "Personal" is also what a person calls that account.
+ *
+ * It lives in `shared` rather than beside either screen because BOTH the picker and the switcher
+ * render it, and the two would otherwise be one edit away from disagreeing about what an account is
+ * called — which is the failure a person notices immediately, because those two controls sit on the
+ * same page.
+ *
+ * A team account keeps its own name: somebody chose it, and it is how they tell several apart.
+ */
+export function accountLabel(a: Pick<Account, 'kind' | 'name'>): string {
+  return a.kind === 'personal' ? 'Personal' : a.name;
+}
+
+/**
+ * The icon that goes with `accountLabel`.
+ *
+ * A person for the account that IS a person's own, a cluster for one with other people in it. It is
+ * paired with the label here so a screen cannot render one rule's word beside the other's glyph.
+ */
+export function accountIcon(a: Pick<Account, 'kind'>): string {
+  return a.kind === 'personal' ? 'user' : 'cluster';
+}
+
+/**
  * The balance below which the console warns (task 6.10, design C4).
  *
  * The refusal at zero is soft — renewals stop and the certificate on the wire

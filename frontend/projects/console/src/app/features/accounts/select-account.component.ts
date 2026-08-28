@@ -7,7 +7,7 @@ import { NzCardModule } from 'ng-zorro-antd/card';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzTagModule } from 'ng-zorro-antd/tag';
-import { Account, apiErrorMessage } from '@acme/shared';
+import { Account, accountIcon, accountLabel, apiErrorMessage } from '@acme/shared';
 import { AccountsService } from './accounts.service';
 
 /**
@@ -64,9 +64,18 @@ import { AccountsService } from './accounts.service';
         <div class="ac-list">
           @for (a of shown(); track a.id) {
             <nz-card [nzHoverable]="true" (click)="choose(a)">
-              <h3>{{ a.name }}</h3>
+              <!--
+                The icon and the word come from accountLabel/accountIcon in shared, the same pair
+                the switcher renders. Both controls are on screen together once an account is
+                selected, so a rule kept in two places is a rule that will be edited in one.
+              -->
+              <h3><span nz-icon [nzType]="icon(a)" class="kind"></span>{{ label(a) }}</h3>
               @if (a.kind === 'personal') {
-                <nz-tag>Personal</nz-tag>
+                <!--
+                  No 'Personal' tag. The heading already says the word, and a badge repeating the
+                  line above it is a label for a distinction the card is not making — every other
+                  card here is a team account and none of them says so.
+                -->
                 <p class="ac-hint">Yours alone, free, five projects.</p>
               } @else {
                 <code>{{ a.slug }}</code>
@@ -131,6 +140,14 @@ import { AccountsService } from './accounts.service';
       }
       .ac-list h3 {
         margin: 0 0 0.25rem;
+        display: flex;
+        align-items: center;
+      }
+      /* Beside the word rather than in a reserved column: the two kinds get different glyphs, not
+         one kind an indent and the other a gap. */
+      .ac-list h3 .kind {
+        margin-inline-end: 0.45rem;
+        opacity: 0.75;
       }
       .add {
         margin-block-start: 2rem;
@@ -145,12 +162,23 @@ export class SelectAccountComponent {
   protected readonly query = signal('');
   protected readonly error = signal<string | null>(null);
 
+  /** What each account is called and shown as, from the one rule both this and the switcher use. */
+  protected readonly label = accountLabel;
+  protected readonly icon = accountIcon;
+
   /** Personal first: it is the one account everybody has, and the one a new user means. */
   protected readonly shown = computed(() => {
     const q = this.query().trim().toLowerCase();
-    const rows = this.accounts
-      .accounts()
-      .filter((a) => !q || a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q));
+    const rows = this.accounts.accounts().filter(
+      (a) =>
+        !q ||
+        // The DISPLAYED word is matched too, not only the stored one. The personal account is shown
+        // as "Personal" and its stored name is derived from an address nobody would think to type,
+        // so without this the one account everybody has is the one the filter cannot find.
+        accountLabel(a).toLowerCase().includes(q) ||
+        a.name.toLowerCase().includes(q) ||
+        a.slug.toLowerCase().includes(q),
+    );
     return [...rows].sort((a, b) => Number(b.kind === 'personal') - Number(a.kind === 'personal'));
   });
 

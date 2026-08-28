@@ -1,5 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
-import { Router, RouterLink, RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { filter, map, startWith } from 'rxjs';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzDropDownModule } from 'ng-zorro-antd/dropdown';
 import { NzIconModule } from 'ng-zorro-antd/icon';
@@ -70,12 +72,38 @@ export class AppComponent {
    * is what an empty list gets, the shell rendering no navigation rather than an empty rule
    * across the page. Nothing either while the account is suspended: that account has exactly one
    * screen (design C5).
+   *
+   * And nothing ON the picker, even when an account IS selected. That screen's question is which
+   * account you want to be in; wearing the current one's navigation above it answers a different
+   * question and invites a click that would leave the screen you came to use. The picker is
+   * reachable with a selection — the mark leads there — so this is a real state and not a
+   * theoretical one.
    */
   readonly nav = computed<NavItem[]>(() => {
+    if (this.onPicker()) return [];
     const account = this.accounts.current();
     if (!account || account.suspended) return [];
     return account.kind === 'personal' ? PERSONAL_NAV : TEAM_NAV;
   });
+
+  /**
+   * Whether the picker is the screen on show.
+   *
+   * From the router rather than from the selection, because the two are independent: a session
+   * with an account selected can be standing on the picker, which is exactly the case this
+   * exists for.
+   *
+   * `startWith` seeds it from the router's current URL, so the first render is right rather than
+   * rendering the navigation and then withdrawing it once a navigation event arrives.
+   */
+  private readonly onPicker = toSignal(
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => e.urlAfterRedirects.startsWith('/accounts')),
+      startWith(this.router.url.startsWith('/accounts')),
+    ),
+    { initialValue: this.router.url.startsWith('/accounts') },
+  );
 
   /**
    * Warned before zero, not at it (task 6.10, design C4). It sits in the shell rather than on

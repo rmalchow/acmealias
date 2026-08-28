@@ -6,7 +6,7 @@ import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import { NzSelectModule } from 'ng-zorro-antd/select';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { apiErrorMessage } from '@acme/shared';
+import { accountIcon, accountLabel, apiErrorMessage } from '@acme/shared';
 import { AccountsService } from './accounts.service';
 
 /**
@@ -76,7 +76,7 @@ import { AccountsService } from './accounts.service';
           the day a second account arrives.
         -->
         <span class="pick inert" [attr.title]="accounts.current()?.slug ?? null">
-          <span nz-icon [nzType]="accounts.current()?.kind === 'personal' ? 'user' : 'cluster'"></span>
+          <span nz-icon [nzType]="icon(accounts.current()!)"></span>
           {{ accounts.current() ? label(accounts.current()!) : 'No account' }}
         </span>
       }
@@ -155,15 +155,13 @@ export class AccountSwitcherComponent {
   protected readonly searchable = computed(() => this.accounts.accounts().length >= 5);
 
   /**
-   * What an account is called in this control.
+   * What an account is called and shown as.
    *
-   * A personal account is "Personal". Its stored name is derived from its owner's address, so
-   * showing it here repeats the user menu a centimetre away — and worse, presents a person's own
-   * identity as though it were the name of a workspace they chose.
+   * From `shared`, because the PICKER renders the same pair and the two are on screen together
+   * once an account is selected — a rule kept in two places is one that will be edited in one.
    */
-  protected label(a: { kind: string; name: string }): string {
-    return a.kind === 'personal' ? 'Personal' : a.name;
-  }
+  protected readonly label = accountLabel;
+  protected readonly icon = accountIcon;
 
   /**
    * There is no ngOnInit here any more. The list is loaded before the first render (app.config's

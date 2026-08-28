@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
@@ -38,7 +38,7 @@ describe('AppComponent', () => {
     await TestBed.configureTestingModule({
       imports: [AppComponent],
       providers: [
-        provideRouter([]),
+        provideRouter([{ path: 'accounts', children: [] }]),
         provideHttpClient(),
         provideHttpClientTesting(),
         // The expiry prompt is an nz-modal, and ng-zorro's overlays carry animation metadata:
@@ -46,6 +46,21 @@ describe('AppComponent', () => {
         provideNoopAnimations(),
       ],
     }).compileComponents();
+  });
+
+  it('shows no navigation on the picker, even with an account selected', async () => {
+    // The picker's question is which account you want to be in. Wearing the current one's
+    // navigation above it answers a different question and offers a click that leaves the screen
+    // you came to use — and this is a real state, not a theoretical one, because the mark leads
+    // here from inside an account.
+    signedIn();
+    TestBed.inject(AccountsService).accounts.set([account({})]);
+    // Awaited: navigation is asynchronous, and the component seeds itself from the router's
+    // CURRENT url at construction. Creating it first would read '/' and pass for the wrong reason.
+    await TestBed.inject(Router).navigateByUrl('/accounts');
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.nav()).toEqual([]);
   });
 
   it('sends the mark to the account picker', () => {
