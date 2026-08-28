@@ -250,6 +250,13 @@ body {
    the rule does nothing. */
 body > main {
   flex: 1 0 auto;
+  /* And the same automatic-minimum trap once more, at the top of the tree: as a
+   * flex item main takes a minimum of its own min-content, which is the widest
+   * thing inside it — the comparison table, which deliberately sets 34rem so its
+   * two columns stay readable. Without this the page below 592px is wider than
+   * the window and every section scrolls sideways together; with it, main is the
+   * window and the table alone scrolls inside its wrapper. */
+  min-inline-size: 0;
 }
 
 code {
@@ -395,6 +402,13 @@ h1 {
   max-inline-size: 60ch;
 }
 
+/* The hero is two paragraphs now — the problem, then the shape of the answer —
+   and they are two paragraphs precisely so the turn between them is visible.
+   Run together they read as one long complaint. */
+.lede + .lede {
+  margin-block-start: 1rem;
+}
+
 .reasons ul {
   list-style: none;
   margin: 0;
@@ -523,6 +537,13 @@ h1 {
 .steps > li {
   counter-increment: step;
   position: relative;
+  /* A GRID ITEM DEFAULTS TO min-width:auto, WHICH MEANS min-content, and the
+   * min-content of a step holding a zone-file line or a dig transcript is that
+   * line's full width — so one <pre> pushed the whole page wider than the
+   * viewport and every section inherited the overflow. `.term` already scrolls;
+   * this is what lets it. Found by measuring: at a 560px viewport the document
+   * was 772px wide, and had been since before the steps existed. */
+  min-inline-size: 0;
   background: var(--raised);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -575,12 +596,70 @@ h1 {
   margin-block-start: 0.75rem;
 }
 
+/* The one-sentence version of a step. Present in the markup for every step and
+ * hidden on a wide screen, where the full body is right there and a summary
+ * above it would be the same thing said twice. */
+.brief {
+  display: none;
+}
+
 /* On a narrow screen the reserved gutter costs more than the alignment buys:
- * put the numeral on its own line above the heading instead. */
+ * put the numeral on its own line above the heading instead.
+ *
+ * AND THE BODIES GO. Six steps carrying zone-file lines, a dig transcript and
+ * nine client configurations is a wall on a phone: every one of those blocks is
+ * monospace text with a minimum width, so it either overflows or shrinks to
+ * unreadable, and the sequence — which is the thing this section exists to
+ * teach — disappears under it. What survives is the numeral, the heading and one
+ * sentence, so the whole integration is six lines a thumb can scroll past.
+ *
+ * The bodies are HIDDEN rather than deleted: this is a viewport rule, and the
+ * same page on the same phone rotated, or read at a smaller text size, gets them
+ * back. Anybody who is actually configuring something is at a keyboard, and the
+ * page they open there is the full one.
+ *
+ * `> :not(h3, .brief)` rather than a class on each block, because the rule is
+ * "the body of a step", and a rule that has to be maintained per element is one
+ * somebody forgets the next time a step gains a paragraph. */
 @media (max-width: 34rem) {
   .steps > li {
     padding-inline-start: 1.25rem;
     padding-block-start: 2.75rem;
+  }
+
+  .steps > li > :not(h3, .brief) {
+    display: none;
+  }
+
+  .brief {
+    display: block;
+    margin: 0;
+    color: var(--ink-dim);
+  }
+
+  /* The band would otherwise put four marks in a column of four rows and become
+     the tallest thing on the page. Two by two, and smaller. */
+  .logos {
+    justify-content: center;
+    gap: 1.25rem 1.75rem;
+    padding: 1.25rem;
+  }
+
+  .logos img {
+    block-size: 1.6rem;
+  }
+
+  .logos li.named {
+    font-size: 1rem;
+    gap: 0.45rem;
+  }
+
+  .logos li.named img {
+    block-size: 1.8rem;
+  }
+
+  .logos li:nth-child(3) img {
+    block-size: 1.9rem;
   }
 }
 
@@ -662,19 +741,78 @@ h1 {
 }
 
 /* -- The clients ----------------------------------------------------------
-   Tabs, set the way the console's navigation is set (shell.component's `.nav`):
-   a row of plain words over a rule, with the active one carrying an accent
-   underline that COVERS the rule rather than sitting under it. Same product, so
-   the control that means "pick one of these" should look the same in both
-   places, and somebody who has used the console already knows what this is.
+   A LIGHT BAND in a dark page, and that is the point rather than an accident.
 
-   The section gets top padding of its own. It used to be `0 3rem`, which pushed
-   the label hard against the reason cards above and made the strip read as
-   though it belonged to the third card. */
+   Four marks belonging to four other organisations, each used under its owner's
+   guidelines — and every one of those guidelines assumes a light ground. Let's
+   Encrypt publishes no reversed variant at all. Recolouring somebody's mark to
+   suit our palette is the failure this strip used to avoid by carrying no marks,
+   so the palette gives way for one band and gives it back afterwards.
+
+   The band is white rather than near-white: a grey would read as a rendering
+   fault beside four logos that each carry their own white. */
 .clients {
   padding-block: 3rem;
 }
 
+.logos {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 1.75rem 2rem;
+  background: #fff;
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem 2.5rem;
+}
+
+/* ONE OPTICAL HEIGHT, not one box height. A wordmark set on a 5:1 canvas and a
+   square icon sized to the same height read as two different sizes, because the
+   eye measures the ink and not the canvas — so the square one is stepped down
+   and the long ones up until the row settles. These numbers were chosen by
+   looking at the row, which is the only way this is ever decided. */
+.logos img {
+  display: block;
+  inline-size: auto;
+  block-size: 2rem;
+}
+
+/* cert-manager: a seal with no wordmark published anywhere, so the name is set
+   beside it. Dark ink because this band is light, and the page's own face
+   because that is what makes it a NAME rather than a forged logotype. */
+.logos li.named {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #16191d;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.logos li.named img {
+  block-size: 2.3rem;
+}
+
+.logos li:nth-child(3) img {  /* certbot: a tall lockup, mark over nothing */
+  block-size: 2.4rem;
+}
+
+/* The attribution under the band. Small, dim, and NOT hidden on narrow screens:
+   it is the sentence that makes the use nominative rather than an implied
+   endorsement, and a viewport is not a reason to stop saying it. */
+.clients .note {
+  margin-block-start: 1rem;
+}
+
+/* -- ...and the configurations, which now live inside step 5 ---------------
+   Tabs, set the way the console's navigation is set (shell.component's `.nav`):
+   a row of plain words over a rule, with the active one carrying an accent
+   underline that COVERS the rule rather than sitting under it. Same product, so
+   the control that means "pick one of these" should look the same in both
+   places, and somebody who has used the console already knows what this is. */
 .tablist {
   display: flex;
   flex-wrap: wrap;
@@ -809,6 +947,25 @@ h1 {
 /* ── The comparison ───────────────────────────────────────────────────────── */
 .table-scroll {
   overflow-x: auto;
+  /* AND A DEFINITE MAXIMUM, which is the half that actually holds. `overflow-x`
+   * makes the table scroll INSIDE this box; it does not stop the box itself from
+   * being sized by what it contains, so the 34rem minimum below still reached the
+   * page and made every section 592px wide on a 380px phone. Measured before and
+   * after: scrollWidth 592 → the viewport, at every width. */
+  max-inline-size: 100%;
+  /* AND the containment that makes the maximum bite. A scroll container is still
+   * SIZED by its contents unless it is told not to be, and `max-inline-size:100%`
+   * resolves against a parent that has itself already been widened by the same
+   * contents — so the two rules together do nothing on their own. `contain:
+   * inline-size` is what severs that: the box's inline size is computed as if it
+   * were empty, the table lays out inside it at its 34rem minimum, and the
+   * scrollbar appears. Measured at 500px: 592 → 500. */
+  contain: inline-size;
+  /* Same grid-item trap as `.steps > li`: the table below sets a 34rem minimum
+   * so its two columns stay readable, and without this the scroller inherits
+   * that as its own minimum and hands it to the page. With it, the table keeps
+   * its minimum and SCROLLS, which is what the wrapper is for. */
+  min-inline-size: 0;
 }
 
 .compare {

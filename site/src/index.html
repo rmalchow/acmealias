@@ -78,12 +78,36 @@
     </header>
 
     <main>
+      <!--
+        THE FIRST CLAIM, WRITTEN AS ONE ENGINEER TO ANOTHER.
+
+        It used to open with what the product IS — "certificates for domains whose DNS you keep
+        exactly where it is" — which is accurate, unobjectionable, and asks the reader to work out
+        for themselves why they should care. The person who lands here already knows the feeling
+        this page is about: they have pasted a DNS provider's API token into a load balancer's
+        configuration, watched it go into the backup of that configuration, and decided not to think
+        about it. Naming that moment does in one sentence what a paragraph of positioning cannot,
+        and it is HONEST rather than manufactured — the token really does carry every record, and
+        the discomfort is the correct response to it.
+
+        The headline stays a claim about US and not about them, because the sentence a skimmer
+        reads should say what this thing does: they keep the key, we answer the challenge. The
+        alternative on the table was "We keep your ACME DNS challenge safe", which is true and one
+        notch vaguer — "safe" is a word every vendor uses and it does not say what changes.
+      -->
       <section class="hero">
         <p class="eyebrow">DNS-01, without the credentials</p>
-        <h1>Certificates for domains whose DNS you keep exactly where it is.</h1>
+        <h1>Keep your DNS key. We answer the challenge.</h1>
         <p class="lede">
-          Publish one <code>CNAME</code>, once. Every renewal after that is invisible to you — and we
-          never ask for access to your DNS provider, because the design does not need it.
+          You have been here. A wildcard needs a <code>DNS-01</code> challenge, that challenge needs
+          an API token, and the token that proves you control one name can rewrite every record you own. So
+          it goes into the load balancer's configuration, and into the backup of that configuration,
+          and you decide not to think about it. It is ugly, and it is unsafe.
+        </p>
+        <p class="lede">
+          There is a better shape for this, and it is already built: publish one <code>CNAME</code>,
+          once, by hand. After that every renewal is invisible to you, and the key never leaves your
+          DNS provider — because we never ask for one.
         </p>
       </section>
 
@@ -139,209 +163,64 @@
       </section>
 
       <!--
-        The clients, as WORDMARKS SET IN OUR OWN TYPE rather than as their logos.
+        THE ROW OF LOGOS, AND THE DECISION IT REVERSES.
 
-        Every name here is somebody's trademark — Traefik Labs', the CNCF's, the EFF's — and each
-        project has a brand policy governing how its mark may be reproduced. Setting the names as
-        text is nominative use, needs no licence, and cannot be got subtly wrong the way a recoloured
-        or stretched logo can. It also renders at one weight and one colour, which a row of real
-        logos never does: nine marks arrive at nine optical weights and turn a quiet strip into a
-        scrapbook. Real logos, if wanted, come from each project's own brand assets under its own
-        guidelines and go in src/brand/clients/; this list becomes <img>s without the layout moving.
+        This was nine client names set as WORDMARKS IN OUR OWN TYPE, on the argument that every name
+        here is somebody's trademark, that setting a name as text is nominative use and needs no
+        licence, and that nine real marks arrive at nine optical weights and turn a quiet strip into
+        a scrapbook. The argument was sound and it is answered rather than forgotten: a row of names
+        is a LIST, and the question this strip exists to answer — "do the tools I already run work
+        with this" — is answered by recognition, in the time it takes to read nothing at all. So:
+        four marks rather than nine names, the three clients most people arrive already running plus
+        the authority almost all of them issue from.
 
-        =========================================================================================
-        THIS LIST WAS AHEAD OF THE CODE AND NO LONGER IS. `acme-dns-protocol` shipped the /update
-        endpoint, and task 7.1 was to verify every name here against the client's own source rather
-        than against its marketing. Two of the nine did not survive that unqualified and are now
-        footnoted rather than quietly left standing:
+        WHAT THE OLD ARGUMENT WON: the strip is LIGHT. Each of these is somebody else's mark used
+        under their own guidelines, and those guidelines assume a light ground — Let's Encrypt
+        publishes no reversed variant at all, and its navy would be a smudge on our black.
+        Recolouring a mark to suit our palette is exactly the "subtly wrong" the wordmarks existed to
+        avoid, so the palette gives way instead and the band reads as a deliberate change of surface.
 
-          certbot  ships NO acme-dns authenticator. It needs a third-party plugin, and only one of
-                   them — certbot-dns-acmedns — refrains from calling /register, which we refuse.
-                   The panel names it. It used to promise "the console gives you the script", which
-                   was a script we do not ship.
-          Caddy    has no acme-dns module in the stock binary. caddy-dns/acmedns is an xcaddy build.
-                   The panel says so.
+        Each file is the project's own published asset, unmodified except for a viewBox added where
+        the original carried none (Traefik's and Let's Encrypt's) — which changes nothing about the
+        drawing and lets one CSS rule size them all to a common optical height. Sources:
+          traefik       traefik.io/images/inline-svgs/traefik-labs.svg
+          cert-manager  cncf/artwork, projects/cert-manager/icon/color
+          certbot       certbot.eff.org
+          letsencrypt   letsencrypt.org/images/letsencrypt-logo-horizontal.svg
 
-        Every other client is built in and needs nothing installed — but ALL of them, certbot and
-        Caddy included, work only because the credentials file is placed BEFORE the first run.
-        Left to themselves, lego, Traefik, acme.sh, win-acme, Posh-ACME and Certify The Web try to
-        register when they find no credentials, and this service refuses that deliberately (design
-        N3). That is the one sentence that has to survive every edit to this section, which is why
-        it is stated above the tabs and not only inside them.
-
-        Two client-specific details this page must not break, both from source:
-          - acme.sh greps the /update response for the quoted value. Our 200 {"txt": "..."} is what
-            satisfies it; a 204 or an empty body would break acme.sh and nothing else.
-          - libdns (Caddy) insists on status exactly 200, not 201 or 204.
-        =========================================================================================
+        The nine configurations did not disappear. They are the body of step 5, which is where
+        somebody walking the integration needs them — and where they no longer sit above the
+        sequence as a wall of YAML answering a question the reader has not asked yet.
       -->
       <section class="clients">
-        <h2>Your client, configured once</h2>
+        <h2>The clients you already run</h2>
         <p class="section-lede">
-          The challenge is the only part that touches us, and in every one of these it is a few lines.
+          We speak the <code>acme-dns</code> protocol, so these need a few lines of configuration and
+          nothing installed. The exact lines are step&nbsp;5 below.
         </p>
-        <p class="section-lede">
-          For the acme-dns clients, place the credentials file the console gives you <strong>before
-          the client's first run</strong>. Left to themselves most of them try to register a new
-          account, and we do not mint those — accounts and domains are created deliberately here.
+        <ul class="logos">
+          <li><img src="./brand/clients/traefik.svg" alt="Traefik" width="160" height="32"></li>
+          <!--
+            cert-manager is the only one of the four with NO wordmark to use. The CNCF artwork
+            repository publishes an icon and a "stacked" file that is byte-for-byte the same icon,
+            and a circular seal alone says nothing to somebody scanning a row: the other three
+            carry their own name and this one would be a blue disc. So the name is set beside it in
+            our type, which is the nominative use the old wordmark strip was built entirely out of.
+          -->
+          <li class="named">
+            <img src="./brand/clients/cert-manager.svg" alt="" width="792" height="792">
+            <span>cert-manager</span>
+          </li>
+          <li><img src="./brand/clients/certbot.svg" alt="Certbot" width="612" height="210"></li>
+          <li><img src="./brand/clients/letsencrypt.svg" alt="Let&#39;s Encrypt" width="339" height="81"></li>
+        </ul>
+        <p class="note">
+          Trademarks of Traefik Labs, the Cloud Native Computing Foundation, the Electronic Frontier
+          Foundation and the Internet Security Research Group. They are here to say which software
+          works with this service; no endorsement by any of them is claimed or implied.
         </p>
-
-        <div class="tabs">
-          <div class="tablist" role="tablist" aria-label="ACME clients">
-            <button role="tab" id="tab-traefik" aria-controls="panel-traefik"
-                    aria-selected="true" tabindex="0">Traefik</button>
-            <button role="tab" id="tab-cert-manager" aria-controls="panel-cert-manager"
-                    aria-selected="false" tabindex="-1">cert-manager</button>
-            <button role="tab" id="tab-certbot" aria-controls="panel-certbot"
-                    aria-selected="false" tabindex="-1">certbot</button>
-            <button role="tab" id="tab-acme-sh" aria-controls="panel-acme-sh"
-                    aria-selected="false" tabindex="-1">acme.sh</button>
-            <button role="tab" id="tab-lego" aria-controls="panel-lego"
-                    aria-selected="false" tabindex="-1">lego</button>
-            <button role="tab" id="tab-caddy" aria-controls="panel-caddy"
-                    aria-selected="false" tabindex="-1">Caddy</button>
-            <button role="tab" id="tab-win-acme" aria-controls="panel-win-acme"
-                    aria-selected="false" tabindex="-1">win-acme</button>
-            <button role="tab" id="tab-posh-acme" aria-controls="panel-posh-acme"
-                    aria-selected="false" tabindex="-1">Posh-ACME</button>
-            <button role="tab" id="tab-certify" aria-controls="panel-certify"
-                    aria-selected="false" tabindex="-1">Certify The Web</button>
-          </div>
-          <div class="panels">
-          <div role="tabpanel" id="panel-traefik" aria-labelledby="tab-traefik">
-            <p>One provider line. The endpoint and credentials come from the environment.</p>
-            <div class="term"><pre>certificatesResolvers:
-  acmealias:
-    acme:
-      dnsChallenge:
-        provider: httpreq
-
-# HTTPREQ_ENDPOINT=https://api.acmealias.com/
-# HTTPREQ_USERNAME / HTTPREQ_PASSWORD = your key</pre></div>
-          </div>
-          <div role="tabpanel" id="panel-cert-manager" aria-labelledby="tab-cert-manager" hidden>
-            <p>The acmeDNS solver is built into cert-manager. No webhook to deploy.</p>
-            <div class="term"><pre>solvers:
-  - dns01:
-      acmeDNS:
-        host: https://api.acmealias.com
-        accountSecretRef:
-          name: acmealias
-          key: acmedns.json</pre></div>
-          </div>
-          <div role="tabpanel" id="panel-certbot" aria-labelledby="tab-certbot" hidden>
-            <p>
-              certbot ships no acme-dns authenticator, so this one needs a plugin:
-              <a href="https://github.com/pan-net-security/certbot-dns-acmedns"><code>certbot-dns-acmedns</code></a>.
-              It is the one that reads a registration file and never tries to register.
-            </p>
-            <div class="term"><pre>pip install certbot-dns-acmedns
-
-certbot certonly \
-  --authenticator certbot-dns-acmedns:dns-acmedns \
-  --certbot-dns-acmedns:dns-acmedns-credentials /etc/acmealias/certbot.ini \
-  -d shop.example.com
-
-# certbot.ini points at the credentials file from the console:
-#   certbot_dns_acmedns:dns_acmedns_api_url = https://api.acmealias.com
-#   certbot_dns_acmedns:dns_acmedns_registration_file = /etc/acmealias/acmedns.json</pre></div>
-          </div>
-          <div role="tabpanel" id="panel-acme-sh" aria-labelledby="tab-acme-sh" hidden>
-            <p>Four environment variables from the credentials file, then issue as usual.</p>
-            <div class="term"><pre>export ACMEDNS_BASE_URL="https://api.acmealias.com"
-export ACMEDNS_USERNAME="..." ACMEDNS_PASSWORD="..."
-export ACMEDNS_SUBDOMAIN="shop-example-com"
-
-acme.sh --issue --dns dns_acmedns -d shop.example.com</pre></div>
-          </div>
-          <div role="tabpanel" id="panel-lego" aria-labelledby="tab-lego" hidden>
-            <p>
-              The same provider Traefik uses, because Traefik is lego underneath. Either protocol
-              works; <code>httpreq</code> needs no file on disk.
-            </p>
-            <div class="term"><pre>HTTPREQ_ENDPOINT=https://api.acmealias.com/ \
-HTTPREQ_USERNAME=... HTTPREQ_PASSWORD=... \
-lego --dns httpreq -d shop.example.com run
-
-# or acme-dns, with the credentials file placed first:
-ACME_DNS_API_BASE=https://api.acmealias.com \
-ACME_DNS_STORAGE_PATH=/etc/acmealias/acmedns.json \
-lego --dns acme-dns -d shop.example.com run</pre></div>
-          </div>
-          <div role="tabpanel" id="panel-caddy" aria-labelledby="tab-caddy" hidden>
-            <p>
-              Caddy needs a custom build — the acmedns module is not in the stock binary:
-              <code>xcaddy build --with github.com/caddy-dns/acmedns</code>. After that it is one
-              tls block.
-            </p>
-            <div class="term"><pre>tls {
-  dns acmedns {
-    server_url https://api.acmealias.com
-    username   {env.ACMEALIAS_USER}
-    password   {env.ACMEALIAS_PASS}
-    subdomain  shop-example-com
-  }
-}</pre></div>
-          </div>
-          <div role="tabpanel" id="panel-win-acme" aria-labelledby="tab-win-acme" hidden>
-            <p>
-              The <strong>acme-dns</strong> validation plugin is built in. Save the credentials from
-              the console as <code>&lt;domain&gt;.json</code> in win-acme's <code>acme-dns</code>
-              folder before the first run — an unattended run with no stored registration fails
-              rather than registering. After that it remembers them for every renewal.
-            </p>
-          </div>
-          <div role="tabpanel" id="panel-posh-acme" aria-labelledby="tab-posh-acme" hidden>
-            <p>
-              The <strong>AcmeDns</strong> plugin ships with Posh-ACME. Its credentials are shaped
-              differently from everyone else's — a positional array keyed by the challenge name —
-              and the console emits exactly that, so paste it into <code>-ACMERegistration</code>
-              and set <code>-DnsAlias</code> to the <code>fulldomain</code>.
-            </p>
-          </div>
-          <div role="tabpanel" id="panel-certify" aria-labelledby="tab-certify" hidden>
-            <p>
-              The <strong>acme-dns</strong> provider is built in. Add it as a credential, paste what
-              the console gave you into its credentials JSON, and pick it on the certificate — with
-              that filled in it never tries to register.
-            </p>
-          </div>
-          </div>
-        </div>
       </section>
 
-      <!--
-        Tabs, progressively. Without JavaScript every panel is visible and the page is a list of nine
-        configurations — longer, and still completely usable. The script hides all but one and wires
-        the roving tabindex the ARIA tab pattern wants: arrow keys move between tabs, and only the
-        selected tab is in the tab order, so a keyboard user traverses the group rather than nine
-        separate stops.
-      -->
-      <script>
-        for (const group of document.querySelectorAll('.tabs')) {
-          const tabs = [...group.querySelectorAll('[role="tab"]')];
-          const show = (i) => {
-            tabs.forEach((tab, n) => {
-              const on = n === i;
-              tab.setAttribute('aria-selected', String(on));
-              tab.tabIndex = on ? 0 : -1;
-              document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
-            });
-          };
-          tabs.forEach((tab, i) => {
-            tab.addEventListener('click', () => show(i));
-            tab.addEventListener('keydown', (e) => {
-              const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-              if (!d) return;
-              e.preventDefault();
-              const next = (i + d + tabs.length) % tabs.length;
-              show(next);
-              tabs[next].focus();
-            });
-          });
-          show(0);
-        }
-      </script>
 
       <!--
         The mechanism, as the sequence somebody actually walks.
@@ -370,6 +249,7 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
         <ol class="steps">
           <li>
             <h3>Add the domain</h3>
+            <p class="brief">In the console, add the name you want certificates for.</p>
             <p>
               In the console, create a project and add the name you want certificates for —
               <code>shop.example.com</code>, or <code>*.example.com</code> for a wildcard. A wildcard
@@ -380,6 +260,7 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
 
           <li>
             <h3>We issue you an alias</h3>
+            <p class="brief">We give you one random label inside our zone, created with the domain and never changed.</p>
             <p>
               One randomly generated label inside <em>our</em> zone —
               <code>edgedns.cloud</code>, which is delegated to us and holds nothing but these
@@ -394,7 +275,8 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
           </li>
 
           <li>
-            <h3>In your DNS provider, add one record</h3>
+            <h3>In your DNS provider, add one CNAME record</h3>
+            <p class="brief">One <code>CNAME</code> at <code>_acme-challenge</code>, published once — the only change you ever make to your DNS.</p>
             <p>
               Wherever your zone lives now — no account with us, no API token, no delegation of
               anything else:
@@ -412,6 +294,7 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
 
           <li>
             <h3>If you publish CAA, authorise your certificate authority</h3>
+            <p class="brief">If you publish <code>CAA</code>, it must name your authority, with both the <code>issue</code> and <code>issuewild</code> tags.</p>
             <p>
               Most domains have no <code>CAA</code> record, and that is fine — an absent
               <code>CAA</code> means any authority may issue. If you do have one, it must name the
@@ -423,16 +306,203 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
 
           <li>
             <h3>Point your ACME client at us</h3>
+            <p class="brief">A few lines of configuration in the client you already run, and nothing to install.</p>
             <p>
               We speak the <code>acme-dns</code> protocol, so the clients you already run work
               unchanged — cert-manager, Caddy, acme.sh, lego, Traefik, Posh-ACME, Certify The Web.
               The console hands you a credentials file for the domain; your client publishes the
               challenge value through it instead of through your DNS provider's API.
             </p>
+
+            <!--
+              The nine configurations, moved in from a section of their own.
+
+              They used to sit ABOVE this sequence, under "Your client, configured once" — which put
+              the hardest-looking part of the page in front of a reader who did not yet know what it
+              was for. Here they are the body of the step that raises the question, read by somebody
+              who has already published the CNAME two steps earlier. The logo row above keeps the
+              recognition job the old section also did, which is the half that belonged at the top.
+
+              Two client-specific details this block must not break, both taken from source rather
+              than from anybody's documentation:
+                - acme.sh greps the /update response for the quoted value. Our 200 {"txt": "..."} is
+                  what satisfies it; a 204 or an empty body would break acme.sh and nothing else.
+                - libdns (Caddy) insists on status exactly 200, not 201 and not 204.
+
+              And the sentence that has to survive every edit here: the credentials file goes in
+              BEFORE the client's first run. Left to themselves lego, Traefik, acme.sh, win-acme,
+              Posh-ACME and Certify The Web try to register when they find no credentials, and this
+              service refuses that deliberately (design N3).
+            -->
+              <p>
+                The challenge is the only part that touches us, and in every one of these it is a few lines.
+              </p>
+              <p>
+                For the acme-dns clients, place the credentials file the console gives you <strong>before
+                the client's first run</strong>. Left to themselves most of them try to register a new
+                account, and we do not mint those — accounts and domains are created deliberately here.
+              </p>
+              <div class="tabs">
+                <div class="tablist" role="tablist" aria-label="ACME clients">
+                  <button role="tab" id="tab-traefik" aria-controls="panel-traefik"
+                          aria-selected="true" tabindex="0">Traefik</button>
+                  <button role="tab" id="tab-cert-manager" aria-controls="panel-cert-manager"
+                          aria-selected="false" tabindex="-1">cert-manager</button>
+                  <button role="tab" id="tab-certbot" aria-controls="panel-certbot"
+                          aria-selected="false" tabindex="-1">certbot</button>
+                  <button role="tab" id="tab-acme-sh" aria-controls="panel-acme-sh"
+                          aria-selected="false" tabindex="-1">acme.sh</button>
+                  <button role="tab" id="tab-lego" aria-controls="panel-lego"
+                          aria-selected="false" tabindex="-1">lego</button>
+                  <button role="tab" id="tab-caddy" aria-controls="panel-caddy"
+                          aria-selected="false" tabindex="-1">Caddy</button>
+                  <button role="tab" id="tab-win-acme" aria-controls="panel-win-acme"
+                          aria-selected="false" tabindex="-1">win-acme</button>
+                  <button role="tab" id="tab-posh-acme" aria-controls="panel-posh-acme"
+                          aria-selected="false" tabindex="-1">Posh-ACME</button>
+                  <button role="tab" id="tab-certify" aria-controls="panel-certify"
+                          aria-selected="false" tabindex="-1">Certify The Web</button>
+                </div>
+                <div class="panels">
+                <div role="tabpanel" id="panel-traefik" aria-labelledby="tab-traefik">
+                  <p>One provider line. The endpoint and credentials come from the environment.</p>
+                  <div class="term"><pre>certificatesResolvers:
+        acmealias:
+          acme:
+            dnsChallenge:
+              provider: httpreq
+
+      # HTTPREQ_ENDPOINT=https://api.acmealias.com/
+      # HTTPREQ_USERNAME / HTTPREQ_PASSWORD = your key</pre></div>
+                </div>
+                <div role="tabpanel" id="panel-cert-manager" aria-labelledby="tab-cert-manager" hidden>
+                  <p>The acmeDNS solver is built into cert-manager. No webhook to deploy.</p>
+                  <div class="term"><pre>solvers:
+        - dns01:
+            acmeDNS:
+              host: https://api.acmealias.com
+              accountSecretRef:
+                name: acmealias
+                key: acmedns.json</pre></div>
+                </div>
+                <div role="tabpanel" id="panel-certbot" aria-labelledby="tab-certbot" hidden>
+                  <p>
+                    certbot ships no acme-dns authenticator, so this one needs a plugin:
+                    <a href="https://github.com/pan-net-security/certbot-dns-acmedns"><code>certbot-dns-acmedns</code></a>.
+                    It is the one that reads a registration file and never tries to register.
+                  </p>
+                  <div class="term"><pre>pip install certbot-dns-acmedns
+
+      certbot certonly \
+        --authenticator certbot-dns-acmedns:dns-acmedns \
+        --certbot-dns-acmedns:dns-acmedns-credentials /etc/acmealias/certbot.ini \
+        -d shop.example.com
+
+      # certbot.ini points at the credentials file from the console:
+      #   certbot_dns_acmedns:dns_acmedns_api_url = https://api.acmealias.com
+      #   certbot_dns_acmedns:dns_acmedns_registration_file = /etc/acmealias/acmedns.json</pre></div>
+                </div>
+                <div role="tabpanel" id="panel-acme-sh" aria-labelledby="tab-acme-sh" hidden>
+                  <p>Four environment variables from the credentials file, then issue as usual.</p>
+                  <div class="term"><pre>export ACMEDNS_BASE_URL="https://api.acmealias.com"
+      export ACMEDNS_USERNAME="..." ACMEDNS_PASSWORD="..."
+      export ACMEDNS_SUBDOMAIN="shop-example-com"
+
+      acme.sh --issue --dns dns_acmedns -d shop.example.com</pre></div>
+                </div>
+                <div role="tabpanel" id="panel-lego" aria-labelledby="tab-lego" hidden>
+                  <p>
+                    The same provider Traefik uses, because Traefik is lego underneath. Either protocol
+                    works; <code>httpreq</code> needs no file on disk.
+                  </p>
+                  <div class="term"><pre>HTTPREQ_ENDPOINT=https://api.acmealias.com/ \
+      HTTPREQ_USERNAME=... HTTPREQ_PASSWORD=... \
+      lego --dns httpreq -d shop.example.com run
+
+      # or acme-dns, with the credentials file placed first:
+      ACME_DNS_API_BASE=https://api.acmealias.com \
+      ACME_DNS_STORAGE_PATH=/etc/acmealias/acmedns.json \
+      lego --dns acme-dns -d shop.example.com run</pre></div>
+                </div>
+                <div role="tabpanel" id="panel-caddy" aria-labelledby="tab-caddy" hidden>
+                  <p>
+                    Caddy needs a custom build — the acmedns module is not in the stock binary:
+                    <code>xcaddy build --with github.com/caddy-dns/acmedns</code>. After that it is one
+                    tls block.
+                  </p>
+                  <div class="term"><pre>tls {
+        dns acmedns {
+          server_url https://api.acmealias.com
+          username   {env.ACMEALIAS_USER}
+          password   {env.ACMEALIAS_PASS}
+          subdomain  shop-example-com
+        }
+      }</pre></div>
+                </div>
+                <div role="tabpanel" id="panel-win-acme" aria-labelledby="tab-win-acme" hidden>
+                  <p>
+                    The <strong>acme-dns</strong> validation plugin is built in. Save the credentials from
+                    the console as <code>&lt;domain&gt;.json</code> in win-acme's <code>acme-dns</code>
+                    folder before the first run — an unattended run with no stored registration fails
+                    rather than registering. After that it remembers them for every renewal.
+                  </p>
+                </div>
+                <div role="tabpanel" id="panel-posh-acme" aria-labelledby="tab-posh-acme" hidden>
+                  <p>
+                    The <strong>AcmeDns</strong> plugin ships with Posh-ACME. Its credentials are shaped
+                    differently from everyone else's — a positional array keyed by the challenge name —
+                    and the console emits exactly that, so paste it into <code>-ACMERegistration</code>
+                    and set <code>-DnsAlias</code> to the <code>fulldomain</code>.
+                  </p>
+                </div>
+                <div role="tabpanel" id="panel-certify" aria-labelledby="tab-certify" hidden>
+                  <p>
+                    The <strong>acme-dns</strong> provider is built in. Add it as a credential, paste what
+                    the console gave you into its credentials JSON, and pick it on the certificate — with
+                    that filled in it never tries to register.
+                  </p>
+                </div>
+                </div>
+              </div>
+
+            <!--
+              Tabs, progressively. Without JavaScript every panel is visible and the step is a list
+              of nine configurations — longer, and still completely usable. The script hides all but
+              one and wires the roving tabindex the ARIA tab pattern wants: arrow keys move between
+              tabs, and only the selected tab is in the tab order, so a keyboard user traverses the
+              group rather than nine separate stops.
+            -->
+            <script>
+              for (const group of document.querySelectorAll('.tabs')) {
+                const tabs = [...group.querySelectorAll('[role="tab"]')];
+                const show = (i) => {
+                  tabs.forEach((tab, n) => {
+                    const on = n === i;
+                    tab.setAttribute('aria-selected', String(on));
+                    tab.tabIndex = on ? 0 : -1;
+                    document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
+                  });
+                };
+                tabs.forEach((tab, i) => {
+                  tab.addEventListener('click', () => show(i));
+                  tab.addEventListener('keydown', (e) => {
+                    const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+                    if (!d) return;
+                    e.preventDefault();
+                    const next = (i + d + tabs.length) % tabs.length;
+                    show(next);
+                    tabs[next].focus();
+                  });
+                });
+                show(0);
+              }
+            </script>
+
           </li>
 
           <li>
             <h3>Request the certificate</h3>
+            <p class="brief">Your client and your certificate authority do the rest, exactly as they do today.</p>
             <p>
               Your client and your certificate authority do the rest, exactly as they do today. You
               can watch it happen: both commands below query the public internet, need no account
