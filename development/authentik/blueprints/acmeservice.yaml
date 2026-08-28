@@ -118,6 +118,13 @@ entries:
   - model: authentik_core.user
     identifiers: { username: user@example.com }
     attrs:
+      # EXTERNAL, because this is a customer. `public-edition` task 5.4: a
+      # customer must reach neither the provider's administration interface nor
+      # its application dashboard. Seeded users were `internal` — authentik's
+      # default — which let a customer sign in to authentik itself and browse the
+      # applications defined there. The enrolment flow already creates external
+      # users, so this only affects the ones the blueprint writes.
+      type: external
       username: user@example.com
       name: User Example
       email: user@example.com
@@ -154,6 +161,13 @@ entries:
   - model: authentik_core.user
     identifiers: { username: config-admin-user }
     attrs:
+      # EXTERNAL, because this is a customer. `public-edition` task 5.4: a
+      # customer must reach neither the provider's administration interface nor
+      # its application dashboard. Seeded users were `internal` — authentik's
+      # default — which let a customer sign in to authentik itself and browse the
+      # applications defined there. The enrolment flow already creates external
+      # users, so this only affects the ones the blueprint writes.
+      type: external
       username: config-admin-user
       name: Config Admin Dev
       email: config-admin-user@acmeservice.internal
@@ -166,6 +180,13 @@ entries:
   - model: authentik_core.user
     identifiers: { username: key-rotation-user }
     attrs:
+      # EXTERNAL, because this is a customer. `public-edition` task 5.4: a
+      # customer must reach neither the provider's administration interface nor
+      # its application dashboard. Seeded users were `internal` — authentik's
+      # default — which let a customer sign in to authentik itself and browse the
+      # applications defined there. The enrolment flow already creates external
+      # users, so this only affects the ones the blueprint writes.
+      type: external
       username: key-rotation-user
       name: Key Rotation Dev
       email: key-rotation-user@acmeservice.internal
@@ -178,6 +199,13 @@ entries:
   - model: authentik_core.user
     identifiers: { username: read-only-user }
     attrs:
+      # EXTERNAL, because this is a customer. `public-edition` task 5.4: a
+      # customer must reach neither the provider's administration interface nor
+      # its application dashboard. Seeded users were `internal` — authentik's
+      # default — which let a customer sign in to authentik itself and browse the
+      # applications defined there. The enrolment flow already creates external
+      # users, so this only affects the ones the blueprint writes.
+      type: external
       username: read-only-user
       name: Read Only Dev
       email: read-only-user@acmeservice.internal
@@ -789,12 +817,36 @@ entries:
   # mapping design C10 removed, and the two are easy to conflate: deleting the
   # group as part of that removal would close the staff console.
   - model: authentik_core.application
+    id: app-admin
     identifiers: { slug: acmeservice-admin }
     attrs:
       name: acmeservice staff
       slug: acmeservice-admin
       provider: !KeyOf provider-admin
       meta_description: "Staff surface. Address-restricted at the ingress; see public-edition U7."
+
+  # WITHOUT THIS BINDING THE STAFF APPLICATION IS OPEN TO EVERYBODY. An
+  # application with no policy binding is visible to every authenticated user on
+  # authentik's dashboard AND will start its authorization flow for them, so the
+  # provider hands out a token for the staff client to any customer who asks.
+  #
+  # The service still refuses them — the staff tree answers only on the staff
+  # hostname, checks a separate client id, and requires a role — so this was not a
+  # way into the staff console. It was worse in a quieter way: every customer
+  # signing in saw a tile called "acmeservice staff" and learned that a staff
+  # surface exists, where it is, and that they are one click from being told off
+  # by it.
+  #
+  # `public-edition` U7 restricts admin.acmealias.com by address at the ingress.
+  # That is the other half and neither half is sufficient: the ingress stops
+  # somebody reaching the surface, and this stops the provider advertising it.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf app-admin
+      group: !Find [authentik_core.group, [name, acme-admin]]
+      order: 0
+    attrs:
+      negate: false
 
   # --- what the sign-in page looks like ---------------------------------------
   #

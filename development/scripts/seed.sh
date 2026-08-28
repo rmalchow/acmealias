@@ -128,6 +128,13 @@ acmectl adminctl node add --project demo --label a --ipv4 203.0.113.10
 acmectl adminctl node add --project demo --label b --ipv4 203.0.113.11
 acmectl adminctl domain create --project demo --name "demo.example.com"
 acmectl adminctl domain create --project demo --name "*.demo.example.com"
+# A third domain, for the OTHER dialect. traefik-lb obtains one certificate for
+# demo.example.com through lego's httpreq protocol and a second for this one
+# through acme-dns — same Traefik, same key, same challenge API, two spellings
+# (acme-dns-protocol task 6.1). It is a separate name because two routers cannot
+# share a Host rule, and a separate name means a separate alias and its own
+# CNAME, which publish_delegation picks up for free.
+acmectl adminctl domain create --project demo --name "alt.example.com"
 # demo.example.com and *.demo.example.com deliberately share one alias and one
 # CNAME — the wildcard case the whole design turns on. `adminctl project dns`
 # below should therefore show TWO domains but only ONE _acme-challenge record.
@@ -142,7 +149,13 @@ say "minting an API key"
 key_out="$(acmectl adminctl key create --project demo --name "demo")"
 printf '%s\n' "$key_out"
 
-key_id="$(printf '%s\n' "$key_out" | sed -n '1s/.*created api key "\([^"]*\)".*/\1/p')"
+# Matches on `api key "..."` rather than on the whole opening phrase. The CLI
+# prints "created api key" for a system key and "created PROJECT api key" for a
+# project one (api-key-kinds K1), and a pattern anchored to the first wording
+# stopped matching the day the second appeared — with the failure arriving here,
+# in a shell script, as an unrecoverable secret rather than in the change that
+# renamed it.
+key_id="$(printf '%s\n' "$key_out" | sed -n '1s/.*api key "\([^"]*\)".*/\1/p')"
 key_secret="$(printf '%s\n' "$key_out" | tail -n1 | tr -d '[:space:]')"
 [ -n "$key_id" ] && [ -n "$key_secret" ] \
   || die "could not parse the key out of \`adminctl key create\`; the secret is unrecoverable — reset.sh and try again"
@@ -156,6 +169,41 @@ HTTPREQ_USERNAME=$key_id
 HTTPREQ_PASSWORD=$key_secret
 EOF
 say "wrote $KEY_ENV for traefik-lb ($key_id)"
+
+# --- the same key, spelled the acme-dns way ----------------------------------
+#
+# lego's acme-dns provider looks the domain up in this file. FINDING IT IS WHAT
+# MATTERS: with an account present it goes straight to /update, and with none it
+# calls /register — which this service refuses (design N3), because an
+# unauthenticated endpoint that mints inventory is the shape the whole tenancy
+# model exists to prevent. So the file is the registration, produced here by
+# something that is already authorized, exactly as the console produces it for a
+# customer.
+#
+# The shape is goacmedns's: an object keyed by DOMAIN. `fulldomain` is the name
+# the customer's CNAME points at and `subdomain` is its first label — both read
+# back out of the DNS plan rather than guessed, because with the shipped default
+# the label is random and only the running system knows it.
+say "writing the acme-dns credentials for traefik-lb"
+alt_target="$(acmectl adminctl project dns demo | sed -n '/Zone snippet:/,$p' |
+  awk '$1 == "_acme-challenge.alt.example.com." && $4 == "CNAME" { print $5 }' | tail -n1)"
+[ -n "$alt_target" ] || die "no _acme-challenge CNAME for alt.example.com in the DNS plan"
+alt_full="${alt_target%.}"          # jxet64y6bngq4j37.dev.acmeservice.internal
+alt_label="${alt_full%%.*}"         # jxet64y6bngq4j37
+
+umask 077
+cat >"$DEV_DIR/$ACMEDNS_STORE" <<EOF
+{
+  "alt.example.com": {
+    "fulldomain": "$alt_full",
+    "subdomain": "$alt_label",
+    "username": "$key_id",
+    "password": "$key_secret",
+    "server_url": ""
+  }
+}
+EOF
+say "wrote $ACMEDNS_STORE for alt.example.com ($alt_label)"
 
 # An already-running traefik-lb started with the empty placeholder and would
 # keep being refused 401 until it is restarted with the real values.
