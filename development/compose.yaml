@@ -126,7 +126,7 @@ services:
   # AUTHENTIK_BOOTSTRAP_* seeds the initial admin on the first start, so nobody
   # has to walk the out-of-box setup flow to get a usable stack.
   authentik-server:
-    image: ghcr.io/goauthentik/server:2024.10
+    image: ghcr.io/goauthentik/server:2026.8.0
     restart: unless-stopped
     dns: ["172.28.0.53"]
     command: server
@@ -221,7 +221,7 @@ services:
   # provider that has no groups, no users and no clients, and the failure looks
   # like a login problem rather than a worker problem.
   authentik-worker:
-    image: ghcr.io/goauthentik/server:2024.10
+    image: ghcr.io/goauthentik/server:2026.8.0
     restart: unless-stopped
     dns: ["172.28.0.53"]
     command: worker

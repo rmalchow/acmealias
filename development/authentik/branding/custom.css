@@ -1,13 +1,26 @@
 /* The sign-in page's appearance (design K1's identity provider, wearing our
  * clothes rather than authentik's).
  *
- * WHY A CSS FILE AND NOT A SETTING. authentik 2024.10's brand object carries a
- * title, a logo and a favicon and nothing else — `branding_custom_css` arrives
- * in a later release. The version it does have is this file: the flow page loads
- * /static/dist/custom.css unconditionally, and the image ships an empty one.
- * development/compose.yaml bind-mounts this over it, so the styling is a file in
- * the repository rather than a field somebody typed into an admin interface, and
- * `./scripts/dev.sh reset` keeps it.
+ * HOW THIS REACHES THE PAGE. It is inlined into the brand's `branding_custom_css`
+ * by development/authentik/blueprints/acmeservice.yaml, and this file is the
+ * source that gets inlined — edit here, and the blueprint carries it.
+ *
+ * It used to be a bind-mount instead: authentik 2024.10 put a <link> to
+ * /static/dist/custom.css on every flow page and shipped that file empty, so
+ * compose.yaml mounted this over it. 2026.8 does not emit that link, so the
+ * mounted file is served, correct, and never loaded.
+ *
+ * THE SELECTORS BELOW ARE FINE, and that is worth stating because it was
+ * doubted at length. The flow page is styled by ordinary `.pf-c-*` class
+ * selectors reaching ordinary elements, verified against 2026.8 with a colour
+ * probe. What broke was never the CSS: the brand carrying it was not the one
+ * being served (see the blueprint's `default: true`), so every rule here sat on
+ * a record nothing read.
+ *
+ * The one mechanism that genuinely does NOT work is an `@import` in
+ * `branding_custom_css` pointing back at the mounted file: the web bundle
+ * applies that field through `adoptedStyleSheets` with `replaceSync`, and a
+ * constructed stylesheet drops @import rules by specification.
  *
  * Everything here is written twice — once for `:root`/`body` and once for
  * `:host` — because authentik renders the flow inside shadow roots and adopts

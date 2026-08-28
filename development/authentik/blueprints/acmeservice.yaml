@@ -616,6 +616,99 @@ entries:
       policy: !KeyOf policy-reputation
       order: 0
 
+  # --- the way back in --------------------------------------------------------
+  #
+  # "Forgot password". It did not exist: no recovery flow was defined and the
+  # identification stage named none, so the sign-in page offered no way back and
+  # the only remedy was somebody editing the user in authentik's admin interface.
+  # For a password-authenticated product that is a support ticket per forgotten
+  # password, and the people it strands are the ones who signed up and left it a
+  # month.
+  #
+  # THIS FLOW DELIBERATELY DOES NOT END IN A user_login STAGE, and that is the
+  # security decision in it rather than an omission. The enrolment section above
+  # wrote the warning down before this flow existed: the approval gate is a
+  # POLICY bound to specific flows, not a flag Django enforces everywhere, so it
+  # guards the flows it is bound to and nothing else. A recovery flow that signed
+  # somebody in at the end would be a complete bypass — an unadmitted person
+  # resets a password and lands inside, never having passed the deny stage bound
+  # at order 25 of the authentication flow.
+  #
+  # Ending without a session costs one extra step (set a password, then sign in)
+  # and means recovery cannot become a second front door. The deny is then
+  # reached the ordinary way, because signing in is the ordinary way.
+  #
+  # Nothing here touches `user_path`, so a person waiting for approval is still
+  # waiting for approval afterwards: recovery proves control of an address, which
+  # is a different claim from being admitted.
+  - model: authentik_stages_identification.identificationstage
+    id: recovery-stage-identification
+    identifiers: { name: acmeservice-recovery-identification }
+    attrs:
+      name: acmeservice-recovery-identification
+      user_fields: [email, username]
+      # NO password_stage here, unlike the sign-in one: recovery exists for
+      # somebody who does not have the password. The enumeration concern is
+      # answered by the email stage instead, which reports the same thing
+      # whether or not the identifier matched.
+      show_matched_user: false
+
+  - model: authentik_stages_email.emailstage
+    id: recovery-stage-email
+    identifiers: { name: acmeservice-recovery-email }
+    attrs:
+      name: acmeservice-recovery-email
+      use_global_settings: true
+      template: email/password_reset.html
+      # FALSE, for the same reason the enrolment mail sets it false: `is_active`
+      # means "we have admitted this person" in this deployment, not "they
+      # proved their address". A recovery link that activated somebody would let
+      # anyone holding an unapproved registration admit themselves by asking to
+      # reset a password they had just chosen.
+      activate_user_on_success: false
+      # The provider's default subject is the name of the wrong product. The
+      # grammar follows transactional-email T4: the noun the message concerns
+      # comes first.
+      subject: "Password reset — AcmeAlias"
+
+  - model: authentik_flows.flow
+    id: flow-recovery
+    identifiers: { slug: acmeservice-recovery }
+    attrs:
+      name: acmeservice-recovery
+      title: Reset your password
+      designation: recovery
+      # The identification stage below asks for an identifier before anything is
+      # sent, so this flow is reachable by anybody and reveals nothing.
+      authentication: require_unauthenticated
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !KeyOf recovery-stage-identification
+      order: 10
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !KeyOf recovery-stage-email
+      order: 20
+
+  # The prompt and the write are authentik's own, reused rather than copied: they
+  # are exactly "ask for a new password twice" and "store it", and a second pair
+  # would be two things to keep in step.
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !Find [authentik_stages_prompt.promptstage, [name, default-password-change-prompt]]
+      order: 30
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !Find [authentik_stages_user_write.userwritestage, [name, default-password-change-write]]
+      order: 40
+
   # --- one page, and no username oracle ---------------------------------------
   #
   # authentik ships an identification stage that asks for the identifier, submits
@@ -640,22 +733,28 @@ entries:
   # it names a flow here, which is why the absence of this one line WAS the whole
   # of the product's closure (design S1).
   #
-  # AN UNAPPROVED PERSON STILL MEETS "Failed to authenticate.", AND THAT IS A
-  # KNOWN DEFECT, NOT AN OVERSIGHT. Design S3 requires a real message here rather
-  # than a refusal indistinguishable from a wrong password, and authentik 2024.10
-  # cannot give one while `is_active` is the gate. Verified by hand against this
-  # stack: an unknown identifier, a wrong password and a correct password for an
-  # INACTIVE user all return exactly `{"non_field_errors": [{"string": "Failed to
-  # authenticate.", "code": "invalid"}]}`. The reason is structural — because
-  # `password_stage` is set, the password is checked INSIDE this stage's
-  # validation, and Django's ModelBackend refuses an inactive user there, so no
-  # later stage or policy in the flow is ever reached and there is nothing for a
-  # deny stage to fire on.
+  # AN UNAPPROVED PERSON USED TO MEET "Failed to authenticate." HERE, AND NO
+  # LONGER DOES. This paragraph described that as a known defect for longer than
+  # it was true, so what it recorded is worth keeping as the reason the fix took
+  # the shape it did.
   #
-  # The obvious repair makes it worse: dropping `password_stage` puts the deny
-  # stage before any password is proved, so anybody could type an address and be
-  # told whether it has a registration awaiting review. That is the enumeration
-  # oracle the line below exists to close. See self-service-signup task 2.2.
+  # The defect was structural rather than cosmetic: because `password_stage` is
+  # set below, the password is checked INSIDE this stage's validation, and
+  # Django's ModelBackend refuses an inactive user there — so no later stage or
+  # policy was ever reached and there was nothing for a deny stage to fire on.
+  # An unknown identifier, a wrong password and a correct password for an
+  # INACTIVE user all returned exactly `{"non_field_errors": [{"string": "Failed
+  # to authenticate.", "code": "invalid"}]}`.
+  #
+  # The repair was to stop using `is_active` as the gate and use the user's PATH
+  # instead (see the enrolment section), which leaves identification and the
+  # password succeeding and lets the deny stage bound at order 25 fire with a
+  # sentence that says what is actually happening.
+  #
+  # What must NOT be done is dropping `password_stage`: that puts the deny before
+  # any password is proved, so anybody could type an address and be told whether
+  # it has a registration awaiting review. That is the enumeration oracle the
+  # line below exists to close. See self-service-signup task 2.2.
   - model: authentik_stages_identification.identificationstage
     identifiers: { name: default-authentication-identification }
     attrs:
@@ -664,6 +763,12 @@ entries:
         !Find [authentik_stages_password.passwordstage, [name, default-authentication-password]]
       show_matched_user: false
       enrollment_flow: !KeyOf flow-enrollment
+      # `recovery_flow` IS THE "FORGOT PASSWORD" LINK, exactly as
+      # `enrollment_flow` above is the sign-up one: the identification stage
+      # renders each link if and only if it names a flow, and there is no
+      # template to edit and no setting elsewhere. Its absence was the whole of
+      # why the product had no password recovery.
+      recovery_flow: !KeyOf flow-recovery
 
   # --- the group claim --------------------------------------------------------
   #
@@ -708,6 +813,20 @@ entries:
     attrs:
       name: acmeservice-console
       client_type: confidential
+      # EXPLICIT SINCE authentik 2026.8, AND EMPTY MEANS NOTHING IS ALLOWED.
+      # The provider gained a `grant_types` list with no default that suits an
+      # existing provider: a blueprint that does not set it leaves `[]`, and the
+      # authorize endpoint then refuses every request with `invalid_request` and
+      # "The request is otherwise malformed" — which arrives at our callback and
+      # surfaces as a 500 from OUR service for a decision authentik made. The
+      # server log is where the real reason is: `Invalid grant_type for provider`.
+      #
+      # ONLY `authorization_code`. Not `refresh_token`: the session is
+      # server-side and this deployment deliberately holds no provider tokens
+      # (design D10), so a refresh token would be a credential we asked for and
+      # have nowhere to put.
+      grant_types:
+        - authorization_code
       client_id: acmeservice-console
       client_secret: dev-console-secret
       sub_mode: hashed_user_id
@@ -729,16 +848,40 @@ entries:
         - url: http://console.localhost/api/v1/auth/callback
           matching_mode: strict
         # Sign-out sends the browser here through authentik's end-session
-        # endpoint (ACME_POST_LOGOUT_REDIRECT_URL). authentik validates a
-        # post_logout_redirect_uri against THIS list — the same one the callback
-        # is registered in — and refuses an unregistered one, so ending the
-        # provider's session needs the marketing site named here as well.
+        # endpoint (ACME_POST_LOGOUT_REDIRECT_URL). authentik refuses an
+        # unregistered post_logout_redirect_uri, so the marketing site has to be
+        # named — but it is named as a LOGOUT uri (below), which is a separate
+        # list from the authorization one the callback is registered in.
         - url: http://www.localhost
           matching_mode: strict
+          # `logout`, NOT the default `authorization` — authentik 2026.8 types
+          # redirect URIs and validates a post_logout_redirect_uri against the
+          # LOGOUT entries alone. Registered as an authorization URI it is not a
+          # valid post-logout destination, which is the shape of the bug this
+          # replaces: the invalidation flow completed to authentik's own root
+          # and the person was left looking at the identity provider's page
+          # rather than the marketing site.
+          redirect_uri_type: logout
       authorization_flow:
         !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      # `default-invalidation-flow`, NOT `default-provider-invalidation-flow`.
+      # The two differ in exactly the thing sign-out is for. The provider one
+      # ships with NO STAGES AT ALL: it ends the application's session, leaves
+      # authentik's own standing, and redirects — which is correct for an SSO
+      # estate where signing out of one app should not sign you out of the
+      # others, and wrong here, where "signed out" has to mean the next person
+      # at this machine is not one click from being the previous one. The
+      # symptom is precise and easy to misread as a redirect bug: you land on
+      # the marketing site, press sign in, and are back inside with no password.
+      #
+      # `default-invalidation-flow` is the brand's own, ships with
+      # `default-invalidation-logout` (a UserLogoutStage) bound at order 0, and
+      # is a flow authentik maintains rather than one of ours. That last part
+      # matters: a CUSTOM invalidation flow was tried and makes the executor
+      # redirect to itself in a loop, which is strictly worse than landing on
+      # the wrong page.
       invalidation_flow:
-        !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+        !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
@@ -770,6 +913,20 @@ entries:
     attrs:
       name: acmeservice-admin
       client_type: confidential
+      # EXPLICIT SINCE authentik 2026.8, AND EMPTY MEANS NOTHING IS ALLOWED.
+      # The provider gained a `grant_types` list with no default that suits an
+      # existing provider: a blueprint that does not set it leaves `[]`, and the
+      # authorize endpoint then refuses every request with `invalid_request` and
+      # "The request is otherwise malformed" — which arrives at our callback and
+      # surfaces as a 500 from OUR service for a decision authentik made. The
+      # server log is where the real reason is: `Invalid grant_type for provider`.
+      #
+      # ONLY `authorization_code`. Not `refresh_token`: the session is
+      # server-side and this deployment deliberately holds no provider tokens
+      # (design D10), so a refresh token would be a credential we asked for and
+      # have nowhere to put.
+      grant_types:
+        - authorization_code
       client_id: acmeservice-admin
       client_secret: dev-admin-secret
       sub_mode: hashed_user_id
@@ -791,16 +948,40 @@ entries:
         - url: http://admin.localhost/api/admin/auth/callback
           matching_mode: strict
         # Sign-out sends the browser here through authentik's end-session
-        # endpoint (ACME_POST_LOGOUT_REDIRECT_URL). authentik validates a
-        # post_logout_redirect_uri against THIS list — the same one the callback
-        # is registered in — and refuses an unregistered one, so ending the
-        # provider's session needs the marketing site named here as well.
+        # endpoint (ACME_POST_LOGOUT_REDIRECT_URL). authentik refuses an
+        # unregistered post_logout_redirect_uri, so the marketing site has to be
+        # named — but it is named as a LOGOUT uri (below), which is a separate
+        # list from the authorization one the callback is registered in.
         - url: http://www.localhost
           matching_mode: strict
+          # `logout`, NOT the default `authorization` — authentik 2026.8 types
+          # redirect URIs and validates a post_logout_redirect_uri against the
+          # LOGOUT entries alone. Registered as an authorization URI it is not a
+          # valid post-logout destination, which is the shape of the bug this
+          # replaces: the invalidation flow completed to authentik's own root
+          # and the person was left looking at the identity provider's page
+          # rather than the marketing site.
+          redirect_uri_type: logout
       authorization_flow:
         !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      # `default-invalidation-flow`, NOT `default-provider-invalidation-flow`.
+      # The two differ in exactly the thing sign-out is for. The provider one
+      # ships with NO STAGES AT ALL: it ends the application's session, leaves
+      # authentik's own standing, and redirects — which is correct for an SSO
+      # estate where signing out of one app should not sign you out of the
+      # others, and wrong here, where "signed out" has to mean the next person
+      # at this machine is not one click from being the previous one. The
+      # symptom is precise and easy to misread as a redirect bug: you land on
+      # the marketing site, press sign in, and are back inside with no password.
+      #
+      # `default-invalidation-flow` is the brand's own, ships with
+      # `default-invalidation-logout` (a UserLogoutStage) bound at order 0, and
+      # is a flow authentik maintains rather than one of ours. That last part
+      # matters: a CUSTOM invalidation flow was tried and makes the executor
+      # redirect to itself in a loop, which is strictly worse than landing on
+      # the wrong page.
       invalidation_flow:
-        !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+        !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
@@ -863,14 +1044,315 @@ entries:
   # and disappear on the next `reset.sh`, leaving a blueprint that names a file
   # nobody can serve.
   #
-  # The black background and the accent green are not here — 2024.10's brand has
-  # no CSS field at all — they are development/authentik/branding/custom.css.
+  # THE STYLESHEET IS PULLED IN BY THE BRAND NOW, NOT BY THE PAGE.
+  #
+  # It used to be enough to mount a file: the image ships an empty
+  # /web/dist/custom.css, every flow page had a <link> to it, and
+  # development/compose.yaml replaces the file. authentik 2026.8 removed that
+  # link and added a `branding_custom_css` field on the brand instead — so the
+  # mounted file is still SERVED (200, the right bytes) and simply never loaded.
+  # The failure is silent and looks like a regression in our CSS rather than a
+  # change of mechanism: the page renders unstyled, on the stock white
+  # background, with authentik's own logo.
+  #
+  # The field holds an @import rather than the stylesheet itself, so the CSS
+  # stays a real file that a developer edits with syntax highlighting and a diff
+  # that means something, instead of nine kilobytes of YAML block scalar nobody
+  # will touch twice. The mount in compose.yaml is what makes the URL resolve
+  # and stays exactly as it was.
   - model: authentik_brands.brand
     identifiers: { domain: authentik-default }
     attrs:
+      # THE ONE LINE THAT DECIDES WHETHER ANY OF THE REST IS EVER SEEN.
+      #
+      # A brand is selected by matching its `domain` against the hostname; the
+      # brand marked `default` is what serves every request that matches none.
+      # `authentik-default` is NOT a hostname — it is the literal domain value of
+      # the brand authentik ships — so this brand matches nothing by name and is
+      # reached only by being the default.
+      #
+      # Without it, `GET /api/v3/core/brands/current/` answers
+      # `matched_domain: "fallback"` with authentik's own title and logo, and
+      # every field below — the title, the logo, the stylesheet — sits on a
+      # record no page reads. The symptom is a completely stock sign-in page,
+      # which reads as "our CSS broke" and sends you looking at selectors. It is
+      # not a CSS problem and there is no error anywhere.
+      default: true
       branding_title: AcmeAlias
       branding_logo: /static/dist/brand/logo.png
       branding_favicon: /static/dist/brand/logo.png
+      # THE STYLESHEET, INLINED FROM development/authentik/branding/custom.css.
+      #
+      # It reaches the page through this field because 2026.8 no longer emits the
+      # <link> to /static/dist/custom.css that 2024.10 did — the bind-mount in
+      # compose.yaml still serves the file correctly and nothing loads it. The
+      # mount stays for the logo and the flow background, which ARE fetched by
+      # URL.
+      #
+      # Do not replace this with `@import url("/static/dist/custom.css")`. It is
+      # accepted, stored, and inert: the field is applied through
+      # `adoptedStyleSheets` with `replaceSync`, and a constructed stylesheet
+      # drops @import rules by specification.
+      #
+      # The selectors are ordinary `.pf-c-*` classes and they work — verified on
+      # 2026.8 with a colour probe. When this whole thing appeared to be a
+      # shadow-DOM problem, it was not: `default: true` below was missing, so the
+      # brand carrying these rules was never the brand being served.
+      branding_custom_css: |
+        /* The sign-in page's appearance (design K1's identity provider, wearing our
+         * clothes rather than authentik's).
+         *
+         * HOW THIS REACHES THE PAGE. It is inlined into the brand's `branding_custom_css`
+         * by development/authentik/blueprints/acmeservice.yaml, and this file is the
+         * source that gets inlined — edit here, and the blueprint carries it.
+         *
+         * It used to be a bind-mount instead: authentik 2024.10 put a <link> to
+         * /static/dist/custom.css on every flow page and shipped that file empty, so
+         * compose.yaml mounted this over it. 2026.8 does not emit that link, so the
+         * mounted file is served, correct, and never loaded.
+         *
+         * THE SELECTORS BELOW ARE FINE, and that is worth stating because it was
+         * doubted at length. The flow page is styled by ordinary `.pf-c-*` class
+         * selectors reaching ordinary elements, verified against 2026.8 with a colour
+         * probe. What broke was never the CSS: the brand carrying it was not the one
+         * being served (see the blueprint's `default: true`), so every rule here sat on
+         * a record nothing read.
+         *
+         * The one mechanism that genuinely does NOT work is an `@import` in
+         * `branding_custom_css` pointing back at the mounted file: the web bundle
+         * applies that field through `adoptedStyleSheets` with `replaceSync`, and a
+         * constructed stylesheet drops @import rules by specification.
+         *
+         * Everything here is written twice — once for `:root`/`body` and once for
+         * `:host` — because authentik renders the flow inside shadow roots and adopts
+         * this stylesheet into each of them. A rule that only names `body` reaches the
+         * page but not the card sitting inside a shadow root.
+         */
+
+        :root,
+        :host {
+          --acme-ink: #05070a;
+          --acme-accent: #00ffb0;
+          --acme-text: #ffffff;
+          --acme-text-dim: #a7b0ba;
+          /* An opaque grey, not a translucent white: on black, a 4%-white panel is a
+           * shade nobody can see, and the card stops looking like a card. */
+          --acme-surface: #16191d;
+          --acme-surface-raised: #1c2026;
+          --acme-line: rgba(255, 255, 255, 0.12);
+
+          /* PatternFly's own dark palette, pulled down to our black. authentik loads
+           * theme-dark.css and everything in it reads these; setting them here is what
+           * makes components we never name — the footer band, the identifier chip,
+           * error messages — land on the same background as the card. */
+          --pf-global--BackgroundColor--dark-100: var(--acme-surface);
+          --pf-global--BackgroundColor--dark-200: var(--acme-ink);
+          --pf-global--BackgroundColor--dark-300: var(--acme-surface-raised);
+          --pf-global--BackgroundColor--dark-400: var(--acme-surface-raised);
+          --pf-global--Color--light-100: var(--acme-text);
+          --pf-global--Color--light-200: var(--acme-text-dim);
+        }
+
+        /* Black, with one off-centre highlight so it reads as a lit surface rather than
+         * as a failure to set a colour. Two radials: a wide cool wash top-left and a
+         * tight accent-tinted specular above the card. */
+        html,
+        body,
+        .pf-c-background-image,
+        .pf-c-login,
+        .pf-c-page,
+        ak-flow-executor {
+          background: var(--acme-ink) !important;
+        }
+
+        .pf-c-login,
+        .pf-c-background-image {
+          /* Three washes, all faint: a green one from the top left, a neutral specular
+           * behind the card, and a deep vignette so the corners stay properly black.
+           * Fixed attachment keeps them put if the flow grows tall enough to scroll. */
+          background-image:
+            radial-gradient(70rem 45rem at 12% -12%, rgba(0, 255, 176, 0.16), transparent 68%),
+            radial-gradient(45rem 30rem at 50% 2%, rgba(190, 225, 255, 0.10), transparent 66%),
+            radial-gradient(90rem 70rem at 50% 120%, rgba(0, 255, 176, 0.05), transparent 60%) !important;
+          background-attachment: fixed !important;
+          color: var(--acme-text);
+        }
+
+        /* authentik paints a stock illustration behind the form. Nothing here wants it. */
+        /* The photograph behind the card is NOT hidden here, and hiding it here was the
+         * mistake worth recording: authentik hands the flow's background in as a custom
+         * property on the element, so any rule that switches it off is one selector away
+         * from being bypassed by a stage that renders it somewhere else — which is
+         * exactly what happened, and the page still showed the stock image. The file
+         * itself is replaced instead (development/compose.yaml), so there is nothing
+         * left to override. What stays here is the black underneath it, for the moment
+         * before the image loads.
+         *
+         * The stock decorative SVG is a different thing and does go away. */
+        .pf-c-background-image::before,
+        .pf-c-background-image svg {
+          display: none !important;
+        }
+
+        /* The card. Glass over black rather than a white panel: a light card on a black
+         * page is the one combination that looks accidental. */
+        .pf-c-login__main,
+        .pf-c-login__main .pf-c-login__main-header,
+        .pf-c-login__main .pf-c-login__main-body,
+        .pf-c-login__main .pf-c-login__main-footer {
+          background-color: var(--acme-surface) !important;
+          color: var(--acme-text) !important;
+        }
+
+        .pf-c-login__main {
+          border: 1px solid var(--acme-line);
+          border-radius: 8px;
+          /* Lit from above: a hairline highlight on the top edge, a long shadow under
+           * the whole panel. That, and nothing else, is what separates a grey box from
+           * a grey box floating on black. */
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.08) inset,
+            0 30px 70px rgba(0, 0, 0, 0.75);
+        }
+
+        /* The card's body is not one element: each stage renders inside its own custom
+         * element, and a stage host left transparent shows the page's black through the
+         * middle of the panel while the header stays grey. Naming the hosts is what
+         * makes the card one colour. */
+        .pf-c-login__main-body,
+        ak-flow-executor,
+        ak-stage-identification,
+        ak-stage-password,
+        ak-stage-authenticator-validate,
+        ak-stage-user-login {
+          background-color: var(--acme-surface) !important;
+          color: var(--acme-text);
+        }
+
+        /* ONE PANEL, NOT A HEADER AND A PANEL.
+         *
+         * PatternFly's login header is a fixed-height band and authentik's logo is
+         * taller than it, so the logo hangs out of the bottom — with a lighter band
+         * behind its top half, a divider line drawn straight through its middle, and the
+         * logo's glow smeared along that line. Every one of those is a symptom of the
+         * band existing at all. So it does not: same colour as the body, no divider, and
+         * enough padding that the logo has the room it was overflowing to find. */
+        .pf-c-login__main .pf-c-login__main-header {
+          background-color: var(--acme-surface) !important;
+          border-bottom: none !important;
+          border-radius: 8px 8px 0 0;
+          padding: 2.25rem 2rem 0.5rem !important;
+          min-height: 0 !important;
+          overflow: visible;
+        }
+
+        .pf-c-login__main .pf-c-login__main-header .pf-c-brand,
+        .pf-c-login__main .pf-c-login__main-header img {
+          display: block;
+          margin: 0 auto;
+        }
+
+        .pf-c-login__main-header-desc,
+        .pf-c-login__main-footer-band,
+        .pf-c-form__helper-text,
+        .pf-c-login__main-footer-band-item {
+          color: var(--acme-text-dim) !important;
+          background-color: transparent !important;
+        }
+
+        .pf-c-title,
+        .pf-c-form__label-text,
+        h1, h2, h3 {
+          color: var(--acme-text) !important;
+        }
+
+        /* THE GLOW GOES ON THE IMAGE, NOT ON `.pf-c-brand`.
+         *
+         * authentik puts three classes on ONE div — `pf-c-login__main-header pf-c-brand
+         * ak-brand` — so the header and the brand are the same element. A drop-shadow
+         * on `.pf-c-brand` is therefore a drop-shadow on the header's whole box, which
+         * draws a green line across the card under the logo and reads as a divider
+         * nobody asked for. Naming the img is what confines it to the mark, and a
+         * max-height on that div squeezes the header rather than the logo. */
+        .pf-c-login__main-header.pf-c-brand {
+          filter: none !important;
+        }
+
+        .pf-c-brand img,
+        img.pf-c-brand,
+        .pf-c-login__main-header img {
+          max-height: 4.5rem;
+          filter: drop-shadow(0 0 12px rgba(0, 255, 176, 0.22));
+        }
+
+        /* Inputs: dark wells, accent focus ring.
+         *
+         * PatternFly draws every field from custom properties, and its own selectors are
+         * specific enough that overriding `background-color` alone leaves states behind
+         * — the disabled password field stayed light grey until the variables below were
+         * set. Set the variables and the states follow. */
+        .pf-c-form-control,
+        .pf-c-form-control:disabled,
+        .pf-c-form-control[readonly] {
+          --pf-c-form-control--BackgroundColor: rgba(0, 0, 0, 0.45);
+          --pf-c-form-control--Color: var(--acme-text);
+          --pf-c-form-control--BorderTopColor: var(--acme-line);
+          --pf-c-form-control--BorderRightColor: var(--acme-line);
+          --pf-c-form-control--BorderLeftColor: var(--acme-line);
+          --pf-c-form-control--BorderBottomColor: var(--acme-line);
+          --pf-c-form-control--disabled--BackgroundColor: rgba(0, 0, 0, 0.30);
+          --pf-c-form-control--disabled--Color: var(--acme-text-dim);
+          --pf-c-form-control--m-readonly--BackgroundColor: rgba(0, 0, 0, 0.30);
+          --pf-c-form-control--focus--BorderBottomColor: var(--acme-accent);
+          --pf-c-form-control--placeholder--Color: var(--acme-text-dim);
+        }
+
+        .pf-c-form-control {
+          background-color: rgba(0, 0, 0, 0.45) !important;
+          color: var(--acme-text) !important;
+          border: 1px solid var(--acme-line) !important;
+          border-bottom-color: var(--acme-line) !important;
+        }
+
+        /* PatternFly paints a disabled field solid grey, which on black reads as a
+         * filled-in box rather than a waiting one. The password field arrives disabled
+         * on this flow — it is enabled once the identifier is typed — so this is the
+         * state most people see first. */
+        .pf-c-form-control:disabled,
+        .pf-c-form-control[disabled],
+        .pf-c-form-control[readonly] {
+          background-color: rgba(0, 0, 0, 0.30) !important;
+          color: var(--acme-text-dim) !important;
+        }
+
+        .pf-c-form-control::placeholder {
+          color: var(--acme-text-dim) !important;
+          opacity: 1;
+        }
+
+        .pf-c-form-control:focus {
+          border-bottom-color: var(--acme-accent) !important;
+          box-shadow: 0 0 0 1px rgba(0, 255, 176, 0.45);
+          outline: none;
+        }
+
+        /* The one saturated thing on the page is the button, in the logo's green.
+         * Dark text on it because #00ffb0 is far too bright to carry white type. */
+        .pf-c-button.pf-m-primary {
+          background-color: var(--acme-accent) !important;
+          color: var(--acme-ink) !important;
+          border: none;
+        }
+
+        .pf-c-button.pf-m-primary:hover,
+        .pf-c-button.pf-m-primary:focus {
+          background-color: #4dffc9 !important;
+        }
+
+        a,
+        .pf-c-button.pf-m-link {
+          color: var(--acme-accent) !important;
+        }
       # authentik ships both a light and a dark stylesheet and picks per browser
       # preference by default. Pinned to dark here, so the page every visitor
       # gets is the one the CSS below is written against — a light-theme visitor

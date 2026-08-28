@@ -160,10 +160,12 @@ sides:
 
 | URL | What |
 | --- | --- |
-| `http://acme-console.localhost` | the console, and its admin API under `/api` |
+| `http://console.localhost` | the console, and its admin API under `/api` |
 | `http://acme-api.localhost` | the same admin API on its own hostname — for `curl`, not the browser |
 | `http://acme-challenge.localhost` | the ACME challenge API (lego's `httpreq`), for poking at `/present` by hand |
-| `http://keycloak.localhost` | the IdP; `admin-user` / `devpass` signs in with the ADMIN role |
+| `http://auth.localhost` | authentik, the identity provider; `admin-user` / `devpass` signs in with the ADMIN role |
+| `http://www.localhost` | the marketing site, and where signing out lands |
+| `http://mail.localhost` | mailpit — every message the stack sends, delivered nowhere and readable here |
 | `https://demo.example.com` (`:443`, via `--acme`) | the customer-like LB, on a real DNS-01 certificate |
 
 The console must keep calling its **own** origin's `/api`: the session and CSRF cookies are
@@ -300,7 +302,7 @@ until the previous one verifies green.
    failure this check catches: a DS pointing at an unsigned child makes every validating resolver
    SERVFAIL the whole subtree while a direct `dig` at our server still looks fine. Full checklist
    in [`docs/dns-zone-setup.md`](docs/dns-zone-setup.md) step 4.
-4. **Register the Keycloak client** and create the first account. Groups grant nothing: a person's
+4. **Register the OIDC client at the identity provider** and create the first account. Groups grant nothing: a person's
    permissions come from their membership of an account, so after the client is registered run
    `acmeservice adminctl account create --slug … --name … --owner <idp-subject> --credits 25` once,
    then sign in. (Only for a shared account: signing in gives every user their own personal one.)

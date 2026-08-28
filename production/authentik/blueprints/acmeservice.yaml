@@ -1,0 +1,418 @@
+version: 1
+metadata:
+  name: acmeservice-production
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+
+# The production identity provider for acmealias.com.
+#
+# SEPARATE FROM development/authentik/blueprints/acmeservice.yaml ON PURPOSE, and
+# the differences are the point rather than drift:
+#
+#   - NO FIXTURE USERS. The development blueprint creates six people because the
+#     acceptance suite signs in as four of them. Production has exactly one
+#     account to begin with — the bootstrap superuser from AUTHENTIK_BOOTSTRAP_*
+#     — and every other person arrives through the front door below.
+#
+#   - NO APPROVAL GATE. Development holds a new registration on the path
+#     `users/pending-approval` and refuses sign-in with a deny stage until
+#     somebody moves them. That was always described as a temporary posture:
+#     `SEQUENCE.md` says the gate "is switched off and the door is simply open"
+#     once the product is public. This is that switch. It is a real reduction in
+#     control and is stated here rather than left to be discovered — anybody who
+#     can receive mail at an address can now reach the product.
+#
+#   - THE CONFIRMATION LINK STAYS. It is what makes an address a fact rather
+#     than a string somebody typed, and `account-invitations` V2 binds an
+#     invitation to an address — so an unverified address is a way into somebody
+#     else's account. Registration without it would be a different and much worse
+#     decision than removing the approval step.
+#
+# WHAT `is_active` MEANS HERE, because it is not what it means in development.
+# There it means "we have admitted this person", which is why the enrolment mail
+# must not activate anybody. Here there is nobody to admit them, so it recovers
+# its ordinary meaning: "this address has been confirmed". That is the whole
+# reason `activate_user_on_success` is true below and false there, and the two
+# files must not be reconciled by copying one line between them.
+
+entries:
+  # --- groups -----------------------------------------------------------------
+  #
+  # One group, and it gates the STAFF application rather than conferring anything
+  # inside the product. Permissions come from membership of an account (design
+  # C10); a group at the identity provider decides only which application is
+  # advertised and reachable.
+  - model: authentik_core.group
+    id: group-admin
+    identifiers: { name: acme-admin }
+    attrs: { name: acme-admin }
+
+  # --- the sign-in page's appearance -----------------------------------------
+  - model: authentik_brands.brand
+    identifiers: { domain: authentik-default }
+    attrs:
+      # WITHOUT THIS NOTHING BELOW IS EVER SEEN. A brand is selected by matching
+      # its `domain` against the hostname, and the one marked default serves
+      # everything that matches none. `authentik-default` is not a hostname — it
+      # is the literal domain value of the brand authentik ships — so this brand
+      # matches nothing by name and is reached only by being the default.
+      # Without it, `/api/v3/core/brands/current/` answers
+      # `matched_domain: "fallback"`, the page renders stock, and it reads as
+      # broken CSS rather than an unselected brand.
+      default: true
+      branding_title: AcmeAlias
+      branding_logo: /static/dist/brand/logo.png
+      branding_favicon: /static/dist/brand/logo.png
+      attributes:
+        settings:
+          theme:
+            base: dark
+
+  # --- the front door ---------------------------------------------------------
+  #
+  # Four stages: ask, write, confirm the address, sign in. Development has six,
+  # and the two it adds are the approval machinery.
+  - model: authentik_flows.flow
+    id: flow-enrollment
+    identifiers: { slug: acmeservice-enrollment }
+    attrs:
+      name: acmeservice-enrollment
+      title: Create an AcmeAlias account
+      designation: enrollment
+      authentication: require_unauthenticated
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-username
+    identifiers: { name: acmeservice-enrollment-field-username }
+    attrs:
+      field_key: username
+      label: Username
+      type: username
+      required: true
+      placeholder: Username
+      placeholder_expression: false
+      order: 0
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-name
+    identifiers: { name: acmeservice-enrollment-field-name }
+    attrs:
+      field_key: name
+      label: Name
+      type: text
+      required: true
+      placeholder: Your name
+      placeholder_expression: false
+      order: 1
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-email
+    identifiers: { name: acmeservice-enrollment-field-email }
+    attrs:
+      field_key: email
+      label: Email
+      type: email
+      required: true
+      placeholder: you@example.com
+      placeholder_expression: false
+      order: 2
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-password
+    identifiers: { name: acmeservice-enrollment-field-password }
+    attrs:
+      field_key: password
+      label: Password
+      type: password
+      required: true
+      placeholder: Password
+      placeholder_expression: false
+      order: 3
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-password-repeat
+    identifiers: { name: acmeservice-enrollment-field-password-repeat }
+    attrs:
+      field_key: password_repeat
+      label: Repeat password
+      type: password
+      required: true
+      placeholder: Repeat password
+      placeholder_expression: false
+      order: 4
+
+  - model: authentik_stages_prompt.promptstage
+    id: enrollment-stage-details
+    identifiers: { name: acmeservice-enrollment-details }
+    attrs:
+      name: acmeservice-enrollment-details
+      fields:
+        - !KeyOf enrollment-field-username
+        - !KeyOf enrollment-field-name
+        - !KeyOf enrollment-field-email
+        - !KeyOf enrollment-field-password
+        - !KeyOf enrollment-field-password-repeat
+
+  # INACTIVE ON CREATION, and activated by the mail below rather than by a
+  # person. The row exists from here on, so a half-finished registration is a
+  # user who cannot sign in rather than nothing at all — which is what lets the
+  # same address be re-registered without a duplicate.
+  - model: authentik_stages_user_write.userwritestage
+    id: enrollment-stage-user-write
+    identifiers: { name: acmeservice-enrollment-user-write }
+    attrs:
+      name: acmeservice-enrollment-user-write
+      create_users_as_inactive: true
+      user_creation_mode: always_create
+      user_path_template: users
+
+  # `activate_user_on_success: true` — THE OPPOSITE OF DEVELOPMENT, deliberately.
+  # See the header: with no approval step, `is_active` means "address confirmed",
+  # and the link in the mail is what confirms it.
+  - model: authentik_stages_email.emailstage
+    id: enrollment-stage-email
+    identifiers: { name: acmeservice-enrollment-email }
+    attrs:
+      name: acmeservice-enrollment-email
+      use_global_settings: true
+      template: email/account_confirmation.html
+      activate_user_on_success: true
+      # The provider's default subject is the name of the wrong product: the
+      # recipient came to us, and the identity provider being separate software
+      # is our business rather than theirs. Grammar follows transactional-email
+      # T4 — the noun the message concerns comes first.
+      subject: "Email confirmation — AcmeAlias"
+
+  - model: authentik_stages_user_login.userloginstage
+    id: enrollment-stage-login
+    identifiers: { name: acmeservice-enrollment-login }
+    attrs:
+      name: acmeservice-enrollment-login
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-details
+      order: 10
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-user-write
+      order: 20
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-email
+      order: 30
+  # SIGNING IN AT THE END IS SAFE HERE AND WOULD NOT BE IN DEVELOPMENT. The
+  # login stage is reached only after the email stage has run, and the email
+  # stage is only satisfied by somebody holding the link. In development this
+  # same stage would bypass the approval deny, which is why that flow ends
+  # without one.
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-login
+      order: 40
+
+  # --- the way back in --------------------------------------------------------
+  #
+  # Defined BEFORE the identification stage that references it: blueprint entries
+  # apply in order, and a `!KeyOf` for something defined below resolves to null
+  # and fails with "This field may not be null", naming the field rather than the
+  # ordering.
+  - model: authentik_stages_identification.identificationstage
+    id: recovery-stage-identification
+    identifiers: { name: acmeservice-recovery-identification }
+    attrs:
+      name: acmeservice-recovery-identification
+      user_fields: [email, username]
+      show_matched_user: false
+
+  - model: authentik_stages_email.emailstage
+    id: recovery-stage-email
+    identifiers: { name: acmeservice-recovery-email }
+    attrs:
+      name: acmeservice-recovery-email
+      use_global_settings: true
+      template: email/password_reset.html
+      activate_user_on_success: false
+      subject: "Password reset — AcmeAlias"
+
+  - model: authentik_flows.flow
+    id: flow-recovery
+    identifiers: { slug: acmeservice-recovery }
+    attrs:
+      name: acmeservice-recovery
+      title: Reset your password
+      designation: recovery
+      authentication: require_unauthenticated
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !KeyOf recovery-stage-identification
+      order: 10
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !KeyOf recovery-stage-email
+      order: 20
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !Find [authentik_stages_prompt.promptstage, [name, default-password-change-prompt]]
+      order: 30
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-recovery
+      stage: !Find [authentik_stages_user_write.userwritestage, [name, default-password-change-write]]
+      order: 40
+
+  # --- one page, and no username oracle ---------------------------------------
+  #
+  # `password_stage` renders the password field on the SAME page as the
+  # identifier, so the pair is submitted together and a wrong identifier and a
+  # wrong password fail identically. Dropping it reintroduces a two-step form
+  # whose first step answers "does this address have an account".
+  #
+  # `enrollment_flow` IS the Sign up link and `recovery_flow` IS the Forgot
+  # password link. There is no separate setting and no template for either: the
+  # identification stage renders each if and only if it names a flow.
+  - model: authentik_stages_identification.identificationstage
+    identifiers: { name: default-authentication-identification }
+    attrs:
+      user_fields: [email, username]
+      password_stage:
+        !Find [authentik_stages_password.passwordstage, [name, default-authentication-password]]
+      show_matched_user: false
+      enrollment_flow: !KeyOf flow-enrollment
+      recovery_flow: !KeyOf flow-recovery
+
+  - model: authentik_flows.flow
+    identifiers: { slug: default-authentication-flow }
+    attrs:
+      title: Welcome to AcmeAlias
+
+  # --- the groups claim -------------------------------------------------------
+  #
+  # Emitted and recorded, deciding nothing (design C10). It is kept because what
+  # the identity provider said about a person is worth having in an audit entry
+  # even when no permission is derived from it.
+  - model: authentik_providers_oauth2.scopemapping
+    id: mapping-groups
+    identifiers: { name: acmeservice-groups }
+    attrs:
+      name: acmeservice-groups
+      scope_name: groups
+      description: "The group names this user belongs to, unqualified."
+      expression: |
+        return [group.name for group in request.user.ak_groups.all()]
+
+  # --- the customer console ---------------------------------------------------
+  - model: authentik_providers_oauth2.oauth2provider
+    id: provider-console
+    identifiers: { name: acmeservice-console }
+    attrs:
+      name: acmeservice-console
+      client_type: confidential
+      client_id: !Env [ACME_OIDC_CLIENT_ID, acmeservice-console]
+      client_secret: !Env ACME_OIDC_CLIENT_SECRET
+      include_claims_in_id_token: true
+      # WITHOUT A SIGNING KEY THE ID TOKEN IS HS256 AND SIGN-IN FAILS WITH A 500.
+      # An authentik provider with none signs symmetrically with the client
+      # secret; this service verifies with go-oidc, which accepts RS256 only, so
+      # the failure arrives AFTER a completely successful login as
+      # `malformed jwt: unexpected signature algorithm "HS256"`.
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+      # EXPLICIT SINCE 2026.8, AND EMPTY MEANS NOTHING IS ALLOWED. A provider
+      # that does not set this refuses every authorization request with
+      # `invalid_request`, which arrives at our callback and surfaces as a 500
+      # from US; authentik's log carries the real reason as
+      # `Invalid grant_type for provider`.
+      grant_types:
+        - authorization_code
+      redirect_uris:
+        - url: https://console.acmealias.com/api/v1/auth/callback
+          matching_mode: strict
+        # TYPE `logout`, not the default `authorization`: a post-logout URI is
+        # validated against the logout entries alone, and one registered as an
+        # authorization URI is refused.
+        - url: https://www.acmealias.com
+          matching_mode: strict
+          redirect_uri_type: logout
+      authorization_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      # `default-invalidation-flow`, NOT `default-provider-invalidation-flow`.
+      # The provider one ships with no stages: it ends the application session,
+      # leaves authentik's own standing, and redirects — so signing out leaves
+      # the next person at the machine one click from being the previous one.
+      invalidation_flow:
+        !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+        - !KeyOf mapping-groups
+
+  - model: authentik_core.application
+    id: app-console
+    identifiers: { slug: acmeservice-console }
+    attrs:
+      name: AcmeAlias
+      slug: acmeservice-console
+      provider: !KeyOf provider-console
+      meta_description: "Certificate challenge handling for domains whose DNS you keep where it is."
+
+  # --- the staff console ------------------------------------------------------
+  - model: authentik_providers_oauth2.oauth2provider
+    id: provider-admin
+    identifiers: { name: acmeservice-admin }
+    attrs:
+      name: acmeservice-admin
+      client_type: confidential
+      client_id: !Env [ACME_ADMIN_OIDC_CLIENT_ID, acmeservice-admin]
+      client_secret: !Env ACME_ADMIN_OIDC_CLIENT_SECRET
+      include_claims_in_id_token: true
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+      grant_types:
+        - authorization_code
+      redirect_uris:
+        - url: https://admin.acmealias.com/api/admin/auth/callback
+          matching_mode: strict
+        - url: https://www.acmealias.com
+          matching_mode: strict
+          redirect_uri_type: logout
+      authorization_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow:
+        !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+        - !KeyOf mapping-groups
+
+  - model: authentik_core.application
+    id: app-admin
+    identifiers: { slug: acmeservice-admin }
+    attrs:
+      name: AcmeAlias staff
+      slug: acmeservice-admin
+      provider: !KeyOf provider-admin
+      meta_description: "Internal operations. Staff only."
+
+  # THE STAFF APPLICATION IS NOT ADVERTISED TO CUSTOMERS. Without this binding
+  # every person signing in sees a tile called "AcmeAlias staff" and learns that
+  # a staff surface exists, where it is, and that they are one click from being
+  # refused by it. The ingress restriction is the other half and neither is
+  # sufficient alone.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf app-admin
+      group: !Find [authentik_core.group, [name, acme-admin]]
+      order: 0
+    attrs:
+      negate: false

@@ -38,7 +38,7 @@ One `compose.yaml` brings up the service and its database; every operational tas
       `ss -lnup 'sport = :53'`; on a systemd host this is usually
       `systemd-resolved`, which must be moved off the address or configured with
       `DNSStubListener=no`
-- [ ] Keycloak, with a realm you can create a client in
+- [ ] authentik, with somewhere to create an OAuth2/OIDC provider and application
 - [ ] Two hostnames on our existing proxy, *not* inside the delegated zone
 - [ ] The zone name agreed — the [delegation itself](dns-zone-setup.md) can come after
       this, and should be verified before any customer is onboarded
@@ -98,28 +98,56 @@ account, which is data this service owns. The groups claim is still read and rec
 session, and beside the roles in every audit entry — because what the IdP said about a person is
 worth keeping, but no configuration turns a group into a permission.
 
-### Keycloak
+### authentik
 
-1. Create a client, e.g. `acmeservice`. Client authentication **on**
-   (confidential), standard flow enabled, direct access grants off.
-2. Valid redirect URI:
-   `https://acme-console.cloudpowered.services/api/v1/auth/callback`
-3. Valid post-logout redirect URI:
-   `https://acme-console.cloudpowered.services/`
-4. Client scopes → dedicated scope → **Add mapper → By configuration → Group
-   Membership**:
-   - Token Claim Name: `groups`
-   - Full group path: **Off** — otherwise every group arrives as
-     `/parent/child`, which makes the recorded claim harder to read (it no
-     longer breaks sign-in, since nothing is matched against it)
-   - Add to ID token: **On**
-5. Copy the client secret and the issuer URL
-   (`https://idp.example/realms/<realm>`).
+The development stack builds all of this from a blueprint —
+`development/authentik/blueprints/acmeservice.yaml` — which is worth reading
+alongside this section: it is the same objects, expressed as configuration, and
+it is kept working by the acceptance suite.
 
-*Any OIDC provider that can put a plain groups claim on the ID token works in principle —
-Authentik, for instance, needs only its built-in
-`goauthentik.io/providers/oauth2/scope-groups` scope mapping — but Keycloak is the
-supported, tested identity provider, and the rest of this page assumes it.*
+1. **Create an OAuth2/OpenID provider.** Client type **confidential**, and keep
+   the client id and secret.
+2. **Signing key: set one explicitly.** A provider with no signing key signs the
+   ID token symmetrically with the client secret, and this service verifies with
+   go-oidc, which accepts RS256 only. The failure is a 500 *after* a completely
+   successful login, reading `malformed jwt: unexpected signature algorithm
+   "HS256"`, which looks like our bug and is not.
+3. **Grant types: `authorization_code`.** On authentik 2026.8 this list is
+   explicit and defaults to EMPTY, and an empty list refuses every authorization
+   request with `invalid_request`. That arrives at our callback and surfaces as a
+   500 from us; the real reason appears only in authentik's log, as `Invalid
+   grant_type for provider`. Do not add `refresh_token`: this service holds no
+   provider tokens beyond the one described in step 5.
+4. **Redirect URIs, and mind the type.** authentik types each entry:
+   - `https://<console host>/api/v1/auth/callback` — type **authorization**
+   - the address sign-out should land on — type **logout**
+
+   A post-logout URI registered as an authorization URI is not a valid
+   post-logout destination, and the request is refused.
+5. **Sign-out needs `id_token_hint`.** authentik requires it whenever a
+   `post_logout_redirect_uri` is present, citing OIDC certification, and does not
+   accept `client_id` in its place. This service stores the ID token on the
+   session for that one call and clears it on use; nothing else reads it.
+6. **Invalidation flow: use the full one, not the provider one.**
+   `default-provider-invalidation-flow` ships with no stages — it ends the
+   application's session, leaves authentik's own standing, and redirects. That is
+   right for an SSO estate and wrong here: the visitor lands on your site and one
+   click puts them back in without a password. Use `default-invalidation-flow`,
+   which carries a `UserLogoutStage`.
+7. **Groups claim.** Add the built-in
+   `goauthentik.io/providers/oauth2/scope-groups` scope mapping if you want group
+   names recorded. Nothing is granted by it — see the note below.
+8. **Branding, if you customize it: set the brand as `default`.** A brand is
+   matched on hostname, and the one marked default serves everything that matches
+   none. A brand that is neither is stored, correct, and never used — the sign-in
+   page renders stock, which reads as broken CSS and is not.
+   `GET /api/v3/core/brands/current/` answering `matched_domain: "fallback"` is
+   the tell.
+
+*Any OIDC provider that can put a plain groups claim on the ID token works in
+principle, and Keycloak did until recently — but authentik is the supported,
+tested identity provider, it is what the development stack runs, and the rest of
+this page assumes it.*
 
 > **The claim is a record, not a key**
 >
@@ -305,7 +333,7 @@ versions carried. What is new is that they can be edited, and that you can add o
 ### Creating the first account
 
 A fresh database has **no accounts**. Earlier versions seeded one at migration time and derived
-membership from Keycloak groups; both are gone. Make the first one from the command line:
+membership from identity-provider groups; both are gone. Make the first one from the command line:
 
 ```
 docker compose run --rm acmeservice \

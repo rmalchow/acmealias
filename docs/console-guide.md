@@ -33,8 +33,8 @@ nothing selected, and choosing which account you are working in is the first thi
 switcher in the navigation bar is how you change it later.
 
 Your permissions come from your **membership of that account**: somebody in it put you in one or
-more roles, and holding several at once is normal — they are additive, not exclusive. Keycloak
-groups do not grant anything. If the account you expect is not in the picker, nobody has added you
+more roles, and holding several at once is normal — they are additive, not exclusive. Groups at
+the identity provider do not grant anything. If the account you expect is not in the picker, nobody has added you
 to it yet, and that is the whole of the diagnosis.
 
 Roles are **rows in your account**, not fixed names in the software. The four below are seeded for
