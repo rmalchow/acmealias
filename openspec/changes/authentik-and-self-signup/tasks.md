@@ -66,6 +66,17 @@
 - [ ] 5.5 Point authentik's outbound mail at the stack's mail sink — `mailpit:1025`, no credentials, no TLS — so verification and recovery messages are captured rather than delivered. The SMTP host is the compose service name, NOT `mail.localhost`: that hostname is the web interface and is served through the HTTP overlay, which SMTP does not pass through
 - [ ] 5.6 Walk the enrolment flow once by hand and read the resulting message at `http://mail.localhost`, so the fallback path is known to work before it is the only way a stranger recovers an account
 
+## 5b. Sign-out lands on authentik, not the marketing site — DIAGNOSED, NOT FIXED
+
+> Reproduced end to end and traced. Recording it precisely because the diagnosis was the expensive
+> part and the symptom is easy to misattribute to our own logout route, which is correct.
+
+- [ ] 5b.1 The chain is: our `GET /api/v1/auth/logout` 303s to the provider's `end-session` with `client_id` and `post_logout_redirect_uri` (correct); `end-session` 302s to the flow executor (correct); the executor completes with `{"component": "xak-flow-redirect", "to": "/"}` — **`/`, authentik's own root, NOT the `post_logout_redirect_uri` that was sent**. The person lands on authentik's page, which is what reads as "do you want to log back in"
+- [ ] 5b.2 Find why the URI is dropped. `http://www.localhost` IS registered in the provider's `redirect_uris` with `matching_mode: strict`, and the request carries both it and `client_id` — the two things RP-initiated logout needs when there is no `id_token_hint`, which design D10 deliberately does not store. Candidates: authentik matching post-logout URIs against a separate list, a trailing-slash mismatch, or a version that requires `id_token_hint` regardless of the spec's `client_id` allowance
+- [ ] 5b.3 Do NOT solve it with a custom invalidation flow. That was tried: a flow with a `UserLogoutStage` and `authentication: none` makes the executor redirect TO ITSELF — an infinite loop, strictly worse than landing on the wrong page. The shipped `default-provider-invalidation-flow` completes correctly; only its destination is wrong
+- [ ] 5b.4 Note the ordering trap found alongside: blueprint entries apply IN ORDER, so a `!Find` for a flow defined below the provider that references it resolves to null and the entry fails with "This field may not be null" — naming the field, not the ordering
+- [ ] 5b.5 Assert the fix in acceptance: after signing out, the browser ends on the marketing site AND a fresh authorization request is sent to a flow rather than straight to the callback. The second half is the one a redirect test misses — with the provider's session alive, signing in again needs no password, and somebody on a shared machine has been told they are safe
+
 ## 6. Documentation — blocked on 11.4
 
 - [ ] 6.1 Rewrite the identity provider section of `docs/installation.md`, including the settings table entries for the four group variables

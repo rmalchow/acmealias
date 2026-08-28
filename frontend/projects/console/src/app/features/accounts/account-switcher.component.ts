@@ -75,10 +75,22 @@ import { AccountsService } from './accounts.service';
           The icon follows the same rule as the list so the control does not change appearance
           the day a second account arrives.
         -->
-        <span class="pick inert" [attr.title]="accounts.current()?.slug ?? null">
-          <span nz-icon [nzType]="icon(accounts.current()!)"></span>
-          {{ accounts.current() ? label(accounts.current()!) : 'No account' }}
-        </span>
+        <!--
+          A control-flow guard, NOT a non-null assertion. This branch renders whenever there is no
+          CHOICE,
+          which includes having no account selected at all — during the picker, and on the first
+          paint before the list has loaded. A current() non-null assertion there is a lie the template
+          tells the compiler, and it costs a TypeError that takes the whole screen out rather than
+          leaving one control blank.
+        -->
+        @if (accounts.current(); as a) {
+          <span class="pick inert" [attr.title]="a.slug">
+            <span nz-icon [nzType]="icon(a)"></span>
+            {{ label(a) }}
+          </span>
+        } @else {
+          <span class="pick inert">No account</span>
+        }
       }
 
       <!--

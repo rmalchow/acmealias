@@ -193,8 +193,13 @@ func authentikMailIdentity(t *testing.T) mail.Address {
 func effectiveConfig(t *testing.T) map[string]any {
 	t.Helper()
 	s := mustSignIn(t, adminUser, devPassword)
+	// Account-scoped, and deliberately so: the route sits under /accounts/:id and
+	// resolves a scope even though it reads no tenant data, because until it did,
+	// any authenticated session could read the deployment's effective
+	// configuration through any account identifier at all.
+	s.selectInto(t, s.personalAccount(t))
 	var out map[string]any
-	if err := s.json(http.MethodGet, consoleURL+"/api/v1/admin/config", nil, http.StatusOK, &out); err != nil {
+	if err := s.json(http.MethodGet, s.acct("/config"), nil, http.StatusOK, &out); err != nil {
 		t.Fatalf("reading the effective configuration: %v", err)
 	}
 	return out
