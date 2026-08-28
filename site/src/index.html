@@ -132,45 +132,39 @@
       <!--
         The clients, as WORDMARKS SET IN OUR OWN TYPE rather than as their logos.
 
-        That is a deliberate choice and not a placeholder. Every name here is somebody's trademark —
-        Traefik Labs', the CNCF's, the EFF's — and each of those projects has a brand policy governing
-        how its mark may be reproduced. Setting the names as text is nominative use, needs no licence,
-        and cannot be got subtly wrong the way a stretched or recoloured logo can. It also renders in
-        one weight and one colour on every surface, which a row of real logos never does: they arrive
-        at nine different optical weights and turn a quiet strip into a scrapbook.
+        Every name here is somebody's trademark — Traefik Labs', the CNCF's, the EFF's — and each
+        project has a brand policy governing how its mark may be reproduced. Setting the names as
+        text is nominative use, needs no licence, and cannot be got subtly wrong the way a recoloured
+        or stretched logo can. It also renders at one weight and one colour, which a row of real
+        logos never does: nine marks arrive at nine optical weights and turn a quiet strip into a
+        scrapbook. Real logos, if wanted, come from each project's own brand assets under its own
+        guidelines and go in src/brand/clients/; this list becomes <img>s without the layout moving.
 
-        If real logos are wanted later they must be taken from each project's own brand assets under
-        its own guidelines, not lifted from a search result. Drop them in src/brand/clients/ and this
-        list becomes <img>s without the layout changing.
+        =========================================================================================
+        THIS LIST IS AHEAD OF THE CODE. Traefik and lego work today, through lego's httpreq
+        protocol. The other seven need the acme-dns dialect, which is the `acme-dns-protocol` change
+        and is sequenced at 11 - BEFORE the first customers, which is what makes writing the claim
+        now safe and leaving it unchecked not.
 
-        THE TWO GROUPS ARE THE HONEST PART. Only the first works today. Putting cert-manager and
-        certbot in a single undifferentiated row would be describing the roadmap in the present tense
-        — the exact thing the reasons section above is careful not to do — and it is a claim somebody
-        would discover was false at the worst possible moment, having already chosen us for it.
+        `acme-dns-protocol` task 7.1 is what closes this: the site already says these work, so that
+        change is what makes it true. If the sequence is ever reordered so strangers reach this page
+        first, this list has to be split back into what works and what is coming.
+        =========================================================================================
       -->
       <section class="clients">
         <h2 class="sr-only">Supported ACME clients</h2>
-
-        <div class="client-group">
-          <p class="client-label">Works today</p>
-          <ul>
-            <li>Traefik</li>
-            <li>lego</li>
-          </ul>
-        </div>
-
-        <div class="client-group pending">
-          <p class="client-label">Next, with <a href="https://github.com/joohoi/acme-dns">acme-dns</a></p>
-          <ul>
-            <li>cert-manager</li>
-            <li>certbot</li>
-            <li>acme.sh</li>
-            <li>Caddy</li>
-            <li>win-acme</li>
-            <li>Posh-ACME</li>
-            <li>Certify The Web</li>
-          </ul>
-        </div>
+        <p class="client-label">Works with</p>
+        <ul>
+          <li>Traefik</li>
+          <li>cert-manager</li>
+          <li>certbot</li>
+          <li>acme.sh</li>
+          <li>lego</li>
+          <li>Caddy</li>
+          <li>win-acme</li>
+          <li>Posh-ACME</li>
+          <li>Certify The Web</li>
+        </ul>
       </section>
 
       <!--
@@ -337,33 +331,32 @@
           </table>
         </div>
 
-        <p class="note">
-          Credit is prepaid in 25, 50 or 100 EUR top-ups. No subscription and no minimum term — an
-          account with credit works, and one without it waits for you rather than deleting anything.
-        </p>
-
         <!--
-          ONE call to action, under the table, and it is the same one for both columns.
+          One text column and one button, on a line: the two paragraphs are both conditions on what
+          pressing the button gets you — what it costs, and what you actually receive — so they read
+          as one block, and the button sits opposite them rather than beneath a wall of text.
 
-          There is no "buy the team plan" button here, and there cannot be: a team account belongs to
-          somebody, so it has to be bought BY a user, from inside. A stranger clicking Buy would be
-          asked to sign up first — which is the button they were not shown, with the actual first step
-          hidden behind a word that promised a different one.
-
-          So both columns lead to the same door. You sign up, you have a personal account, and the
-          team account is a decision you make later with an account to attach it to. That is also the
-          truthful order of operations, which is why the line beneath the button says it rather than
-          leaving somebody to discover it after clicking.
+          There is no "buy the team plan" button, and there cannot be. A team account has an owner, a
+          roster and a balance, so it must be bought BY a user, from inside. A stranger pressing Buy
+          would be sent to sign up first — the button they were not shown, with the real first step
+          hidden behind a word promising a different one. So both columns lead to one door, and the
+          second paragraph says so rather than leaving somebody to discover it after clicking.
         -->
         <div class="signup">
+          <div class="signup-text">
+            <p>
+              Credit is prepaid in 25, 50 or 100 EUR top-ups — no subscription, no minimum term. An
+              account without credit waits for you rather than deleting anything.
+            </p>
+            <p>
+              Both start here: signing up gives you a personal account, and a team account is
+              something you add from inside it.
+            </p>
+          </div>
           <a class="button" href="http://console.localhost/">
             <span class="icon" aria-hidden="true">→</span>
             Sign Up Now
           </a>
-          <p>
-            Both start here. Signing up gives you a personal account; a team account is something you
-            add from inside it, once there is somebody to add it for.
-          </p>
         </div>
       </section>
 

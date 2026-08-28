@@ -44,6 +44,7 @@
 
 ## 7. Saying so
 
-- [ ] 7.1 Update the marketing site's supported-client list. It currently says Traefik works and adapters are being written; after this it is most of the ecosystem
+- [ ] 7.1 **The marketing site ALREADY lists these clients as working.** `site/src/index.html`'s client strip names Traefik, cert-manager, certbot, acme.sh, lego, Caddy, win-acme, Posh-ACME and Certify The Web under "Works with" — seven of which need this change. That was written deliberately and ahead of the code, on the strength of this change sitting at 11, before the first customers. THIS TASK IS WHAT MAKES THE PAGE TRUE. Verify each name against a real client, and correct the page for any that does not work rather than leaving the claim standing
+- [ ] 7.1a If this change slips past the first customers in the sequence, split that strip back into what works and what is coming BEFORE they arrive
 - [ ] 7.2 Document both dialects, and be explicit that acme-dns clients need no `/register`
 - [ ] 7.3 Update the OpenAPI document

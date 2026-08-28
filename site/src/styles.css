@@ -497,18 +497,16 @@ h1 {
   max-inline-size: 62ch;
 }
 
-/* ── The clients ──────────────────────────────────────────────────────────
+/* -- The clients ----------------------------------------------------------
    A quiet strip, not a feature. It substantiates the claim the card above it
-   makes and should not compete with it — so the names are set in the body face
+   makes and should not compete with it - so the names are set in the body face
    at one weight and one colour, which is also the only way nine wordmarks sit
    together without one of them shouting. */
 .clients {
   padding-block: 0 3rem;
-  display: grid;
-  gap: 1.25rem;
 }
 
-.client-group ul {
+.clients ul {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -517,7 +515,7 @@ h1 {
   gap: 0.5rem 1.5rem;
 }
 
-.client-group li {
+.clients li {
   font-size: 1.05rem;
   font-weight: 500;
   letter-spacing: 0.01em;
@@ -525,23 +523,11 @@ h1 {
 }
 
 .client-label {
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.5rem;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   font-size: 0.7rem;
   color: var(--ink-dim);
-}
-
-/* Dimmer, because these do not work yet. The distinction is carried by the LABEL
-   above each group and not by the colour alone — dimming is a hint, and a reader
-   who does not register it would otherwise read a promise. */
-.pending li {
-  color: var(--ink-dim);
-}
-
-.client-label a {
-  color: inherit;
-  text-decoration-color: rgb(255 255 255 / 30%);
 }
 
 /* ── The terminal ─────────────────────────────────────────────────────────────
@@ -683,25 +669,43 @@ h1 {
 }
 
 /* ── Sign up ──────────────────────────────────────────────────────────────
-   Under the comparison rather than at the foot of the page: the table is where
-   the question "which of these am I" gets answered, and the answer to both is the
-   same button. A call to action three sections later would be asking somebody to
-   remember a decision they already made. */
+   Text on the left, the button opposite it on the right. Under the comparison,
+   because the table is where "which of these am I" gets answered and the answer
+   to both columns is the same button — a call to action three sections later
+   would be asking somebody to remember a decision they already made.
+
+   'space-between' with the button last puts it at the right edge without a
+   margin auto on either element, so removing the text would not strand it. */
 .signup {
   margin-block-start: 2rem;
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  justify-content: space-between;
+  gap: 2rem;
   flex-wrap: wrap;
 }
 
-/* Beside the button, not under it: this sentence is a condition on what the
-   button does, and a reader who has already pressed it has not been told. */
-.signup p {
+.signup-text {
+  /* Two short paragraphs at reading width. Tighter than the page's default
+     leading, because these are conditions on the button beside them rather than
+     prose somebody settles into. */
+  display: grid;
+  gap: 0.6rem;
+  max-inline-size: 58ch;
+  flex: 1 1 24rem;
+}
+
+.signup-text p {
   margin: 0;
   color: var(--ink-dim);
   font-size: 0.95rem;
-  max-inline-size: 42ch;
+  line-height: 1.5;
+}
+
+/* Never squeezed. On a narrow window the flex-wrap drops it to its own line at
+   full size rather than compressing the one control on the page that matters. */
+.signup .button {
+  flex: 0 0 auto;
 }
 
 /* Visually gone, still announced. The comparison's caption and the dashes'
