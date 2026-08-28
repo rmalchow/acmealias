@@ -119,8 +119,16 @@ exactly as U9 asked — but the route it guards, `POST /api/v1/accounts`, is the
 **So the gate on strangers moved, and it is worth being blunt about where it went.** The only thing
 standing between an arbitrary person on the internet and a working free account is whether the
 identity provider's enrolment flow exists. That is a blueprint entry
-(`development/authentik/blueprints/acmeservice.yaml`), not a line of Go, and it is currently absent —
-`authentik-and-self-signup` task group 5 is open and deferred to this change.
+(`development/authentik/blueprints/acmeservice.yaml`), not a line of Go.
+
+**It exists now, and one thing stands behind it.** `self-service-signup` added the flow, so the door
+this decision described as absent is built. It is not open: the flow's `user_write` stage carries
+`create_users_as_inactive`, so a registrant is held until a person ticks `Active`. That gate is the
+provider's, not ours — an unapproved person never obtains a session, so `EnsurePersonalAccount` never
+runs for them and no `accounts` row is written for somebody we have not admitted. The consequence for
+this decision is that opening the door to strangers is now genuinely a configuration change (S8
+there) rather than a flow somebody still has to write, and what remains here is the RECOVERY flow,
+the production reputation thresholds and the rate limit that bounds successful enrolments.
 
 Three consequences follow, and they are the substance of this decision.
 
@@ -296,7 +304,7 @@ Given that, the strictest arrangement available — and what actually exists tod
 | Our service verifies which application issued the token | a validly signed token is not enough | **to verify** — the issuer is validated per client, and the assertion that a console token is refused on the staff surface is not written |
 | Two ingress rules | the hostname split restricts anything at all | **not built** — see U7, where the argument lives |
 | Customers `external`, staff `internal` | external users reach neither the administration interface nor the application dashboard | **not built** — development has no such distinction to make and production does |
-| The staff application has no enrolment flow | not a disabled one; none | **trivially true today**, because no enrolment flow exists at all. It stops being trivially true the moment U9 adds one, which is the point at which it needs asserting |
+| The staff application has no enrolment flow | not a disabled one; none | **true, and no longer trivially so.** `self-service-signup` added `acmeservice-enrollment` and bound it to the CUSTOMER sign-in page's identification stage only. Nothing binds it to the staff application, and the assertion that nothing ever does is now worth writing |
 | Administrator access is a small group with mandatory multi-factor | that group is the ceiling on everything above | **not built** |
 
 **One property of the existing design helps and should not be overstated.** `staff-plane` S2 maps

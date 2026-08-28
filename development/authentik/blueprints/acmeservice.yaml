@@ -169,6 +169,385 @@ entries:
       groups:
         - !KeyOf group-read-only
 
+  # --- the front door ---------------------------------------------------------
+  #
+  # THE PRODUCT USED TO BE CLOSED BY OMISSION, NOT BY DECISION.
+  #
+  # Until this flow existed, this file defined exactly one flow —
+  # default-authentication-flow — and bound no enrolment flow to it. A person who
+  # reached the sign-in page saw a username field, a password field and no way to
+  # become somebody who had either. The door was not locked; there was no door.
+  # Two other changes describe a switch that closed it. There was no switch
+  # (self-service-signup design S1).
+  #
+  # WHAT THIS FLOW DOES, IN ORDER.
+  #
+  #   10  ask for a username, a name, an address and a password
+  #   20  create the user — INACTIVE, on the path users/pending-verification
+  #   30  send a confirmation link and wait for it to be clicked
+  #   40  tell them the registration is with a person, and carry the new path
+  #   50  move them to users/pending-approval
+  #
+  # TWO QUESTIONS ARE BEING ASKED AND THEY ARE NOT THE SAME QUESTION (design S2).
+  # Verification asks "is this address yours" — a machine decides, in seconds,
+  # permanently. Approval asks "do we want you as a customer" — a person decides,
+  # in hours, and we intend to stop asking once the volume is trusted. They are
+  # constantly conflated. Verification runs FIRST so that the queue a human reads
+  # contains only addresses that exist: the reviewer's attention is the scarce
+  # resource the whole gate depends on, and a queue full of typos and throwaway
+  # addresses is a queue nobody reads carefully.
+  #
+  # THE TWO PATHS ARE THE QUEUE, and that is why the flow writes the user twice.
+  # authentik's email stage needs a saved user to hang its token on, so the user
+  # row necessarily exists BEFORE the address is proved. Without the second write
+  # a reviewer could not tell somebody who confirmed their address from somebody
+  # who typed it wrong and never came back — and approving the second kind is
+  # exactly what the ordering above was for. So:
+  #
+  #   users/pending-verification  registered, never clicked the link
+  #   users/pending-approval      address proved, waiting for a person
+  #
+  # The reviewer's queue is the second folder. authentik's user list renders paths
+  # as a tree, so this is a queue without anybody building one (design S9).
+  #
+  # THE GATE ITSELF IS `create_users_as_inactive` ON STAGE 20, AND NOTHING ELSE.
+  # It is here rather than in our service on purpose (design S3): held inactive at
+  # the provider, an unapproved person never reaches us at all — no session, no
+  # accounts row, no slug, no audit entry. If approval lived in our service, then
+  # anybody able to fill in this form could make us write rows for a person we had
+  # explicitly not decided to admit. Every row in `accounts` belongs to somebody
+  # we admitted, by construction rather than by a predicate somebody has to
+  # remember to consult (design S5).
+  #
+  # APPROVING SOMEBODY IS TICKING `Active` ON THEIR USER. Refusing them is leaving
+  # it alone, or deleting the user. There is nothing to build for either.
+  #
+  # TURNING THE GATE OFF IS AN ACTION, NOT ONLY A SETTING (design S8). Clearing
+  # `create_users_as_inactive` stops the flow creating inactive users. It does NOT
+  # activate the ones it already created. That asymmetry is right in one direction
+  # — tightening it must never lock out customers already working — and a trap in
+  # the other, so switching it off is accompanied by activating whoever is still
+  # held in users/pending-approval, as a step somebody takes and the event log
+  # records. See development/authentik/README.md.
+  #
+  # AN INVITED PERSON WALKS THIS FLOW TOO, and waits like everybody else. There is
+  # deliberately no second enrolment flow: the earlier design had one differing by
+  # a single `user_write` key, and it was the whole mechanism of an exemption
+  # anybody could reach merely by being invited (design S7, reversed;
+  # account-invitations V13). What an invited person skips is the confirmation
+  # mail — the invitation link already proved control of the address — and only
+  # that. Confirmed is not admitted.
+
+  - model: authentik_flows.flow
+    id: flow-enrollment
+    identifiers: { slug: acmeservice-enrollment }
+    attrs:
+      name: acmeservice-enrollment
+      title: Create your AcmeAlias account
+      designation: enrollment
+      # An already-authenticated person has no business here, and without this
+      # they would be offered a form that creates a second user for them.
+      authentication: require_unauthenticated
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-username
+    identifiers: { name: acmeservice-enrollment-field-username }
+    attrs:
+      field_key: username
+      label: Username
+      type: username
+      required: true
+      placeholder: Username
+      placeholder_expression: false
+      order: 0
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-name
+    identifiers: { name: acmeservice-enrollment-field-name }
+    attrs:
+      field_key: name
+      label: Name
+      type: text
+      required: true
+      placeholder: Name
+      placeholder_expression: false
+      order: 1
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-email
+    identifiers: { name: acmeservice-enrollment-field-email }
+    attrs:
+      field_key: email
+      label: Email
+      type: email
+      required: true
+      placeholder: Email
+      placeholder_expression: false
+      order: 2
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-password
+    identifiers: { name: acmeservice-enrollment-field-password }
+    attrs:
+      field_key: password
+      label: Password
+      type: password
+      required: true
+      placeholder: Password
+      placeholder_expression: false
+      order: 3
+
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-password-repeat
+    identifiers: { name: acmeservice-enrollment-field-password-repeat }
+    attrs:
+      field_key: password_repeat
+      label: Password (repeat)
+      type: password
+      required: true
+      placeholder: Password (repeat)
+      placeholder_expression: false
+      order: 4
+
+  # The sentence somebody reads at the end of enrolment, and the only thing they
+  # are told before a person looks at them.
+  #
+  # TWELVE HOURS IS NOT A NEW NUMBER. staff-plane publishes a twelve-hour
+  # best-effort commitment for its abuse contact, and this reuses it rather than
+  # inventing a second one somebody would have to keep in step (design S2's open
+  # question). It is load-bearing rather than polite: an invitation expires
+  # fourteen days after it is ISSUED and that clock runs while its invitee waits
+  # for us, so any promised response longer than fourteen days is a promise to
+  # break invitations (design S7, account-invitations V13). The number is the
+  # human's to confirm; what must not happen is a promise nobody keeps, because
+  # the person waiting has been told a decision is coming.
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-review-notice
+    identifiers: { name: acmeservice-enrollment-field-review-notice }
+    attrs:
+      field_key: review_notice
+      label: Registration received
+      type: static
+      required: false
+      initial_value: >-
+        Thank you — your address is confirmed. A person reviews every new
+        registration before it can sign in, and we aim to do that within twelve
+        hours. You will not be able to sign in until then.
+      initial_value_expression: false
+      placeholder: >-
+        Thank you — your address is confirmed. A person reviews every new
+        registration before it can sign in, and we aim to do that within twelve
+        hours. You will not be able to sign in until then.
+      placeholder_expression: false
+      sub_text: You can close this page. There is nothing else for you to do.
+      order: 0
+
+  # A HIDDEN FIELD IS NOT A CLIENT-SUPPLIED ONE, which is what makes this safe.
+  # authentik's prompt stage re-imposes the server's value on every hidden and
+  # static field when the form comes back (`_validate_password_fields`' sibling
+  # in stages/prompt/stage.py), so the browser cannot post a different path and
+  # promote itself out of the queue. `path` is an ordinary field on the user, so
+  # the user_write stage below writes it like any other.
+  - model: authentik_stages_prompt.prompt
+    id: enrollment-field-approved-path
+    identifiers: { name: acmeservice-enrollment-field-approval-path }
+    attrs:
+      field_key: path
+      label: path
+      type: hidden
+      required: false
+      placeholder: users/pending-approval
+      placeholder_expression: false
+      order: 1
+
+  - model: authentik_stages_prompt.promptstage
+    id: enrollment-stage-details
+    identifiers: { name: acmeservice-enrollment-details }
+    attrs:
+      name: acmeservice-enrollment-details
+      fields:
+        - !KeyOf enrollment-field-username
+        - !KeyOf enrollment-field-name
+        - !KeyOf enrollment-field-email
+        - !KeyOf enrollment-field-password
+        - !KeyOf enrollment-field-password-repeat
+
+  - model: authentik_stages_prompt.promptstage
+    id: enrollment-stage-review-notice
+    identifiers: { name: acmeservice-enrollment-review-notice }
+    attrs:
+      name: acmeservice-enrollment-review-notice
+      fields:
+        - !KeyOf enrollment-field-review-notice
+        - !KeyOf enrollment-field-approved-path
+
+  # THE GATE. One key, and the whole of the approval mechanism.
+  #
+  # No group is set, and that is deliberate rather than an omission: nothing in
+  # this product is derived from groups any more (personal-and-team-accounts C10),
+  # and an enrolment flow that placed people in one would be the obvious place for
+  # that to quietly start again.
+  - model: authentik_stages_user_write.userwritestage
+    id: enrollment-stage-user-write
+    identifiers: { name: acmeservice-enrollment-user-write }
+    attrs:
+      name: acmeservice-enrollment-user-write
+      create_users_as_inactive: true
+      user_creation_mode: always_create
+      user_path_template: users/pending-verification
+
+  # The second write. It creates nothing — it exists to move a person from
+  # users/pending-verification to users/pending-approval once, and only once, the
+  # link in their mail has actually been clicked.
+  - model: authentik_stages_user_write.userwritestage
+    id: enrollment-stage-user-write-verified
+    identifiers: { name: acmeservice-enrollment-user-write-verified }
+    attrs:
+      name: acmeservice-enrollment-user-write-verified
+      create_users_as_inactive: true
+      user_creation_mode: never_create
+
+  # `activate_user_on_success` IS DELIBERATELY FALSE, AND THE SHIPPED EXAMPLE
+  # SETS IT TRUE. authentik's example enrolment flow uses `is_active` to mean
+  # "has confirmed their address", so clicking the link activates the account.
+  # Here `is_active` means "we have admitted this person", which is a different
+  # and later fact — so confirming the address must not activate anybody, or the
+  # approval gate is opened by the very mail that was only meant to prove an
+  # address exists.
+  - model: authentik_stages_email.emailstage
+    id: enrollment-stage-email-verification
+    identifiers: { name: acmeservice-enrollment-email-verification }
+    attrs:
+      name: acmeservice-enrollment-email-verification
+      use_global_settings: true
+      template: email/account_confirmation.html
+      activate_user_on_success: false
+      # THE SUBJECT IS OVERRIDDEN BECAUSE THE PROVIDER'S DEFAULT IS THE NAME OF
+      # THE WRONG PRODUCT. authentik's email stage defaults its subject to
+      # "authentik", which is correct and useless: the recipient came to us, and
+      # the identity provider being a separate piece of software is our business
+      # rather than theirs.
+      #
+      # The wording follows transactional-email T4's grammar rather than being
+      # chosen freshly — the noun the message concerns comes FIRST, and there is
+      # no constant prefix. It reads the way `Invitation to <account>` does, and
+      # for the same reason: front-loading the noun is what makes a mailbox
+      # search and a phone notification useful, and the prefix habit spends the
+      # most valuable characters in an inbox on what the sender column already
+      # shows (task 4.3 there).
+      subject: Address confirmation
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-details
+      order: 10
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-user-write
+      order: 20
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-email-verification
+      order: 30
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-review-notice
+      order: 40
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf enrollment-stage-user-write-verified
+      order: 50
+
+  # THERE IS NO user_login STAGE HERE, and its absence is the design.
+  #
+  # authentik's example enrolment flow ends by signing the new person in. This one
+  # ends by telling them to wait. A user_login stage at the end would sign in an
+  # account that was created inactive, which is the one thing the whole flow is
+  # arranged to prevent.
+
+  # --- bounding the mail this flow will send for anybody who asks --------------
+  #
+  # ONE SURFACE IS GENUINELY NEW HERE and it is not the general abuse question.
+  # Most of that is answered elsewhere and does not reopen: five projects on a
+  # personal account, per-domain billing on a team one, and a domain that answers
+  # no challenge until its delegation has been seen — none of which an unapproved
+  # person reaches. What IS new is that an unauthenticated stranger can now cause
+  # us to send mail to an arbitrary address, which is a spam vector pointed at
+  # third parties (design S10).
+  #
+  # authentik's reputation policy is the stock bound. It scores by client address
+  # and by the identifier typed, dropping a point per failed identification or
+  # failed login and rising on success, and it PASSES when the score is BAD —
+  # which is why it is bound to a deny stage rather than to the flow. Below the
+  # threshold, enrolment and sign-in both stop.
+  #
+  # Worth knowing before trusting it: nothing lowers a score for a SUCCESSFUL
+  # enrolment, so this bounds an address that has been failing to sign in, not
+  # somebody quietly registering a hundred throwaway accounts from one host. The
+  # rate limit for that is public-edition's to add in production, where it also
+  # configures this policy's real thresholds.
+  - model: authentik_policies_reputation.reputationpolicy
+    id: policy-reputation
+    identifiers: { name: acmeservice-reputation }
+    attrs:
+      name: acmeservice-reputation
+      check_ip: true
+      check_username: true
+      threshold: -5
+
+  - model: authentik_stages_deny.denystage
+    id: stage-deny-reputation
+    identifiers: { name: acmeservice-reputation-deny }
+    attrs:
+      name: acmeservice-reputation-deny
+      deny_message: >-
+        Too many attempts from here. Wait a while and try again.
+
+  # `evaluate_on_plan: false` with `re_evaluate_policies: true` is the pair that
+  # makes a conditional stage work at all: evaluated when the flow is PLANNED the
+  # reputation of the person is not yet known, because they have not typed
+  # anything. Evaluated when the stage is REACHED, it is.
+  - model: authentik_flows.flowstagebinding
+    id: binding-enrollment-reputation
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf stage-deny-reputation
+      order: 5
+    attrs:
+      evaluate_on_plan: false
+      re_evaluate_policies: true
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf binding-enrollment-reputation
+      policy: !KeyOf policy-reputation
+      order: 0
+
+  - model: authentik_flows.flowstagebinding
+    id: binding-authentication-reputation
+    identifiers:
+      target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      stage: !KeyOf stage-deny-reputation
+      order: 15
+    attrs:
+      evaluate_on_plan: false
+      re_evaluate_policies: true
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf binding-authentication-reputation
+      policy: !KeyOf policy-reputation
+      order: 0
+
   # --- one page, and no username oracle ---------------------------------------
   #
   # authentik ships an identification stage that asks for the identifier, submits
@@ -187,6 +566,28 @@ entries:
   # step with the default flow instead of forking it. Both identifier forms stay
   # accepted: the addresses here are usernames AND emails, and a person who typed
   # the one they remember should not be told they picked the wrong field.
+  #
+  # `enrollment_flow` IS THE SIGN UP LINK. There is no separate setting for it and
+  # no template to edit: the identification stage renders the link if and only if
+  # it names a flow here, which is why the absence of this one line WAS the whole
+  # of the product's closure (design S1).
+  #
+  # AN UNAPPROVED PERSON STILL MEETS "Failed to authenticate.", AND THAT IS A
+  # KNOWN DEFECT, NOT AN OVERSIGHT. Design S3 requires a real message here rather
+  # than a refusal indistinguishable from a wrong password, and authentik 2024.10
+  # cannot give one while `is_active` is the gate. Verified by hand against this
+  # stack: an unknown identifier, a wrong password and a correct password for an
+  # INACTIVE user all return exactly `{"non_field_errors": [{"string": "Failed to
+  # authenticate.", "code": "invalid"}]}`. The reason is structural — because
+  # `password_stage` is set, the password is checked INSIDE this stage's
+  # validation, and Django's ModelBackend refuses an inactive user there, so no
+  # later stage or policy in the flow is ever reached and there is nothing for a
+  # deny stage to fire on.
+  #
+  # The obvious repair makes it worse: dropping `password_stage` puts the deny
+  # stage before any password is proved, so anybody could type an address and be
+  # told whether it has a registration awaiting review. That is the enumeration
+  # oracle the line below exists to close. See self-service-signup task 2.2.
   - model: authentik_stages_identification.identificationstage
     identifiers: { name: default-authentication-identification }
     attrs:
@@ -194,6 +595,7 @@ entries:
       password_stage:
         !Find [authentik_stages_password.passwordstage, [name, default-authentication-password]]
       show_matched_user: false
+      enrollment_flow: !KeyOf flow-enrollment
 
   # --- the group claim --------------------------------------------------------
   #

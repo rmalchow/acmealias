@@ -9,12 +9,25 @@
 
 ## 1. Self-service enrolment, in development first
 
-> **Moved to `self-service-signup`.** This section and `authentik-and-self-signup` §5 specified
-> overlapping halves of the same enrolment work, and neither owned the approval gate a member of
-> staff now applies to each registration. Both are done there. What stays this change's: recovery,
-> the reputation policy in PRODUCTION (1.4 here is its development form), and the switches in §2 —
-> whose premise 9.3 there corrects, since `ACME_ALLOW_ACCOUNT_CREATION` gates buying a TEAM account
-> and has never been what stops a stranger registering.
+> **Moved to `self-service-signup`, and DONE there.** This section and `authentik-and-self-signup`
+> §5 specified overlapping halves of the same enrolment work, and neither owned the approval gate a
+> person now applies to each registration. The flow, the gate, the mail sink, the development
+> reputation policy and the manual walk are all done there; the gate is a key on the provider's
+> `user_write` stage rather than anything in our schema (design S3 there).
+>
+> **What stays this change's**, and is NOT done:
+>
+> - **Recovery** (1.3). This deployment configures no recovery flow at all. That is worth saying
+>   plainly rather than leaving as an unticked box: an enrolled person who forgets their password
+>   today has no way back, and the enumeration property 1.3 asks about has nothing to hold of.
+> - **The reputation policy in PRODUCTION.** 1.4 here is its production form; the development
+>   policy exists (`acmeservice-reputation`, bound to a deny stage on both the enrolment and the
+>   authentication flow). What it does not bound is worth carrying forward: authentik lowers a
+>   score on failed sign-ins, and nothing lowers it for a SUCCESSFUL enrolment — so a host quietly
+>   registering throwaway accounts is bounded by nothing yet. That rate limit is this change's.
+> - **The switches in §2** — whose premise 8.3 there corrects, since `ACME_ALLOW_ACCOUNT_CREATION`
+>   gates buying a TEAM account and has never been what stopped a stranger registering. What
+>   stopped them was the absence of a flow, which is now present.
 
 
 - [ ] 1.1 Add an enrolment flow to `development/authentik/blueprints/acmeservice.yaml`, reachable from the console sign-in page, with an **email-verification stage** — a session must not be issued before the address is proved (design U4, U9)

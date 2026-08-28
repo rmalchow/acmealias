@@ -94,10 +94,31 @@
 > `lower(email)` makes one address identify at most one person, which the
 > binding silently assumed and nothing enforced.
 >
-> CANNOT BE STARTED: there is no registration flow to add an entry point TO.
-> authentik ships no enrolment flow and this deployment configures none, which is
-> `self-service-signup`'s whole subject. 7.1 and 7.4 are edits to a blueprint
-> that has nothing to edit yet.
+> UNBLOCKED, AND NOT STARTED. This group used to read "cannot be started: there
+> is no registration flow to add an entry point TO". There is one now —
+> `self-service-signup` added `acmeservice-enrollment` to
+> `development/authentik/blueprints/acmeservice.yaml`, and it is reachable from
+> the sign-in form. So 7.1 and 7.4 have something to edit.
+>
+> **READ V13 BEFORE WRITING ANY OF IT, because the shape changed.** An earlier
+> plan built this as a SECOND enrolment flow whose `user_write` created users
+> active — the exemption's whole mechanism. That is reversed: there is ONE
+> enrolment flow and everybody who walks it waits for approval, invited or not
+> (`self-service-signup` design S7, and task 3.2 there forbids the second flow
+> explicitly). What an invited person skips is the confirmation mail, and only
+> that. Confirmed is not admitted.
+>
+> So 7.1 is an entry point INTO the existing flow carrying the invitation, not a
+> flow of its own. Two mechanisms are available and neither has been chosen:
+> authentik's `invitation` stage on the same flow, or a server-imposed `email`
+> prompt value with the email stage skipped under a policy. What must hold is
+> that the address is recorded confirmed, no second message is sent, and
+> `create_users_as_inactive` still applies.
+>
+> **And carry the cost forward rather than discovering it.** The fourteen-day
+> invitation clock runs while the invitee waits for approval (V13), so 11a.4 and
+> `self-service-signup` 7.5 are the same test seen from two sides — whichever
+> group writes it should delete the other's copy rather than write two.
 
 - [ ] 7.1 Add the registration entry point reached from an invitation, creating a user with the invited address already confirmed and sending no confirmation message
 - [ ] 7.2 Assert that only the invited address is confirmed by this path
@@ -165,7 +186,17 @@
 - [x] 11a.1 Do not build an exemption. An invited person is created inactive and waits, exactly like a stranger; there is one enrolment flow
 - [x] 11a.2 Keep the address confirmation exemption, which is a different thing: the invitation link proved control of the address, so no confirmation mail is sent (design V3)
 - [x] 11a.3 Do NOT pause or extend the fourteen days while the invitee waits. Rejected in V13: the service cannot observe when somebody was approved, and lengthening V8's expiry to hide an approval latency problem trades a security parameter for an operational one
-- [ ] 11a.4 (blocked with group 7: there is no approval gate to make somebody wait at) Test the unhappy path end to end — invited, registers, approved after the invitation expired — and assert what the invitee sees is an expired invitation naming the account to ask, not an error
+- [ ] 11a.4 (blocked with group 7, but no longer for the old reason) Test the unhappy path end to end — invited, registers, approved after the invitation expired — and assert what the invitee sees is an expired invitation naming the account to ask, not an error
+
+  > This used to say "there is no approval gate to make somebody wait at". There
+  > is one now: `self-service-signup` creates every registrant inactive, and
+  > `backend/acceptance/enrollment_test.go` already approves one by ticking
+  > `is_active` through the provider's API, which is the fixture this test needs.
+  > What is still missing is group 7's entry point — nothing sends an invitee
+  > into enrolment carrying their invitation, so the "invited, registers" half of
+  > this path cannot be walked yet.
+  >
+  > It is the same test as `self-service-signup` 7.5. Write it once.
 
 ## 12. Blocklist interaction
 

@@ -65,28 +65,50 @@
   > reads back out of the sender — so the grammar is now enforced by a test rather
   > than recorded in a comment.
 - [x] 4.2 Add NO constant subject prefix. It spends the most valuable characters in an inbox on what the sender column already says (T4)
-- [ ] 4.3 Review the identity provider's own subjects against the same grammar and override them where they disagree
+- [x] 4.3 Review the identity provider's own subjects against the same grammar and override them where they disagree
 
-  > **Nothing to review yet.** A subject is authentik's only when an email STAGE
-  > renders one, and `development/authentik/blueprints/acmeservice.yaml`
-  > configures no email stage: authentik ships none by default, the dev stack has
-  > no recovery flow and no enrolment flow, so the identity provider currently
-  > sends zero messages. Checking this off today would mean reviewing the
-  > subjects of an empty set.
+  > **Reviewed, and there is exactly one.** `self-service-signup` added the first
+  > and only email stage this deployment has —
+  > `acmeservice-enrollment-email-verification` — so the set that was empty when
+  > this note was written now has one member.
   >
-  > It unblocks with `self-service-signup`, which is what adds the flow that
-  > sends. Overriding is a custom template mounted into authentik's template
-  > directory and named on the stage — the same mechanism 1.3's second half
-  > needs, so do both at once.
+  > It disagreed and was overridden. authentik's `EmailStage.subject` defaults to
+  > the literal `authentik`, which is the correct name of the wrong product as far
+  > as the recipient is concerned. It is now `Address confirmation`: the noun the
+  > message concerns first, no constant prefix, reading the way
+  > `Invitation to <account>` does. Verified by provoking a real registration and
+  > reading the message back out of mailpit — subject `Address confirmation`,
+  > from `AcmeAlias <no-reply@acmealias.com>`.
+  >
+  > **Overriding needed no custom template**, which this note previously assumed
+  > it would: the subject is a field on the stage and therefore blueprint-managed.
+  > The custom TEMPLATE mechanism is still what 1.3's footer needs, and that is
+  > still open.
 
 > What exists: `backend/acceptance/mail_test.go` compares the two senders'
 > CONFIGURED identities — the service's effective config against authentik's
-> environment — which already fails when somebody changes one side. It does not
-> yet provoke a message from each and read both out of mailpit, because
-> provoking authentik's means driving an enrolment flow `self-service-signup`
-> has not built. Both tasks stay open until it does.
+> environment — which already fails when somebody changes one side.
+>
+> **UNBLOCKED.** The reason these stayed open was that provoking a message from
+> authentik meant driving an enrolment flow nobody had built.
+> `self-service-signup` built it, and
+> `backend/acceptance/enrollment_test.go` already provokes one and reads it back
+> out of mailpit to find the confirmation link — so the machinery both tasks
+> wanted is written and only the assertion is missing. The service half is
+> provoked by `TestIntegrationInvitationEndToEnd`.
 
 ## 5. Proving the two agree
 
 - [ ] 5.1 A test that provokes one message from EACH sender, reads both out of mailpit, and asserts the same sender identity and the same footer (T2)
+
+  > Not written. Both halves can now be provoked in one test — enrolment for the
+  > provider's, an invitation for the service's — using
+  > `enrollment_test.go`'s helpers. What it must compare is what ARRIVED, not
+  > what was configured, which is the whole difference from
+  > `TestBothSendersShareOneIdentity`.
+  >
+  > **The footer half of it cannot pass yet**, and that is 1.3 rather than this
+  > task: the footer is not written, and authentik's side of it needs a custom
+  > template mounted into the image. So this test lands with the sender-identity
+  > assertion and gains the footer one when 1.3 does.
 - [ ] 5.2 Make that test the thing that fails when somebody edits one template set and not the other — which is the only version of this agreement that survives being forgotten

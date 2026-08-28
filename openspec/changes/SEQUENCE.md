@@ -57,8 +57,21 @@ the bottom.
    PROVIDER'S, because "may this person authenticate at all" is a fact about an identity, while
    "suspended" is a fact about a known customer's account and stays ours. Putting it there also means
    no `accounts` row is ever written for somebody we have not admitted, and nothing in our schema or
-   in `store.Usable` changes. It sits after invitations because accepting one is a vouching that
-   bypasses the gate.
+   in `store.Usable` changes. It sits after invitations because accepting one WAS a vouching that
+   bypassed the gate — a position S7 has since reversed: there is one enrolment flow and everybody
+   walks through it, invited or not, and what an invited person skips is the confirmation mail and
+   only that.
+
+   *Implemented: 24 of 34 tasks, and the shape of what is left is worth reading rather than
+   counting.* The flow exists, the gate is one key on its `user_write` stage, and the whole path —
+   register, confirm, be refused, be approved, sign in, hold exactly one account that did not exist
+   a moment earlier — was walked against the running stack. Two things are open. **Task 2.2 is
+   diagnosed and not fixed**: an unapproved person still meets "Failed to authenticate.", which is
+   the refusal design S3 said must not be shipped, and authentik 2024.10 cannot give a better one
+   while `is_active` is the gate — the measurement and the two ways out are in the task. **Group 3
+   is blocked on `account-invitations` 7.1**, which this change unblocked in turn: an invited person
+   is held for approval like everybody else, but nothing yet sends them into enrolment carrying
+   their invitation.
 8. **`domain-setup-feedback`** — telling a customer whether their delegation actually works. It
    sits immediately before the first customers rather than after them, because the very first thing
    any customer does is publish one `CNAME`, and this is the only thing that tells them whether they
