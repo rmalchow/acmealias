@@ -8,7 +8,7 @@ import { NzSwitchModule } from 'ng-zorro-antd/switch';
 import { NzTableModule, NzTableQueryParams } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, Interaction, apiErrorMessage } from '@acme/shared';
+import { apiErrorMessage, ApiService, HelpHintComponent, Interaction } from '@acme/shared';
 /**
  * Recent interactions: every challenge this load balancer published, who published it and from where, and
  * whether the CA ever came to look.
@@ -25,6 +25,7 @@ import { ApiService, Interaction, apiErrorMessage } from '@acme/shared';
   imports: [
     DatePipe,
     FormsModule,
+    HelpHintComponent,
     NzButtonModule,
     NzIconModule,
     NzInputModule,
@@ -35,7 +36,18 @@ import { ApiService, Interaction, apiErrorMessage } from '@acme/shared';
   ],
   template: `
     <div class="panel-head">
-      <h2>Recent interactions</h2>
+      <h2>
+        Recent interactions
+        <app-help-hint
+          heading="Recent interactions"
+          [paragraphs]="[
+            'One row per publication: an ACME client asked us to answer a challenge, and this is what became of it. It is the first place to look when a certificate did not renew, because it says whether your client ever reached us at all.',
+            'Which key published, and from which address, are on the row — so a refusal caused by a key’s IP restriction is visible as a refusal rather than as silence.',
+            'The outcome is worked out when the row is read, not stored, so it is right for a publication still in flight: pending is published and not yet asked for, live is being served now, validated means the certificate authority queried it, and unqueried means nobody ever did — which usually means the CNAME is missing or the CA never got as far as asking.',
+            'The spelling column says how the client addressed us: our own alias name, your _acme-challenge name followed through the CNAME, or the acme-dns protocol, which names the alias by its bare label. acme-dns has no withdrawal operation, so those publications end by expiring rather than by being cleaned up.'
+          ]"
+        />
+      </h2>
       <button nz-button nzSize="small" (click)="load()">
         <span nz-icon nzType="reload"></span>
         Refresh
@@ -91,12 +103,17 @@ import { ApiService, Interaction, apiErrorMessage } from '@acme/shared';
     >
       <thead>
         <tr>
-          <th nzWidth="13rem">When</th>
-          <th>Domains</th>
-          <th nzWidth="10rem">From</th>
-          <th nzWidth="9rem">Key</th>
-          <th nzWidth="8rem">Queried</th>
-          <th nzWidth="9rem">Outcome</th>
+          <!-- Twelfths, like the tables above this panel. Domains was the only column with no
+               width at all, so it absorbed whatever the others left — which put a variable-width
+               column in the middle of a table whose other five are fixed. It is now three
+               twelfths, one less than the four it was taking, and the twelfth goes to From: an
+               IPv6 address is 39 characters at its longest and was wrapping in 10rem. -->
+          <th nzWidth="16.6667%">When</th>
+          <th nzWidth="25%">Domains</th>
+          <th nzWidth="16.6667%">From</th>
+          <th nzWidth="16.6667%">Key</th>
+          <th nzWidth="8.3333%">Queried</th>
+          <th nzWidth="16.6667%">Outcome</th>
         </tr>
       </thead>
       <tbody>

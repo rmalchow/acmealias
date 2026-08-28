@@ -3,7 +3,7 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NzDatePickerModule } from 'ng-zorro-antd/date-picker';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, apiErrorMessage } from '@acme/shared';
+import { ApiService, HelpHintComponent, apiErrorMessage } from '@acme/shared';
 import { Outcome, UsageBucket, UsageResponse } from './reporting.models';
 
 /**
@@ -19,10 +19,20 @@ import { Outcome, UsageBucket, UsageResponse } from './reporting.models';
  */
 @Component({
   selector: 'app-project-usage-panel',
-  imports: [DatePipe, FormsModule, NzDatePickerModule, NzToolTipModule],
+  imports: [DatePipe, FormsModule, HelpHintComponent, NzDatePickerModule, NzToolTipModule],
   template: `
     <div class="panel-head">
-      <h2>Attempts over time</h2>
+      <h2>
+        Attempts over time
+        <app-help-hint
+          heading="Attempts over time"
+          [paragraphs]="[
+            'Every challenge this project asked us to answer, counted over time. A healthy project is quiet and periodic — a small cluster of attempts per certificate, roughly every sixty days, one per node that renews independently.',
+            'The shape is what to read rather than the numbers. A flat line where you expected a renewal means your client never asked us; a sudden dense run means something is retrying, which is worth catching before it meets a rate limit at the certificate authority.',
+            'Attempts are also what a team account is billed on, so this is the same count the bill is drawn from.'
+          ]"
+        />
+      </h2>
     </div>
 
     <p class="ac-hint measure-note">{{ measureNote() }}</p>

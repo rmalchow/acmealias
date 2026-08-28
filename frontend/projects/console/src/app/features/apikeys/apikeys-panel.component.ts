@@ -7,7 +7,7 @@ import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, LBNode, NOT_PERMITTED, Project, SessionService, apiErrorMessage, confirmAction, may } from '@acme/shared';
+import { ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, HelpHintComponent, LBNode, NOT_PERMITTED, Project, SessionService, apiErrorMessage, confirmAction, may } from '@acme/shared';
 import { openApiKeyCreateModal } from './apikey-create.modal';
 import { openApiKeyRevealModal } from './apikey-reveal.modal';
 
@@ -26,10 +26,21 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
  */
 @Component({
   selector: 'app-apikeys-panel',
-  imports: [DatePipe, NzAlertModule, NzButtonModule, NzIconModule, NzTableModule, NzTagModule, NzToolTipModule],
+  imports: [DatePipe, HelpHintComponent, NzAlertModule, NzButtonModule, NzIconModule, NzTableModule, NzTagModule, NzToolTipModule],
   template: `
     <div class="panel-head">
-      <h2>Project keys</h2>
+      <h2>
+        Project keys
+        <app-help-hint
+          heading="Project keys"
+          [paragraphs]="[
+            'The credentials your ACME clients authenticate with. A key goes into the DNS-01 configuration of your own client — Traefik, cert-manager, acme.sh — and is what lets that client hand us a challenge value for one of this project’s domains.',
+            'A key reaches this project and nothing else, and it is deleted with the project. It cannot read your account, cannot touch another project, and cannot publish for a name that is not in the Domains table above.',
+            'Restrictions narrow it further. A key can be confined to CIDR ranges you name, and to the addresses of this project’s own nodes — in which case a node added later works with no change here. A key with neither restriction works from anywhere, which is convenient and is worth a moment’s thought.',
+            'The secret is shown once, at creation, and is never recoverable afterwards. Rotating mints a successor without revoking the current key: deploy the new secret, confirm it works, then revoke the old one. Both are valid side by side on purpose, so there is no gap.'
+          ]"
+        />
+      </h2>
       <button
         nz-button
         nzType="primary"

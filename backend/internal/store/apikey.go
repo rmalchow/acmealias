@@ -70,7 +70,7 @@ func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey, c
 }
 
 // ListAPIKeysForProject returns the PROJECT keys bound to one project, with
-// their networks preloaded, ordered by creation time.
+// their networks preloaded, newest first.
 //
 // It used to answer a question about grants — "which keys' authority reaches
 // this project" — because a key's relationship to a project was a grant and
@@ -96,7 +96,7 @@ func ListAPIKeysForProject(ctx context.Context, db *gorm.DB, sc Scope, projectID
 		return sc.Where(tx).
 			Preload("Networks").
 			Where("kind = ? and project_id = ?", model.APIKeyKindProject, p.ID).
-			Order("created_at").
+			Order("created_at desc, id desc").
 			Find(&ks).Error
 	})
 	if err != nil {
@@ -106,7 +106,7 @@ func ListAPIKeysForProject(ctx context.Context, db *gorm.DB, sc Scope, projectID
 }
 
 // ListSystemAPIKeys returns the account's system keys — the members that are not
-// people — with their role and any legacy grants, ordered by creation time.
+// people — with their role and any legacy grants, newest first.
 //
 // Both shapes appear here: a key holding a role, and a key from before there
 // were two kinds, holding its own grants. The console renders whichever it
@@ -120,7 +120,7 @@ func ListSystemAPIKeys(ctx context.Context, db *gorm.DB, sc Scope) ([]model.APIK
 			Preload("Grants").
 			Preload("Role").
 			Where("kind = ?", model.APIKeyKindSystem).
-			Order("created_at").
+			Order("created_at desc, id desc").
 			Find(&ks).Error
 	})
 	if err != nil {
@@ -195,7 +195,7 @@ func NoteAddressRefusal(ctx context.Context, db *gorm.DB, id model.ID, ip string
 func ListAPIKeys(ctx context.Context, db *gorm.DB, sc Scope) ([]model.APIKey, error) {
 	var ks []model.APIKey
 	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
-		return sc.Where(tx).Preload("Networks").Preload("Grants").Order("created_at").Find(&ks).Error
+		return sc.Where(tx).Preload("Networks").Preload("Grants").Order("created_at desc, id desc").Find(&ks).Error
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: list api keys: %w", err)

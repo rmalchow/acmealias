@@ -8,6 +8,7 @@ import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule, NzTableQueryParams } from 'ng-zorro-antd/table';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
+import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionService, apiErrorMessage, may, openNameSlugModal } from '@acme/shared';
 /** 19.1 — the project list: filter, page, and create through a modal (creation is ADMIN-only, D10). */
 @Component({
@@ -22,6 +23,7 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
     NzInputModule,
     NzTableModule,
     NzToolTipModule,
+    NzAlertModule,
   ],
   template: `
     <app-page-header [crumbs]="[{ label: 'Projects' }]" title="Projects" [subtitle]="subtitle()" />
@@ -60,6 +62,49 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
 
     @if (error(); as msg) {
       <p class="ac-error">{{ msg }}</p>
+    }
+
+    <!--
+      THE EMPTY ACCOUNT IS THE ONE SCREEN WITH NOTHING TO READ, and it is the first screen
+      somebody sees. The table's "No projects" is a true statement that answers no question: the
+      person looking at it does not yet know what a project is, so telling them there are none of
+      them is telling them nothing.
+
+      It shows only when the account really is empty — not when a filter matched nothing, where
+      the reader has already seen the list and needs their filter back rather than an
+      explanation. Hence showIntro() rather than a bare length check.
+    -->
+    @if (showIntro()) {
+      <nz-alert
+        class="intro"
+        nzType="info"
+        nzShowIcon
+        nzMessage="What is a project?"
+        [nzDescription]="intro"
+      />
+      <ng-template #intro>
+        <p>
+          A project is one deployment held together: the load balancer nodes that terminate TLS,
+          the domains they answer for, and the API keys their ACME clients authenticate with. Most
+          accounts have one per environment — production, staging — rather than one per domain.
+        </p>
+        <p>
+          The grouping is what enforces the boundary. A key belonging to a project can publish a
+          challenge only for domains in that same project, and we serve only what such a key
+          published. A key from staging asking us to answer for a production domain is refused —
+          not filtered out of a view, refused at the door — so a compromised staging deployment
+          cannot obtain a certificate for a name it was never meant to have.
+        </p>
+        <p>
+          Keys can be narrowed further. A key may be restricted to the CIDR ranges you name, and to
+          the addresses of this project's own nodes, so a secret that leaks out of your network
+          cannot be used from outside it.
+        </p>
+        <p>
+          Nothing about your DNS is stored here beyond one label per domain. You publish a single
+          CNAME per domain, once; after that every renewal happens without you.
+        </p>
+      </ng-template>
     }
 
     <nz-table
@@ -103,6 +148,15 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
   `,
   styles: [
     `
+      .intro {
+        margin-bottom: 1rem;
+      }
+      .intro p {
+        margin: 0 0 0.5rem;
+      }
+      .intro p:last-child {
+        margin-bottom: 0;
+      }
       .clear {
         /* A real button, so it is tabbable and announced — it just has to look like the icon it
          * replaced rather than like a button. */
@@ -138,6 +192,18 @@ export class ProjectListComponent implements OnInit {
     if (rows.length > 0) return may(rows[0], CAN_ADMIN_PROJECT);
     return this.session.me()?.permissions?.includes(CAN_ADMIN_PROJECT) ?? false;
   });
+
+  /**
+   * The explanation appears for an account with no projects at all, and NOT for a filter that
+   * matched nothing: `total()` is the unfiltered count only while `query` is empty, and someone
+   * who has filtered their way to zero rows has already seen what a project list looks like.
+   *
+   * `loading()` is in the condition so the box does not flash on first paint, when the count is
+   * still 0 because nothing has come back yet.
+   */
+  readonly showIntro = computed(
+    () => !this.loading() && this.total() === 0 && this.query.trim() === '',
+  );
 
   /**
    * A different sentence from the generic one, because this refusal has a different cause and a

@@ -6,7 +6,7 @@ import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAAStatus, CAN_WRITE, CertificateState, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
+import { ApiService, CAAStatus, CAN_WRITE, HelpHintComponent, CertificateState, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
@@ -42,6 +42,7 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
   selector: 'app-project-detail',
   imports: [
     PageHeaderComponent,
+    HelpHintComponent,
     ApiKeysPanelComponent,
     InteractionsPanelComponent,
     ProjectUsagePanelComponent,
@@ -67,7 +68,18 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
 
     <section>
       <div class="panel-head">
-        <h2>Nodes</h2>
+        <h2>
+          Nodes
+          <app-help-hint
+            heading="Nodes"
+            [paragraphs]="[
+              'The machines of your load balancer — the ones that terminate TLS and run the ACME client. A project usually has one row per node, and a single-node deployment has exactly one.',
+              'Each node runs ACME independently unless the nodes share their certificate storage, so during a renewal several of them may publish a challenge value for the same name at once. That is expected: the values coexist, and every one of them validates.',
+              'The addresses are what certificate observation connects to. When a domain has it switched on, we open a TLS connection to every node on IPv4 and on IPv6 separately and record what each one presented — which is how “renewed on IPv4 but not on IPv6” becomes visible rather than becoming an outage.',
+              'They are also what an API key restricted to this project’s nodes is allowed to connect from. Add a node here before pointing its ACME client at us, or a restricted key will refuse it.'
+            ]"
+          />
+        </h2>
         <button
           nz-button
           nzType="primary"
@@ -144,7 +156,19 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
 
     <section>
       <div class="panel-head">
-        <h2>Domains</h2>
+        <h2>
+          Domains
+          <app-help-hint
+            heading="Domains"
+            [paragraphs]="[
+              'The names this project may obtain certificates for. A key belonging to this project can publish a challenge for these names and for nothing else, so this table is the boundary as well as the inventory.',
+              'Each domain gets an alias label, and you publish one CNAME for it — from _acme-challenge under your own name, to that label in our zone. Once, by hand. Every renewal after that happens without you, and we never ask for a credential to your DNS.',
+              'Challenges says what we will do for the name right now, from what we have already seen: until the delegation has been observed once, a challenge for it is refused rather than served.',
+              'Validation is three live verdicts, one dot each — the delegation CNAME as DNS answers it this second, the CAA records that decide whether the CA may issue at all, and the certificate we last observed. The third dot is grey unless observation is switched on for that domain, which is per domain and off until you ask for it.',
+              'A wildcard and its base name validate at the same challenge name, because the *. label is stripped before the name is formed. So *.example.com and example.com share one alias and one CNAME between them, not two.'
+            ]"
+          />
+        </h2>
         <!--
           RECHECK IS ONE BUTTON BECAUSE IT WAS ALWAYS ONE ACTION. It used to sit on every row,
           which read as "check this domain" — and it never was: the control posts
