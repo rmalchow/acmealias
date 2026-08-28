@@ -57,16 +57,24 @@ the bottom.
    makes the other two mean anything, because without it a domain nobody controls is
    indistinguishable from one somebody does. It pairs with the change above — that one tells a
    customer what is wrong, this one decides whether we do any work for them at all.
-9. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+9. **`swagger-ui`** — a reader for the contract that is already published. `/api/v1/openapi.yaml`
+   serves a hand-written document nobody can comfortably read: 657 lines of YAML in a browser tab is
+   a published contract the way a filing cabinet is a published archive. It sits here because the
+   audience is the first customer who wants to program against the service rather than click, and
+   because it is a shop window — one of the few pages a technical evaluator reads before deciding to
+   build against us, which is why it is styled like the product rather than left stock, and why the
+   assets are vendored rather than fetched from a CDN that would blank the page on an air-gapped
+   deployment.
+10. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-10. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+11. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-11. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+12. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-12. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
+13. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
     never spoken to: a self-service enrolment flow at the identity provider, a real payment provider
     behind the checkout that currently takes no money, protective limits that hold whether or not
     anybody has paid, the production identity provider and the rest of the staff/customer separation,

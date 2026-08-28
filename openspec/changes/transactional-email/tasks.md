@@ -6,8 +6,8 @@
 
 ## 1. The sender identity
 
-- [ ] 1.1 Decide the sender address and display name, once, and record them where both senders read them from configuration rather than from a template
-- [ ] 1.2 Decide the reply address. `no-reply@` is the reflex and T3 argues against it: every message here is something a recipient may reasonably want to answer
+- [x] 1.1 Decide the sender address and display name, once, and record them where both senders read them from configuration rather than from a template
+- [x] 1.2 Decide the reply address. `no-reply@` is the reflex and T3 argues against it: every message here is something a recipient may reasonably want to answer
 - [ ] 1.3 Write the footer, once. Both senders carry the same one (T5)
 - [ ] 1.4 Configure the identity provider's sender to match, in `development/authentik/blueprints/acmeservice.yaml`
 
@@ -21,15 +21,26 @@
 
 ## 3. The service's sender
 
-- [ ] 3.1 Add a mail sender to the service — the shape only. The messages belong to the changes that send them: `account-invitations` the invitation, `metering-and-credits` the credit warning
-- [ ] 3.2 Read the sender identity, reply address and footer from configuration, in the layered schema's grouping
-- [ ] 3.3 Point it at `mailpit:1025` in development — the compose service name, NOT `mail.localhost`, which is the web interface and is served through the HTTP overlay that SMTP does not traverse
+- [x] 3.1 Add a mail sender to the service — the shape only. The messages belong to the changes that send them: `account-invitations` the invitation, `metering-and-credits` the credit warning
+- [x] 3.2 Read the sender identity, reply address and footer from configuration, in the layered schema's grouping
+- [x] 3.3 Point it at `mailpit:1025` in development — the compose service name, NOT `mail.localhost`, which is the web interface and is served through the HTTP overlay that SMTP does not traverse
+
+> 4.1 stays open until there is a subject to judge: the grammar is recorded where
+> subjects are built (`mail.Message`), but the first one is written by
+> `account-invitations`.
 
 ## 4. Subjects
 
 - [ ] 4.1 Adopt the grammar of T4: the noun the message concerns comes first
-- [ ] 4.2 Add NO constant subject prefix. It spends the most valuable characters in an inbox on what the sender column already says (T4)
+- [x] 4.2 Add NO constant subject prefix. It spends the most valuable characters in an inbox on what the sender column already says (T4)
 - [ ] 4.3 Review the identity provider's own subjects against the same grammar and override them where they disagree
+
+> What exists: `backend/acceptance/mail_test.go` compares the two senders'
+> CONFIGURED identities — the service's effective config against authentik's
+> environment — which already fails when somebody changes one side. It does not
+> yet provoke a message from each and read both out of mailpit, because
+> provoking authentik's means driving an enrolment flow `self-service-signup`
+> has not built. Both tasks stay open until it does.
 
 ## 5. Proving the two agree
 

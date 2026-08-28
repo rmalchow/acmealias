@@ -67,7 +67,7 @@ export interface NavItem {
   template: `
     <header class="bar" [class.staff]="tone() === 'staff'">
       <a class="brand" [routerLink]="home()" [attr.aria-label]="product() + ' — home'">
-        <span class="brand-box"><img src="brand/logo.svg" alt="" /></span>
+        <img class="brand-logo" src="brand/logo.svg" alt="" />
         <span class="brand-word">@if (wordLight(); as l) {<b>{{ l }}</b>}{{ wordRest() }}</span>
         @if (badge(); as text) {
           <span class="brand-badge">{{ text }}</span>
@@ -120,8 +120,15 @@ export interface NavItem {
         align-items: center;
         justify-content: space-between;
         gap: 1rem;
-        height: 3rem;
-        padding-inline: var(--ac-page-gutter);
+        /* The marketing site's bar, to the value: site/src/styles.css '.bar' is
+           'padding: 1rem 1.5rem' with no set height, so the bar is as tall as the mark plus its
+           padding. --ac-page-gutter is 1.5rem, so the inline half is the same number AND keeps
+           the console's own rule that the bar's contents sit on the page's gutter.
+
+           It was 'height: 3rem', which made a console bar shorter than the site's and put the
+           same mark at two sizes on two pages of one product. Height now follows the mark, so
+           the two cannot drift again unless somebody changes the mark. */
+        padding: 1rem var(--ac-page-gutter);
         background: var(--ac-ground);
         border-block-end: 1px solid var(--ac-line);
       }
@@ -155,8 +162,10 @@ export interface NavItem {
            beside it — the eye landed on the word rather than on the glyph, which is backwards for
            a bar whose only accent-coloured thing is the mark. */
         font-weight: 400;
-        font-size: 1.35rem;
-        letter-spacing: 0.01em;
+        /* site/src/styles.css '.mark-word'. */
+        font-size: 2rem;
+        line-height: 1;
+        letter-spacing: 0.005em;
         color: var(--ac-ink);
       }
 
@@ -166,27 +175,19 @@ export interface NavItem {
         font-weight: 300;
       }
 
-      /* The mark sits in a box of its own rather than floating against the bar. The logo is a
-         stroked outline with no fill, so at bar size it needs a ground to read against — and the
-         box is what gives the corner a fixed shape whatever the mark inside it becomes. */
-      .brand-box {
-        display: grid;
-        place-items: center;
-        inline-size: 1.85rem;
-        block-size: 1.85rem;
-        border: 1px solid var(--ac-accent-line);
-        border-radius: 4px;
-        background: var(--ac-accent-soft);
-      }
+      /* The mark, bare. It had a tinted box around it — a ground for a hairline outline to read
+         against — and the marketing site proves the ground is unnecessary: the bar is already
+         near-black, and the mark is drawn to sit on exactly that. The box also made the console's
+         mark a different object from the site's, which is the thing being fixed here.
 
-      .brand-box img {
-        inline-size: 1.05rem;
-        block-size: auto;
+         2rem is site/src/styles.css '.mark-logo'. It is what sets the bar's height, since the bar
+         has no height of its own. */
+      .brand-logo {
+        block-size: 2rem;
+        inline-size: auto;
         display: block;
       }
 
-      /* Set in the accent, which is amber on the staff console — so the word 'staff' is itself
-         the colour that says which console this is. */
       .brand-badge {
         margin-inline-start: 0.15rem;
         font-size: 0.75rem;

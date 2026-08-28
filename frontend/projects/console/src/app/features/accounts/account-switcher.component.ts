@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { NzButtonModule } from 'ng-zorro-antd/button';
@@ -19,9 +19,15 @@ import { AccountsService } from './accounts.service';
  * in the place the control lives, with nothing to open. Inert rather than disabled: a disabled
  * control says something is wrong, and nothing is (task 6.1a).
  *
- * With two or more it is a searchable select rather than a dropdown menu, because a customer who
- * pays for several accounts will have several, and a list that has to be scrolled is a list that
- * gets the wrong entry picked.
+ * With two or more it is a select. The SEARCH box appears at five, not at two: below that the
+ * whole list is on screen and a search field is a control that costs a keystroke to dismiss and
+ * finds nothing you could not already see. Five is where a list stops being scannable at a
+ * glance, and it is where scrolling to the wrong entry starts being possible.
+ *
+ * The PERSONAL account is shown as a profile icon and the word "Personal", not by its name. Its
+ * name is derived from its owner's address, so rendering it here puts the signed-in person's
+ * identity next to the user menu that already says it — the same word twice, a centimetre apart,
+ * one of them pretending to be the name of a thing. "Personal" is also what the person calls it.
  *
  * A SUSPENDED account is listed and marked, never omitted (task 6.1b): its owner is the only
  * person who can pay for it, and the picker is how they reach it. Selecting one as a member is
@@ -37,7 +43,7 @@ import { AccountsService } from './accounts.service';
       @if (accounts.hasChoice()) {
         <nz-select
           class="pick"
-          nzShowSearch
+          [nzShowSearch]="searchable()"
           nzBorderless
           [nzOptionOverflowSize]="12"
           [ngModel]="accounts.current()?.id ?? null"
@@ -46,11 +52,16 @@ import { AccountsService } from './accounts.service';
           nzPlaceHolder="No account"
         >
           @for (a of accounts.accounts(); track a.id) {
-            <nz-option nzCustomContent [nzValue]="a.id" [nzLabel]="a.name">
-              {{ a.name }}
+            <!--
+              nzLabel is what the CLOSED control shows and what a search matches on, so it carries
+              the same word the row does. A personal account whose label stayed its derived name
+              would read "Personal" in the list and something else once picked.
+            -->
+            <nz-option nzCustomContent [nzValue]="a.id" [nzLabel]="label(a)">
               @if (a.kind === 'personal') {
-                <small class="tag">personal</small>
+                <span nz-icon nzType="user" class="kind"></span>
               }
+              {{ label(a) }}
               @if (a.suspended) {
                 <small class="tag warn">suspended</small>
               }
@@ -58,9 +69,15 @@ import { AccountsService } from './accounts.service';
           }
         </nz-select>
       } @else {
+        <!--
+          The one-account case, and in practice that account is almost always the personal one —
+          which is exactly where showing its derived name would repeat the user menu beside it.
+          The icon follows the same rule as the list so the control does not change appearance
+          the day a second account arrives.
+        -->
         <span class="pick inert" [attr.title]="accounts.current()?.slug ?? null">
-          <span nz-icon nzType="cluster"></span>
-          {{ accounts.current()?.name ?? 'No account' }}
+          <span nz-icon [nzType]="accounts.current()?.kind === 'personal' ? 'user' : 'cluster'"></span>
+          {{ accounts.current() ? label(accounts.current()!) : 'No account' }}
         </span>
       }
 
@@ -109,6 +126,12 @@ import { AccountsService } from './accounts.service';
         margin-inline-start: 0.5rem;
         opacity: 0.6;
       }
+      /* Sits with the word rather than in a column of its own: only the personal row has one, so
+       * a reserved gutter would indent every other row against nothing. */
+      .kind {
+        margin-inline-end: 0.4rem;
+        opacity: 0.75;
+      }
       .tag.warn {
         color: var(--ac-warn);
         opacity: 1;
@@ -122,6 +145,25 @@ export class AccountSwitcherComponent {
   private readonly router = inject(Router);
 
   protected readonly switching = signal(false);
+
+  /**
+   * The search box appears at five accounts.
+   *
+   * Below that the whole list is visible at once, and a search field is then a control that has
+   * to be dismissed to see what it was covering. Five is where scanning stops working.
+   */
+  protected readonly searchable = computed(() => this.accounts.accounts().length >= 5);
+
+  /**
+   * What an account is called in this control.
+   *
+   * A personal account is "Personal". Its stored name is derived from its owner's address, so
+   * showing it here repeats the user menu a centimetre away — and worse, presents a person's own
+   * identity as though it were the name of a workspace they chose.
+   */
+  protected label(a: { kind: string; name: string }): string {
+    return a.kind === 'personal' ? 'Personal' : a.name;
+  }
 
   /**
    * There is no ngOnInit here any more. The list is loaded before the first render (app.config's

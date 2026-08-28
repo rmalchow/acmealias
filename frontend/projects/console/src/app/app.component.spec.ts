@@ -48,6 +48,23 @@ describe('AppComponent', () => {
     }).compileComponents();
   });
 
+  it('sends the mark to the screen that lists projects', () => {
+    // The logo is the way back. In this console that means the project list — the screen with the
+    // account switcher above it and the projects in it — and NOT '/', which is where the staff
+    // console's mark goes and where this one would land somebody on a bare redirect.
+    //
+    // Asserted on the rendered href rather than on the input, because what breaks this is somebody
+    // changing the shell's default and the console forgetting to override it: the input would still
+    // read '/projects' in one file while the anchor pointed elsewhere.
+    signedIn();
+    TestBed.inject(AccountsService).accounts.set([account({})]);
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    const brand: HTMLAnchorElement = fixture.nativeElement.querySelector('a.brand');
+    expect(brand).withContext('the bar has no brand link at all').toBeTruthy();
+    expect(brand.getAttribute('href')).toBe('/projects');
+  });
+
   it('names the remedy once in a personal account', () => {
     // Not Projects with three disabled entries beside it: navigation is the map of the product,
     // and `Upgrade` is the positive form of everything a personal account is missing (C11).
