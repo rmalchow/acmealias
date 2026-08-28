@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>acmesite — placeholder</title>
+<h1>Placeholder</h1>
+<p>
+  This file exists so that <code>//go:embed all:dist</code> in
+  <code>main.go</code> resolves on a clean checkout. <code>go:embed</code> is a
+  compile-time directive and an empty directory is a build failure, not a
+  smaller binary — so without a committed file here, <code>go build ./...</code>
+  breaks for anyone who has not run <code>site/build.sh</code> first.
+</p>
+<p>
+  The real site is copied over this by <code>docker/Dockerfile.site</code>
+  before the Go build. If you are reading this in a browser, you are looking at
+  an image built without that step.
+</p>

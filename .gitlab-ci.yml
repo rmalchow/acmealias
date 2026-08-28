@@ -4,7 +4,6 @@
 # split) and D15 (Docker Compose production deploy) for the reasoning below.
 
 stages:
-  - lint
   - test
   - build
   - publish
@@ -12,6 +11,10 @@ stages:
 variables:
   GOPATH: "$CI_PROJECT_DIR/.cache/go"
   GOMODCACHE: "$CI_PROJECT_DIR/.cache/go-mod"
+  REGISTRY: harbor.rand0m.me/public
+  DOCKER_BUILDKIT: "1"
+  # Persistent BuildKit local-cache root, bind-mounted from the runner host.
+  CACHE_DIR: /var/cache/acme-buildkit
 
 .go-cache:
   cache:
@@ -21,25 +24,29 @@ variables:
       - .cache/go
       - .cache/go-mod
 
-lint-go:
-  stage: lint
-  # golangci-lint isn't installed on developer machines or generic runner
-  # images — this image provides the binary instead of us installing it.
-  image: golangci/golangci-lint:latest-alpine
-  extends: .go-cache
-  script:
-    - cd backend && golangci-lint run ./...
-
-lint-frontend:
-  stage: lint
-  image: node:22-bookworm-slim
-  cache:
-    key:
-      files: [frontend/package-lock.json]
-    paths:
-      - frontend/node_modules
-  script:
-    - cd frontend && npm ci && npx ng lint
+# WHAT CI DOES AND DOES NOT DO, because this pipeline is deliberately thin.
+#
+# It used to lint Go, lint the frontend, run `go test -race`, and run the Angular
+# suite under headless Chromium. All four are run locally, all the time, and a
+# second copy of them here bought a slower merge rather than a signal anybody was
+# waiting on — which is the same argument design D13 already makes about the
+# integration tests and A10 makes about the acceptance suite. The pipeline now
+# follows that reasoning to its end instead of applying it to two stages out of
+# four.
+#
+# WHAT STILL GUARDS A MERGE, and it is more than "nothing":
+#
+#   - `go test ./...` below. Seconds, no external dependency, and it is the one
+#     thing a clean checkout can tell you that a working tree cannot — that the
+#     tests pass against what is COMMITTED rather than against what is on disk.
+#   - The image build. It compiles both Angular projects and the Go binary from
+#     a clean context, so a broken template, a missing import or a `go:embed`
+#     that no longer resolves fails the pipeline whether or not anybody ran
+#     anything locally.
+#
+# What is genuinely gone is style enforcement and the frontend unit suite. If a
+# lint regression ever lands on main and nobody notices, that is the cost being
+# paid, and re-adding a job is a five-line edit.
 
 test-go:
   stage: test
@@ -50,38 +57,62 @@ test-go:
   # (design D13). They're a dev-stack activity, exercised locally against
   # development/scripts/up.sh's PostgreSQL via scripts/test-integration.sh.
   # Do NOT set TEST_DATABASE_URL to "fix" that — see D13 before changing this.
+  #
+  # WITHOUT `-race`, which this job used to carry. The detector roughly triples
+  # the run and its findings are the kind you get from exercising the thing, not
+  # from a unit suite — `./scripts/test.sh` keeps it locally.
   script:
-    - cd backend && go test -race ./...
+    - cd backend && go test ./...
 
-test-frontend:
-  stage: test
-  image: node:22-bookworm-slim
-  cache:
-    key:
-      files: [frontend/package-lock.json]
-    paths:
-      - frontend/node_modules
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends chromium
-    # CI jobs run as root, and Chrome refuses to run its sandbox as root
-    # (crbug.com/638180). karma-chrome-launcher's built-in ChromeHeadless
-    # launcher doesn't add --no-sandbox and there's no karma.conf.js in
-    # frontend/ to add a custom launcher to, so point CHROME_BIN at a
-    # thin wrapper that always adds it instead.
-    - printf '#!/bin/sh\nexec /usr/bin/chromium --no-sandbox "$@"\n' > /usr/local/bin/chromium-ci
-    - chmod +x /usr/local/bin/chromium-ci
-    - export CHROME_BIN=/usr/local/bin/chromium-ci
-  script:
-    - cd frontend && npm ci
-    - npx ng test --watch=false --browsers=ChromeHeadless
+# TWO IMAGES, not one, and they are separate because they change on completely
+# different cadences. A price table on the marketing site is edited far more
+# often than a DNS server, and one image would mean redeploying the thing that
+# answers challenges in order to fix a typo.
+#
+#   acmealias   the service: one Go binary carrying BOTH Angular consoles
+#               (internal/webui embeds all:dist and serves dist/console to
+#               customers, dist/admin to staff), the DNS server and the
+#               challenge API
+#   acmesite    the marketing site: static files behind unprivileged nginx
+#
+# Both build from the REPOSITORY ROOT. The service image copies frontend/ and
+# backend/, so it is not buildable from backend/ alone.
 
-build:
+.build-image: &build-image
   stage: build
   image: docker:27-cli
   # The runners have the Docker socket mounted (design D13/D15), so a plain
-  # `docker build` works here without docker:dind.
-  script:
-    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" .
+  # `docker buildx` works here without docker:dind.
+  before_script:
+    - mkdir -p ~/.docker
+    - cp "${CONFIG_JSON}" ~/.docker/config.json
+    - docker buildx create --name acme-builder --driver docker-container --bootstrap || true
+    - docker buildx use acme-builder
+  script: |
+    IMAGE=$REGISTRY/$IMAGE_NAME
+    CACHE=$CACHE_DIR/$IMAGE_NAME
+    mkdir -p "$CACHE"
+    docker buildx build \
+      --cache-from type=local,src="$CACHE" \
+      --cache-from type=registry,ref="$IMAGE:latest" \
+      --cache-to   type=local,dest="$CACHE",mode=max \
+      --build-arg  BUILDKIT_INLINE_CACHE=1 \
+      -f "$DOCKERFILE" \
+      -t "$IMAGE:$CI_COMMIT_SHA" \
+      --load \
+      .
+
+build-acmealias:
+  <<: *build-image
+  variables:
+    IMAGE_NAME: acmealias
+    DOCKERFILE: Dockerfile
+
+build-acmesite:
+  <<: *build-image
+  variables:
+    IMAGE_NAME: acmesite
+    DOCKERFILE: docker/Dockerfile.site
 
 # NO ACCEPTANCE STAGE HERE, AND THAT IS A DECISION — see design A10 of
 # openspec/changes/add-acceptance-environment. The acceptance suite exists and
@@ -100,13 +131,46 @@ build:
 # fix. If merges should one day block on end-to-end issuance, this is a
 # one-block edit — the script the job would call is exactly the same one.
 
-publish:
+# PUBLISH IS STILL TAG-ONLY. The build stage above proves both images compile on
+# every push to a branch CI runs on; pushing them to a registry that a server
+# pulls `latest` from is a deployment, and a deployment on every green commit is
+# a different decision from a build on every green commit. Tag to release.
+
+.publish-image: &publish-image
   stage: publish
   image: docker:27-cli
   rules:
     - if: $CI_COMMIT_TAG
-  script:
-    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG" -t "$CI_REGISTRY_IMAGE:latest" .
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
-    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
-    - docker push "$CI_REGISTRY_IMAGE:latest"
+  before_script:
+    - mkdir -p ~/.docker
+    - cp "${CONFIG_JSON}" ~/.docker/config.json
+    - docker buildx create --name acme-builder --driver docker-container --bootstrap || true
+    - docker buildx use acme-builder
+  script: |
+    IMAGE=$REGISTRY/$IMAGE_NAME
+    CACHE=$CACHE_DIR/$IMAGE_NAME
+    mkdir -p "$CACHE"
+    docker buildx build \
+      --cache-from type=local,src="$CACHE" \
+      --cache-from type=registry,ref="$IMAGE:latest" \
+      --cache-to   type=local,dest="$CACHE",mode=max \
+      --build-arg  BUILDKIT_INLINE_CACHE=1 \
+      -f "$DOCKERFILE" \
+      -t "$IMAGE:$CI_COMMIT_TAG" \
+      -t "$IMAGE:latest" \
+      --load \
+      .
+    docker push "$IMAGE:$CI_COMMIT_TAG"
+    docker push "$IMAGE:latest"
+
+publish-acmealias:
+  <<: *publish-image
+  variables:
+    IMAGE_NAME: acmealias
+    DOCKERFILE: Dockerfile
+
+publish-acmesite:
+  <<: *publish-image
+  variables:
+    IMAGE_NAME: acmesite
+    DOCKERFILE: docker/Dockerfile.site

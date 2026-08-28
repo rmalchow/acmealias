@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1
+#
+# The marketing site (`acmesite`), as a distroless image. Build from the
+# repository root:
+#   docker build -f docker/Dockerfile.site .
+#
+# NO NGINX, AND THAT IS THE POINT. Serving static files is the one job nginx is
+# unarguably good at, and this was `nginxinc/nginx-unprivileged:alpine` for
+# exactly that reason. What it cost was a second runtime baseline for one
+# product: a shell, a package manager, a config language and a CVE feed, to
+# answer four routes that never change — next to a service image that is already
+# one Go binary on `distroless/static` with nothing else in it. Two baselines is
+# two things to patch and two ways to be wrong about what is installed.
+#
+# So the site is compiled INTO a Go binary (backend/cmd/acmesite) and the image
+# has no filesystem worth the name: no shell to exec into, no package manager,
+# nothing to upgrade but the binary itself.
+
+# --- Stage 1: build the site ---------------------------------------------
+# site/build.sh is the one definition of what a built site is. Inlining its
+# behaviour as a COPY here would mean the day it grows a step — a templating
+# pass, an asset digest — this image would keep shipping the old shape without
+# failing.
+FROM alpine:3.22 AS site
+RUN apk add --no-cache bash
+WORKDIR /src
+COPY site/ ./site/
+RUN bash site/build.sh
+
+# --- Stage 2: compile it into the server ---------------------------------
+FROM golang:1.26.3-bookworm AS backend
+WORKDIR /src/backend
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+# Over the committed placeholder, which exists only so `go:embed` resolves on a
+# clean checkout.
+COPY --from=site /src/site/dist/ ./cmd/acmesite/dist/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o /out/acmesite ./cmd/acmesite
+
+# --- Stage 3: nothing but the binary -------------------------------------
+# `static` rather than `base`: the binary is CGO_ENABLED=0 and serves from
+# memory, so it needs no libc and no CA bundle — it makes no outbound
+# connections at all.
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=backend /out/acmesite /usr/local/bin/acmesite
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/acmesite"]

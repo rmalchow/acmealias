@@ -1,15 +1,22 @@
 # syntax=docker/dockerfile:1
 
-# --- Stage 1: build the console (Angular) ------------------------------
-# `ng build admin`'s configured outputPath (frontend/angular.json) writes
-# into backend/internal/webui/dist, so it must land there before the Go
-# stage runs so `go:embed` picks it up (design D9).
+# --- Stage 1: build BOTH consoles (Angular) ----------------------------
+# `internal/webui` embeds `all:dist` and subs into dist/console AND dist/admin
+# (design D9), so both have to be built here. Building only one is a silent
+# failure rather than a loud one: `go:embed all:dist` still succeeds, the
+# fs.Sub for the missing surface returns an error that webui.go deliberately
+# drops, and the published image serves 404 for every page of a console it
+# claims to carry.
+#
+# Their configured outputPaths (frontend/angular.json) write into
+# backend/internal/webui/dist/{console,admin}, so they must land there before
+# the Go stage runs.
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npx ng build admin
+RUN npx ng build console && npx ng build admin
 
 # --- Stage 2: build the Go binary ---------------------------------------
 FROM golang:1.26.3-bookworm AS backend

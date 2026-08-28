@@ -29,3 +29,11 @@
 
 # The marketing site is built from site/src by site/build.sh.
 /site/dist/
+
+# The marketing site is copied in here by docker/Dockerfile.site before the Go
+# build, exactly as the consoles are for internal/webui above. The placeholder
+# index.html is committed for the same reason that one is: `go:embed` needs the
+# directory to be non-empty at COMPILE time, so an ignored-but-absent dist makes
+# `go build ./...` fail on a fresh clone.
+/backend/cmd/acmesite/dist/*
+!/backend/cmd/acmesite/dist/index.html
