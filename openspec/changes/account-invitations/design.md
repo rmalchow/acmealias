@@ -493,6 +493,27 @@ What is adopted instead is that the failure is made **legible**: an invitation t
 invitee was waiting is still just an expired invitation to Bob, who re-sends it. The re-send is one
 click and the new fourteen days begin. That is a poor consolation and it is the true one.
 
+### V18. Write, then send — and a send failure keeps the invitation
+
+The row is committed first and the message goes afterwards. Neither order is safe, so the question is
+not which one can fail but **which failure a person can recover from.**
+
+- **Send first, write second.** A failure leaves a message in somebody's inbox pointing at an
+  invitation that does not exist. The recipient can do nothing at all, and what they see is our link
+  being broken — which is also what they will report.
+- **Write first, send second.** A failure leaves an invitation nobody was told about. The account can
+  SEE it, sitting in the pending list, and fix it with the re-send button that exists for exactly
+  this.
+
+The second failure is visible to the person who can act on it, and the first is not.
+
+**Rejected: rolling the invitation back when the send fails.** It is the intuitive tidy-up and it
+removes the one thing that makes recovery possible — the row the re-send button acts on. It converts a
+recoverable state into a lost one in the name of consistency.
+
+What the recovery needs is that nobody is misled in the meantime, so the send failure is reported to
+whoever clicked. They know the message did not go; the pending entry tells them it still can.
+
 ## Risks / Trade-offs
 
 - **The mismatched-identity dead end** (invited at work, signs in personally) → named honestly in V2

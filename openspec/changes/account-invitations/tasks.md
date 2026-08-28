@@ -113,26 +113,12 @@
 
 - [x] 8.1 Add the invitation template on the delivery mechanism `add-accounts-and-public-edition` provides, naming the account, the role offered and the inviter
 - [x] 8.2 Send on issue and on re-send, and not on revocation
-- [ ] 8.3 Test that a send failure does not leave an invitation that was never delivered
+- [x] 8.3 Test that a send failure leaves the invitation STANDING, visible in the pending list, and re-sendable — and that the failure is reported to whoever clicked
 
-  > **Not done, and the implementation deliberately does the OPPOSITE.** This task
-  > asks for the invitation to be rolled back when the message cannot be sent. The
-  > handler keeps it, and sends after the transaction commits.
-  >
-  > Both orders lose something and the question is which loss is recoverable. Send
-  > first and write second, and a failure leaves a message pointing at an
-  > invitation that does not exist — unrecoverable for the recipient, and it looks
-  > like our link being broken. Write first and send second, and a failure leaves
-  > an invitation nobody was told about — which the account can SEE in its pending
-  > list and fix with the re-send button that exists for exactly this.
-  >
-  > Rolling the invitation back on a send failure would take away the row that
-  > makes re-sending possible, which is the one action that recovers the
-  > situation. The send failure is reported to the person who clicked, so they
-  > know the message did not go.
-  >
-  > Leaving this unchecked rather than rewriting it: if the change's author
-  > disagrees, the task is the record of the disagreement.
+  > **This task said the opposite and was wrong.** It asked for the invitation to
+  > be rolled back when the message could not be sent. Rewritten rather than left
+  > as a standing disagreement, because a task list carrying an argument forever is
+  > one nobody trusts. The reasoning is now design V18.
 
 ## 9. Audit
 

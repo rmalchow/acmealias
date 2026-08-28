@@ -4,6 +4,17 @@
 > currently runs as, and nothing works between the first task of group 2 and the
 > last task of group 3. Do not stop in the middle.
 
+## 0. Found later: the owner can be demoted out of their own account
+
+> Surfaced while implementing `account-invitations`, which needed to know who may invite. Recorded
+> here because it is this change's model, not that one's.
+
+- [ ] 0.1 `store.CountUnrestrictedMembers` guards that the unrestricted role keeps at least ONE member. It does not guard that the member it keeps is the OWNER — the person `Account.owner` names, who is the only one who may pay
+- [ ] 0.2 So a team can demote the person being billed. They then cannot invite anybody, cannot assign a role, and cannot reach the roster of an account that charges their card — while the people who removed them carry on
+- [ ] 0.3 Decide the rule. "The owner is always in the unrestricted role" is the obvious one and it has a cost: it means the owner cannot be removed even at their own request, so transferring ownership becomes the only way out — which `account-invitations` and the transfer flow already assume
+- [ ] 0.4 Whatever is decided, the refusal has to say WHICH constraint it hit. "The account must keep an administrator" and "the owner must stay an administrator" send somebody to two different actions
+
+
 ## 1. The two kinds of account
 
 - [x] 1.1 Add `accounts.kind` (`personal` | `team`), `accounts.owner_user_id` and `accounts.credits` to the model and a migration (design C1)
