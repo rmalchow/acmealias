@@ -254,9 +254,20 @@ mail:
   # when you need them to answer.
   reply_to: '${ACME_MAIL_REPLY_TO:support@acmealias.com}'
 
-  # A transactional message says who sent it, and the jurisdiction requires
-  # particular details. Settled once, for both senders, so the fifth template
-  # cannot quietly disagree with the first four.
+  # A transactional message says who sent it. Settled once, for both senders, so
+  # the fifth template cannot quietly disagree with the first four.
+  #
+  # THE VALUE BELOW IS A DEVELOPMENT PLACEHOLDER AND IS NOT SUFFICIENT FOR A
+  # DEPLOYMENT THAT SENDS TO STRANGERS. The operating company here is
+  # German-facing whatever the domain's suffix is, and §5 DDG (what used to be
+  # §5 TMG) makes the identifying details compulsory on a commercial message,
+  # not decorative: the company's name and legal form, its postal address — a
+  # PO box does not satisfy it — an address for immediate contact including an
+  # email address, the register court and registration number, the person
+  # authorised to represent the company, and the VAT identification number where
+  # one exists. Those are facts about the company rather than about this
+  # software, so they are set here by whoever operates it; nothing in the code
+  # can supply them and nothing checks them.
   #
   # SINGLE-quoted, like every other placeholder here. Double quotes make YAML
   # process backslash escapes in whatever gets substituted, so an operator whose

@@ -9,7 +9,33 @@
 - [x] 1.1 Decide the sender address and display name, once, and record them where both senders read them from configuration rather than from a template
 - [x] 1.2 Decide the reply address. `no-reply@` is the reflex and T3 argues against it: every message here is something a recipient may reasonably want to answer
 - [ ] 1.3 Write the footer, once. Both senders carry the same one (T5)
-- [ ] 1.4 Configure the identity provider's sender to match, in `development/authentik/blueprints/acmeservice.yaml`
+
+  > **Open, and it is the operator's to close, not this change's.** The mechanism
+  > is built — one `mail.footer` setting, read by `mail.Identity`, refused at
+  > start-up when empty — and `config.yaml` now names exactly what the value has
+  > to contain: §5 DDG makes the company's name and legal form, its postal
+  > address, an address for immediate contact, the register court and number, the
+  > authorised representative and the VAT identification number compulsory on a
+  > commercial message. Those are facts about the operating company, not about
+  > this software. The shipped default is a development placeholder and is
+  > labelled as one.
+  >
+  > The second half — the identity provider carrying the SAME footer — has
+  > nothing to attach to yet: authentik renders a footer only inside an email
+  > stage's template, and this deployment configures no email stage, because no
+  > flow here sends mail. It arrives with `self-service-signup`, alongside 4.3
+  > and 5.1.
+
+- [x] 1.4 Configure the identity provider's sender to match, in `development/authentik/blueprints/acmeservice.yaml`
+
+  > Done, but NOT in the file this task names, and the difference is worth
+  > recording: authentik's sender is `AUTHENTIK_EMAIL__FROM`, which is read from
+  > the environment at start-up and is not a blueprint-managed object — there is
+  > no `authentik_*` model carrying it, so a blueprint entry for it cannot be
+  > written. It is set in `development/compose.yaml` beside the mail host and
+  > port, to `AcmeAlias <no-reply@acmealias.com>`, which is what `config.yaml`'s
+  > `mail.from` and `mail.sender` default to. `backend/acceptance/mail_test.go`
+  > reads both sides back and fails when somebody edits one.
 
 ## 2. Deliverability, which is the part that fails silently
 
@@ -34,6 +60,18 @@
 - [ ] 4.1 Adopt the grammar of T4: the noun the message concerns comes first
 - [x] 4.2 Add NO constant subject prefix. It spends the most valuable characters in an inbox on what the sender column already says (T4)
 - [ ] 4.3 Review the identity provider's own subjects against the same grammar and override them where they disagree
+
+  > **Nothing to review yet.** A subject is authentik's only when an email STAGE
+  > renders one, and `development/authentik/blueprints/acmeservice.yaml`
+  > configures no email stage: authentik ships none by default, the dev stack has
+  > no recovery flow and no enrolment flow, so the identity provider currently
+  > sends zero messages. Checking this off today would mean reviewing the
+  > subjects of an empty set.
+  >
+  > It unblocks with `self-service-signup`, which is what adds the flow that
+  > sends. Overriding is a custom template mounted into authentik's template
+  > directory and named on the stage — the same mechanism 1.3's second half
+  > needs, so do both at once.
 
 > What exists: `backend/acceptance/mail_test.go` compares the two senders'
 > CONFIGURED identities — the service's effective config against authentik's
