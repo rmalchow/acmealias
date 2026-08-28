@@ -10,6 +10,17 @@
   the middle of the page.
 -->
 <!--
+  Nobody signed in: one screen, and none of the chrome.
+
+  Not the shell with an empty bar. A navigation bar and an account switcher rendered for somebody
+  who has no account are controls that cannot do anything, and a person who has just arrived cannot
+  tell a product they are locked out of from one that is broken.
+-->
+@if (session.signedOut()) {
+  <app-signed-out idpLabel="auth.localhost" />
+} @else {
+
+<!--
   The mark leads to /accounts, the picker — NOT to /projects.
 
   The picker is the console's front door: it is where a session with no selection is sent, and it
@@ -99,3 +110,5 @@
     <p>You were signed out, so the last request was not carried out. Sign in again to continue where you were.</p>
   </ng-container>
 </nz-modal>
+
+}

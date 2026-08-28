@@ -9,7 +9,7 @@ import { NzMenuModule } from 'ng-zorro-antd/menu';
 import { NzModalModule } from 'ng-zorro-antd/modal';
 import { AccountSwitcherComponent } from './features/accounts/account-switcher.component';
 import { AccountsService } from './features/accounts/accounts.service';
-import { LOW_BALANCE, NavItem, SessionService, ShellComponent } from '@acme/shared';
+import { LOW_BALANCE, NavItem, SessionService, ShellComponent, SignedOutComponent } from '@acme/shared';
 
 /**
  * A personal account's navigation, and a team account's (design C11, tasks 6.2 / 6.2a).
@@ -43,6 +43,7 @@ export const TEAM_NAV: NavItem[] = [
 @Component({
   selector: 'app-root',
   imports: [
+    SignedOutComponent,
     RouterOutlet,
     RouterLink,
     ShellComponent,

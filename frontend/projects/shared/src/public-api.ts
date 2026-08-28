@@ -33,3 +33,4 @@ export * from './lib/ui/name-slug.modal';
 // The chrome around every screen. Both applications render it as their root component's body;
 // what differs is what they put in it, not the frame itself.
 export * from './lib/ui/shell.component';
+export * from './lib/ui/signed-out.component';

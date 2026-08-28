@@ -464,7 +464,17 @@ lego --dns httpreq -d shop.example.com run</pre></div>
               something you add from inside it.
             </p>
           </div>
-          <a class="button" href="http://console.localhost/">
+          <!--
+            Straight to the console's login route, which 302s on to the identity provider — NOT to
+            the console's front page.
+
+            The console shows a "log in or sign up" screen to anybody who arrives without a session,
+            because being thrown at another hostname unannounced is the shape of a phishing redirect.
+            But somebody who has just pressed a button that says Sign Up Now has already answered
+            that question, and showing them a second button saying the same thing is a step that
+            exists only because two pages were built separately.
+          -->
+          <a class="button" href="http://console.localhost/api/v1/auth/login">
             <span class="icon" aria-hidden="true">→</span>
             Sign Up Now
           </a>

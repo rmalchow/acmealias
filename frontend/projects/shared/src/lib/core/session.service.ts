@@ -61,6 +61,24 @@ export class SessionService {
 
   /** Null until `/api/v1/me` has answered. */
   readonly me = signal<Me | null>(null);
+
+  /**
+   * Whether `/api/v1/me` has answered at all, either way.
+   *
+   * It exists because `me() === null` is TWO states — "not asked yet" and "asked, nobody is signed
+   * in" — and the difference decides whether the shell renders a screen or a blank. Without it the
+   * first paint of a signed-out session is indistinguishable from the first paint of a signed-in one
+   * that has not loaded, so the only safe thing to draw was nothing.
+   */
+  readonly checked = signal(false);
+
+  /**
+   * Nobody is signed in, and we know that rather than merely not knowing yet.
+   *
+   * The console renders a sign-in screen on this instead of bouncing the browser at the identity
+   * provider — see `SignedOutComponent` for why.
+   */
+  readonly signedOut = computed(() => this.checked() && this.me() === null);
   /** Set by the auth interceptor when a session dies mid-use; the shell prompts on it. */
   readonly expired = signal(false);
   readonly roles = computed<readonly Role[]>(() => this.me()?.roles ?? []);
@@ -73,7 +91,14 @@ export class SessionService {
     return allowed.length === 0 || this.roles().some((r) => allowed.includes(r));
   }
 
-  /** Loaded once at startup. A 401 is handled by the auth interceptor, which sends us to sign-in. */
+  /**
+   * Loaded once at startup.
+   *
+   * A 401 here is NOT an error to handle — it is the answer. It means nobody is signed in, which is
+   * an ordinary state for a page anybody can reach, and the shell renders a sign-in screen on it.
+   * `checked` is set either way, because "asked and nobody is here" is what the screen is waiting
+   * for.
+   */
   async load(): Promise<void> {
     try {
       const me = await firstValueFrom(this.http.get<Me>('/api/v1/me'));
@@ -82,8 +107,10 @@ export class SessionService {
       // which one before it can make any of them.
       this.api.setAccount(me.selectedAccountId);
     } catch {
+      this.checked.set(true);
       return;
     }
+    this.checked.set(true);
     this.expired.set(false);
     await this.returnToRemembered();
   }

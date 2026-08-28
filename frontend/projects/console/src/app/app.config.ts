@@ -24,6 +24,7 @@ import {
   DownOutline,
   DownloadOutline,
   FilterOutline,
+  LoginOutline,
   LogoutOutline,
   PlusOutline,
   ReloadOutline,
@@ -70,6 +71,8 @@ export const appConfig: ApplicationConfig = {
       DownOutline,
       DownloadOutline,
       FilterOutline,
+      // The signed-out screen's one control.
+      LoginOutline,
       LogoutOutline,
       PlusOutline,
       ReloadOutline,
