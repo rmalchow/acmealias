@@ -10,13 +10,16 @@
 - [x] 1.2 Decide the reply address. `no-reply@` is the reflex and T3 argues against it: every message here is something a recipient may reasonably want to answer
 - [ ] 1.3 Write the footer, once. Both senders carry the same one (T5)
 
-  > **A placeholder is in place and the task stays open.** The operator is
-  > "AcmeAlias Inc" in `config.yaml` and in the built-in defaults — chosen to LOOK
-  > like a placeholder, because an invented street address and a made-up register
-  > number would look finished and survive a review. What §5 DDG requires and this
-  > still lacks: legal form, a postal address that is not a PO box, the register
-  > court and number, the authorised representative, and the VAT ID. Nothing in
-  > the code can supply them and nothing checks them.
+  > **A placeholder is in place and the task stays open.** `config.yaml` and the
+  > built-in defaults carry "AcmeAlias Inc, Example Street 1234, Exampletown,
+  > Foobar Province" — every part chosen to LOOK like a placeholder, because a
+  > plausible street and a made-up register number would look finished and survive
+  > a review.
+  >
+  > Supplied: the name and the postal address. STILL MISSING from §5 DDG: the
+  > legal form, the register court and registration number, the person authorised
+  > to represent the company, and the VAT identification number. Nothing in the
+  > code can supply them and nothing checks them.
 
   > **Open, and it is the operator's to close, not this change's.** The mechanism
   > is built — one `mail.footer` setting, read by `mail.Identity`, refused at

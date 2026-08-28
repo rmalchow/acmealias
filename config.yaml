@@ -306,12 +306,17 @@ mail:
   # value nobody wrote a backslash into on purpose. A multi-line footer is set
   # through the environment variable, where no YAML quoting applies.
   #
-  # The name below is a NAMED PLACEHOLDER rather than a plausible one. "AcmeAlias
-  # Inc" is obviously a stand-in — nobody reads it and believes the company has
-  # been registered — where an invented street address and a made-up register
-  # number would look finished and pass review. The rest of §5 is missing on
-  # purpose, and its absence is what has to stay visible.
-  footer: '${ACME_MAIL_FOOTER:AcmeAlias Inc — support@acmealias.com}'
+  # EVERY PART OF THE VALUE BELOW IS A NAMED PLACEHOLDER, and that is the point.
+  # "AcmeAlias Inc" and "Example Street 1234, Exampletown" are obviously
+  # stand-ins: nobody reads them and believes a company was registered at an
+  # address somebody could visit. A plausible-looking street and a made-up
+  # register number would look finished and survive a review, which is the
+  # failure this avoids — the absence has to stay visible until it is filled.
+  #
+  # It supplies the NAME and the POSTAL ADDRESS. Still missing from §5 DDG: the
+  # legal form, the register court and registration number, the person authorised
+  # to represent the company, and the VAT identification number.
+  footer: '${ACME_MAIL_FOOTER:AcmeAlias Inc, Example Street 1234, Exampletown, Foobar Province — support@acmealias.com}'
 
   # host:port. In a container stack this is the mail service's own name — NOT
   # the hostname its web interface is served on, which does not speak SMTP.
