@@ -229,5 +229,19 @@ services:
   acmesite:
     image: harbor.rand0m.me/public/acmesite:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    environment:
+      # WHERE THE SIGN IN AND SIGN UP BUTTONS GO, and the reason this variable
+      # exists at all: the site's markup names `http://console.localhost`,
+      # because that is where the development stack serves the console — and
+      # this image shipped those three links verbatim. A visitor who pressed
+      # Sign up on the production site was sent to a host on their own machine.
+      #
+      # The image is built once by CI and deployed to whichever host has it, so
+      # the address is configuration read at start-up rather than a value baked
+      # in at build time. It must be scheme and host with no path; acmesite
+      # refuses to start on anything else, and also refuses if it is set and
+      # matches nothing in the site — which is what catches somebody editing the
+      # markup out from under the substitution.
+      ACMESITE_CONSOLE_ORIGIN: https://console.acmealias.com
     ports:
       - 127.0.0.1:18081:8080

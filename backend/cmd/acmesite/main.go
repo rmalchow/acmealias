@@ -19,11 +19,14 @@
 package main
 
 import (
+	"bytes"
 	"embed"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -53,9 +56,36 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The console the Sign in and Sign up buttons point at.
+	//
+	// The site's markup names `http://console.localhost`, which is the DEVELOPMENT
+	// console, because that is where the development stack serves it from — and
+	// the same three links were shipped verbatim to production, where they sent
+	// a visitor who wanted to sign up to a host on their own machine. A dead
+	// button on the one page whose entire job is to produce a customer.
+	//
+	// It is substituted HERE, at start-up, rather than in `site/build.sh`,
+	// because the alternative is an image per environment: the site is one
+	// artefact built once by CI, deployed to whatever host has it, and a URL
+	// baked in at build time makes the image and the deployment one thing. Every
+	// other address this product has is configuration read at start-up, and this
+	// is not a special case.
+	//
+	// Unset means serve the files exactly as built, which is what development
+	// wants: the literal in the markup is already right there.
+	rewrites, err := consoleRewrites(docs, os.Getenv("ACMESITE_CONSOLE_ORIGIN"))
+	if err != nil {
+		log.Error("the console origin is unusable", "error", err)
+		os.Exit(1)
+	}
+	if len(rewrites) > 0 {
+		log.Info("console links rewritten", "origin", os.Getenv("ACMESITE_CONSOLE_ORIGIN"),
+			"files", len(rewrites))
+	}
+
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: handler(docs),
+		Handler: handler(docs, rewrites),
 		// Modest and explicit. A static server with no timeouts is a slowloris
 		// target, and the defaults are none.
 		ReadHeaderTimeout: 5 * time.Second,
@@ -70,7 +100,7 @@ func main() {
 	}
 }
 
-func handler(docs fs.FS) http.Handler {
+func handler(docs fs.FS, rewrites map[string][]byte) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -88,6 +118,15 @@ func handler(docs fs.FS) http.Handler {
 			// homepage for every typo and hide broken links from the people who
 			// could fix them.
 			http.NotFound(w, r)
+			return
+		}
+
+		// A rewritten file wins over the embedded one. Nothing else about the
+		// response changes — same name, same caching, same zero ModTime — so
+		// this is the file the build produced with three URLs in it corrected.
+		if body, ok := rewrites[name]; ok {
+			setCaching(w, name)
+			http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(body))
 			return
 		}
 
@@ -158,4 +197,57 @@ func setCaching(w http.ResponseWriter, name string) {
 	case ".woff", ".woff2", ".ttf", ".eot", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp":
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 	}
+}
+
+// devConsoleOrigin is the address the site's markup carries, and the only thing
+// substitution replaces. It is a constant rather than a pattern deliberately: a
+// regular expression over shipped HTML can match something nobody meant, and the
+// failure mode of this function is a broken page rather than a compile error.
+const devConsoleOrigin = "http://console.localhost"
+
+// consoleRewrites returns the HTML files whose console links need correcting,
+// keyed by the name `resolve` produces, or nil when there is nothing to do.
+//
+// It REFUSES rather than shrugs in two cases, and both were live possibilities:
+// an origin that is not a usable absolute origin (a bare hostname, a path, a
+// trailing slash that would produce `https://console.example.com//api/...`), and
+// an origin that is set but matches nothing in the site. The second is the one
+// worth failing on: it means the markup stopped saying what this function
+// expects, and the symptom otherwise is a marketing site quietly pointing every
+// visitor at somebody's laptop.
+func consoleRewrites(docs fs.FS, origin string) (map[string][]byte, error) {
+	if origin == "" {
+		return nil, nil
+	}
+	origin = strings.TrimSuffix(origin, "/")
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.Path != "" {
+		return nil, fmt.Errorf("ACMESITE_CONSOLE_ORIGIN is %q; it must be scheme and host with no "+
+			"path, such as https://console.example.com", origin)
+	}
+
+	out := map[string][]byte{}
+	err = fs.WalkDir(docs, ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(name) != ".html" {
+			return err
+		}
+		body, err := fs.ReadFile(docs, name)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(body, []byte(devConsoleOrigin)) {
+			return nil
+		}
+		out[name] = bytes.ReplaceAll(body, []byte(devConsoleOrigin), []byte(origin))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("ACMESITE_CONSOLE_ORIGIN is set to %q, but no page in the site "+
+			"contains %s — the markup this substitution depends on has changed, and shipping it "+
+			"unrewritten would point every visitor at a development host", origin, devConsoleOrigin)
+	}
+	return out, nil
 }
