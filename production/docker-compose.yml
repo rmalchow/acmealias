@@ -178,6 +178,30 @@ services:
       # X-Forwarded-For must be believed from — and only from.
       ACME_TRUSTED_PROXY_CIDRS: 192.168.235.96/28
 
+      # ANYONE SIGNED IN MAY BUY A TEAM ACCOUNT HERE, which is the opposite of
+      # the default and of what the setting's own documentation warns about —
+      # so the reason is worth writing down rather than leaving as a bare
+      # `true`.
+      #
+      # The warning is about a deployment that authenticates ONE organization
+      # through its identity provider, where every employee could otherwise
+      # mint a tenant. This deployment is the other kind: the people signing in
+      # are strangers, self-registration is the intended door, and an account
+      # is the thing they came to create. Closed, `Add account` and `Upgrade`
+      # both dead-end on a 403 and nobody can become a customer at all.
+      #
+      # What sits behind the checkout is a stand-in and NOT a payment
+      # processor: creating the account writes its first credit entry directly,
+      # inside the same transaction as the account, its roles and its owner's
+      # membership. Two consequences follow and both are accepted knowingly —
+      # credit is granted here without money moving, and the amount is trusted
+      # only because it must come from the fixed set the service offers rather
+      # than from the request body. Nothing on the screen says it is a
+      # stand-in, deliberately (task 5.5): the screen being exercised is the
+      # screen that ships, and what makes that safe is that there is no
+      # processor to defraud.
+      ACME_ALLOW_ACCOUNT_CREATION: "true"
+
       # A public resolver, for checking customers' delegations. It must NOT be
       # our own server: asking ourselves whether a customer published a CNAME
       # into our zone answers a different question.
