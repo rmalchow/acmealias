@@ -404,6 +404,20 @@ h1 {
   gap: 1rem;
 }
 
+/* The one word to remember, over the sentence that earns it.
+
+   Set like the hero's eyebrow — uppercase, tracked out, in the accent — so the three read as one
+   set across the row rather than as three unrelated labels. Smaller than the hero's because it sits
+   inside a panel and is competing with the heading directly below it rather than opening a page. */
+.kicker {
+  margin: 0 0 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--accent);
+}
+
 /* NOT numbered. The markers that used to sit here (01 / 02 / 03) were correct when this was a
    sequence — publishing the record has to happen before anything can follow it — and these are
    reasons, which have no order. A numbered marker is a structural claim about the content, so

@@ -91,10 +91,16 @@
 
         Every claim here is about something that EXISTS. The temptation on a page like this is to
         describe the roadmap in the present tense; what is on the roadmap is named as such.
+
+        The one-word kicker above each heading is the thing to remember; the heading is the specific
+        claim. They are a <p> and not a second heading level, deliberately — three words that read as
+        a set would otherwise fragment the document outline into three sections of one sentence each,
+        and a screen reader would announce a heading whose entire content is "Isolate".
       -->
       <section class="reasons">
         <ul>
           <li>
+            <p class="kicker">Integrate</p>
             <h2>It speaks to what you already run</h2>
             <p>
               The challenge API implements <a href="https://go-acme.github.io/lego/dns/httpreq/">lego's
@@ -104,6 +110,7 @@
             </p>
           </li>
           <li>
+            <p class="kicker">Isolate</p>
             <h2>An API key reaches exactly one thing</h2>
             <p>
               A key carries grants, not a role. A staging key cannot touch production because no grant
@@ -111,6 +118,7 @@
             </p>
           </li>
           <li>
+            <p class="kicker">Audit</p>
             <h2>Every challenge is on the record</h2>
             <p>
               Who published a value, whether a certificate authority actually came for it, from where,
