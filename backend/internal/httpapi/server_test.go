@@ -209,3 +209,57 @@ func TestHashedAssetIsCacheable(t *testing.T) {
 		t.Errorf("asset %s Cache-Control %q, want a long-lived immutable directive", match[1], cc)
 	}
 }
+
+// The documentation page's mark comes out of this binary too (design W2, task
+// 6.2).
+//
+// openapi_test.go proves the page names no other host. It cannot prove the last
+// step, because two of the page's references — the mark and the favicon — are
+// the CONSOLE's copies, served by internal/webui rather than by the docs route.
+// That is deliberate: one mark, one file, and a documentation page whose logo
+// could drift from the console's would be worse than one that shares it. The
+// cost is that only a server with the console mounted can show the sharing
+// actually works, which is here.
+func TestSwaggerPageBrandAssetsAreServedByThisService(t *testing.T) {
+	s, _ := newServers(t)
+
+	page := get(t, s.Public, http.MethodGet, "/api/swagger")
+	if page.Code != http.StatusOK {
+		t.Fatalf("GET /api/swagger: status %d, want 200", page.Code)
+	}
+	body := page.Body.String()
+
+	for _, ref := range []string{"/brand/logo.svg", "/brand/favicon.svg"} {
+		if !strings.Contains(body, ref) {
+			continue
+		}
+		rec := get(t, s.Public, http.MethodGet, ref)
+		if rec.Code == http.StatusNotFound {
+			t.Skipf("skipping: the embedded console has no %s — run `ng build console` first", ref)
+		}
+		if rec.Code != http.StatusOK {
+			t.Errorf("the documentation page asks for %s and this service answers %d", ref, rec.Code)
+		}
+	}
+}
+
+// The reader is not a way past anything (design W5, task 3.4).
+//
+// Requests fired from the page go to the same /api/v1 routes, through the same
+// middleware, as any other client's — there is no proxy and no second entrance.
+// What that means in practice is that the page's own first request, the one that
+// works out which account is selected, is refused without a session exactly like
+// every other read. If that ever answers 200 to nobody, the docs route has grown
+// an authority it must not have.
+func TestSwaggerPageIsNoWayPastTheSessionGuard(t *testing.T) {
+	s, _ := newServers(t)
+
+	if rec := get(t, s.Public, http.MethodGet, "/api/v1/accounts"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /api/v1/accounts unauthenticated: status %d, want 401", rec.Code)
+	}
+	// And the docs tree serves files, not operations: a path that climbs out of
+	// it is a 404 rather than a route somewhere else.
+	if rec := get(t, s.Public, http.MethodGet, "/api/swagger/../v1/accounts"); rec.Code == http.StatusOK {
+		t.Error("a traversal out of the documentation asset tree answered 200")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -209,5 +210,131 @@ func TestOpenAPIIsServedWithoutCredentials(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte("openapi: 3.1.0")) {
 		t.Fatal("the served document is not the document")
+	}
+}
+
+// --- the reader ------------------------------------------------------------
+
+// docsEcho builds the API on a bare Echo, the same way the tests above do, so
+// the reader's routes are exercised through the real registration rather than
+// against a hand-made router. It matters here because /api/swagger has to beat
+// the /api/* catch-all RegisterAdmin installs, and that is a property of the
+// router's preferences rather than of anything this package writes.
+func docsEcho(t *testing.T) *echo.Echo {
+	t.Helper()
+	e := echo.New()
+	if err := RegisterAdmin(e, AdminOptions{
+		DB:     &gorm.DB{},
+		Guard:  &authz.Guard{Log: slog.New(slog.DiscardHandler)},
+		Auth:   testConsoleAuth{},
+		Config: config.Config{},
+		Log:    slog.New(slog.DiscardHandler),
+	}); err != nil {
+		t.Fatalf("RegisterAdmin: %v", err)
+	}
+	return e
+}
+
+// The reader is as public as the document it renders (design W4, task 6.1). A
+// lock on the viewer standing beside an open door to the YAML protects nothing,
+// and the audience is precisely the person who has no account yet.
+func TestSwaggerPageIsServedWithoutCredentials(t *testing.T) {
+	e := docsEcho(t)
+
+	for _, p := range []string{"/api/swagger", "/api/swagger/"} {
+		rec := get(t, e, http.MethodGet, p)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d, want 200 — the reader must not require a session, "+
+				"and it must not lose to the /api/* catch-all", p, rec.Code)
+		}
+		if !bytes.Contains(rec.Body.Bytes(), []byte("Scalar.createApiReference")) {
+			t.Errorf("GET %s served something that is not the documentation page", p)
+		}
+	}
+}
+
+// The page renders the document that is already published, rather than a second
+// copy of it (task 6.3). Two copies of a contract is how a contract drifts.
+func TestSwaggerPageRendersTheServedDocument(t *testing.T) {
+	page := string(get(t, docsEcho(t), http.MethodGet, "/api/swagger").Body.Bytes())
+
+	if !strings.Contains(page, "url: '/api/v1/openapi.yaml'") {
+		t.Error("the page does not point the renderer at /api/v1/openapi.yaml.\n" +
+			"If it embeds its own copy of the document, the two can disagree and nothing will say so.")
+	}
+}
+
+// docsReference matches every URL the page asks a browser to fetch or follow.
+var docsReference = regexp.MustCompile(`(?:src|href)="([^"]+)"|url\("([^"]+)"\)`)
+
+// Every asset the page needs is served by this service (design W2, task 6.2).
+//
+// This is the property most easily lost later, and it will not be lost
+// deliberately: it goes when somebody adds an icon set, a font or an analytics
+// snippet from a CDN because that is how one is normally added. On a deployment
+// with no route to the internet the result is the one page in the product that
+// renders blank — and that is the deployment most likely to have somebody
+// reading documentation rather than guessing.
+func TestSwaggerPageReachesNoOtherHost(t *testing.T) {
+	e := docsEcho(t)
+	page := get(t, e, http.MethodGet, "/api/swagger").Body.String()
+
+	for _, m := range docsReference.FindAllStringSubmatch(page, -1) {
+		ref := m[1]
+		if ref == "" {
+			ref = m[2]
+		}
+		if strings.Contains(ref, "://") || strings.HasPrefix(ref, "//") {
+			t.Errorf("the documentation page references %q, which is somebody else's host.\n"+
+				"The binary has to render this page with no route to the internet, and a CDN on the page "+
+				"that documents this API also tells a third party who read it.", ref)
+			continue
+		}
+		if !strings.HasPrefix(ref, "/api/swagger/") {
+			// /brand/*, / and /api/v1/openapi.yaml are served by this binary
+			// too — by internal/webui and by registerOpenAPI. They are checked
+			// end to end in server_test.go, where the console is mounted.
+			continue
+		}
+		if rec := get(t, e, http.MethodGet, ref); rec.Code != http.StatusOK {
+			t.Errorf("the page asks for %s and this service answers %d", ref, rec.Code)
+		}
+	}
+
+	// The renderer's own defaults reach out even when the page does not. Both of
+	// these are switched off in the page rather than relied upon, and both are
+	// asserted because a version bump could change either default under us.
+	if !strings.Contains(page, "withDefaultFonts: false") {
+		t.Error("withDefaultFonts is not turned off — Scalar's faces live on fonts.scalar.com")
+	}
+	if !strings.Contains(page, "proxyUrl: ''") {
+		t.Error("proxyUrl is not pinned empty — a request proxy would send this service's callers, " +
+			"and their session cookie, through api.scalar.com")
+	}
+}
+
+// The renderer's own product is switched off (design W2).
+//
+// Scalar ships a Configure/Share/Deploy bar and an "Ask AI" chat, and BOTH turn
+// themselves on by inspecting window.location.hostname: the toolbar's default is
+// the string 'localhost', and the agent enables itself for localhost, 127.0.0.1
+// and any name ending .test, .example, .invalid or .localhost. Every one of those
+// describes the development stack this is worked on in, and both controls link to
+// scalar.com services.
+//
+// A hostname check inside a vendored bundle is not where "no third party sees who
+// reads our documentation" should rest, so the page says it. This asserts the page
+// keeps saying it, because the assertion is cheap and the failure is invisible —
+// nothing breaks, a Deploy button just appears on the shop window.
+func TestSwaggerPageDoesNotOfferSomebodyElsesProduct(t *testing.T) {
+	page := get(t, docsEcho(t), http.MethodGet, "/api/swagger").Body.String()
+
+	if !strings.Contains(page, "showDeveloperTools: 'never'") {
+		t.Error("the developer-tools bar is not switched off — it defaults to on for localhost " +
+			"and links to editor.scalar.com, client.scalar.com and dashboard.scalar.com")
+	}
+	if !strings.Contains(page, "agent: { disabled: true }") {
+		t.Error("the Ask AI agent is not switched off — it enables itself on localhost-like " +
+			"hostnames and its chat talks to api.scalar.com")
 	}
 }

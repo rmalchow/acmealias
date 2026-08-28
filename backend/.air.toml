@@ -9,7 +9,15 @@ tmp_dir = "tmp"
 [build]
 cmd = "go build -o ./tmp/acmeservice ./cmd/acmeservice"
 bin = "./tmp/acmeservice"
-include_ext = ["go"]
+# Not only Go. Three of the things this binary serves are files it embeds and
+# not code: the published contract (internal/httpapi/openapi.yaml) and the
+# documentation page and its faces (internal/httpapi/docs). Editing one of those
+# and seeing the old page come back is a confusing ten minutes, because nothing
+# is broken and nothing says anything.
+#
+# woff2 is here for completeness rather than because faces get edited; html and
+# yaml are the two that will.
+include_ext = ["go", "html", "yaml", "woff2"]
 exclude_dir = ["tmp", "internal/webui/dist", "acceptance"]
 delay = 200
 stop_on_error = true

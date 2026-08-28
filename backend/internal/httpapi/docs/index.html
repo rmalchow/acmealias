@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AcmeAlias API</title>
+
+    <!--
+      Every URL on this page is absolute and same-origin, and that is the property the
+      change is about (design W2): the binary has to render this page on a host with no
+      route to the internet. Absolute rather than relative because the page answers at
+      both /api/swagger and /api/swagger/, and a relative src would resolve against two
+      different bases.
+
+      /brand/logo.svg and /brand/favicon.svg are the CONSOLE's copies, served out of the
+      same binary by internal/webui. They are not vendored a second time here: one mark,
+      one file, and a docs page whose logo can drift from the console's would be worse
+      than one that shares it.
+    -->
+    <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+
+    <style>
+      /* The faces, vendored beside this file rather than fetched — the same rule the
+         console's globals.css and the marketing site's styles.css follow, and for the
+         same reason. Latin only: this document is English, and the latin-ext cuts the
+         other two surfaces carry are for names in running prose that this page has none
+         of. Anything outside the range falls back to the system sans, which is what the
+         font stack below is for. */
+      @font-face {
+        font-family: Barlow;
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("/api/swagger/fonts/barlow-latin-400-normal.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: Barlow;
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("/api/swagger/fonts/barlow-latin-500-normal.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Barlow Condensed";
+        font-style: normal;
+        font-weight: 300;
+        font-display: swap;
+        src: url("/api/swagger/fonts/barlow-condensed-latin-300-normal.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Barlow Condensed";
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url("/api/swagger/fonts/barlow-condensed-latin-400-normal.woff2") format("woff2");
+      }
+
+      /* ── The brand tokens ──────────────────────────────────────────────────────
+         Task 4.0 asked for these to come from the console's compiled theme rather than
+         be retyped, and they cannot: the console emits `--ac-*` from
+         projects/shared/src/theme/brand.less at BUILD time, into a stylesheet whose
+         name is content-hashed, and this page is served by Go with no build step
+         (task 1.2) and no way to name that file. So this is a fourth copy of the
+         palette, alongside site/src/styles.css and development/authentik/branding/
+         custom.css — and, exactly as those two say of themselves, there is no mechanism
+         keeping them in step.
+
+         What limits the damage is that the copy is SMALL and named: six values, in one
+         block, using the same token names the console uses, so a search for `--ac-accent`
+         finds every surface that has one. */
+      :root {
+        --ac-accent: #00ffb0;
+        --ac-accent-bright: #4dffc9;
+        --ac-ground: #05070a;
+        --ac-raised: #16191d;
+        --ac-raised-2: #1c2026;
+        --ac-line: rgb(255 255 255 / 12%);
+        --ac-ink: #fff;
+        --ac-ink-dim: #a7b0ba;
+        --ac-glow: rgb(0 255 176 / 10%);
+        --ac-glow-far: rgb(0 255 176 / 4%);
+
+        /* ── The renderer, wearing it ────────────────────────────────────────────
+           Scalar themes through custom properties, which is the whole reason it was
+           chosen over Swagger UI (design W3): these fourteen declarations are the
+           override layer, and there is no long tail of internal class names behind
+           them arriving in somebody else's blue. */
+        --scalar-font: Barlow, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        --scalar-font-code: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+        --scalar-background-1: var(--ac-ground);
+        --scalar-background-2: var(--ac-raised);
+        --scalar-background-3: var(--ac-raised-2);
+        --scalar-background-accent: rgb(0 255 176 / 12%);
+        --scalar-border-color: var(--ac-line);
+
+        --scalar-color-1: var(--ac-ink);
+        --scalar-color-2: var(--ac-ink-dim);
+        --scalar-color-3: rgb(255 255 255 / 45%);
+        --scalar-color-accent: var(--ac-accent);
+        --scalar-link-color: var(--ac-accent);
+        --scalar-link-color-hover: var(--ac-accent-bright);
+
+        --scalar-button-1: var(--ac-accent);
+        /* Near-black on the accent, not white: #00ffb0 against white is 1.32:1 and
+           fails every threshold there is. The console's brand.less and the marketing
+           site's `.button` both make this call, with the measurement. */
+        --scalar-button-1-color: var(--ac-ground);
+        --scalar-button-1-hover: var(--ac-accent-bright);
+
+        --scalar-sidebar-background-1: var(--ac-ground);
+        --scalar-sidebar-color-1: var(--ac-ink);
+        --scalar-sidebar-color-2: var(--ac-ink-dim);
+        --scalar-sidebar-border-color: var(--ac-line);
+        --scalar-sidebar-item-hover-background: var(--ac-raised);
+        --scalar-sidebar-item-active-background: var(--ac-raised-2);
+        --scalar-sidebar-color-active: var(--ac-accent);
+        --scalar-sidebar-search-background: var(--ac-raised);
+        --scalar-sidebar-search-border-color: var(--ac-line);
+        --scalar-sidebar-search-color: var(--ac-ink-dim);
+
+        --scalar-radius: 4px;
+
+        /* NOT overridden, deliberately (task 4.1b): --scalar-color-green, -blue, -red,
+           -orange, -purple are the METHOD badges. GET, POST and DELETE reading as three
+           different things is worth more than any of them matching the accent, and the
+           accent is a green — pulling the others toward it is exactly how a palette
+           stops carrying meaning. Scalar's own values stand. */
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      /* The console's lighting, from globals.css: three faint washes over the black, so
+         a docs tab and a console tab look like two rooms in one building. */
+      body {
+        margin: 0;
+        background-color: var(--ac-ground);
+        background-image:
+          radial-gradient(70rem 45rem at 12% -12%, var(--ac-glow), transparent 68%),
+          radial-gradient(45rem 30rem at 50% 2%, rgb(190 225 255 / 6%), transparent 66%),
+          radial-gradient(90rem 70rem at 50% 120%, var(--ac-glow-far), transparent 60%);
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+        color: var(--ac-ink);
+        font-family: Barlow, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      }
+
+      /* The bar, to the values ShellComponent and the marketing site's `.bar` use. Flat
+         and opaque: chrome the page's lighting shows through reads as part of the page. */
+      .bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1rem;
+        padding: 1rem 1.5rem;
+        background: var(--ac-ground);
+        border-block-end: 1px solid var(--ac-line);
+      }
+
+      .mark {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        text-decoration: none;
+      }
+
+      .mark-logo {
+        block-size: 2rem;
+        inline-size: auto;
+        display: block;
+      }
+
+      /* Two weights in one word — `Acme` light, `Alias` regular — inside one span, so the
+         name stays a single selectable string. White beside the mark, because the bar is
+         allowed exactly one green thing and it is the glyph. */
+      .mark-word {
+        font-family: "Barlow Condensed", Barlow, sans-serif;
+        font-weight: 400;
+        font-size: 2rem;
+        line-height: 1;
+        letter-spacing: 0.005em;
+        color: var(--ac-ink);
+      }
+
+      .mark-word b {
+        font-weight: 300;
+      }
+
+      /* The console's shell puts a badge here for the staff surface. This one says which
+         of the product's pages you are on. */
+      .mark-badge {
+        margin-inline-start: 0.15rem;
+        font-size: 0.75rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ac-accent);
+        border: 1px solid rgb(0 255 176 / 35%);
+        border-radius: 3px;
+        padding: 0 0.35rem;
+      }
+
+      /* ── What you are about to act on ─────────────────────────────────────────
+         Design W5, tasks 3.2 and 3.3. Request sending is left ARMED, because the read
+         operations are most of why anybody prefers this page to the raw YAML — and what
+         the page owes the reader in exchange is not a restriction but situational
+         awareness. The API enforces exactly the grants it enforces for `curl`; what it
+         cannot do is tell somebody exploring a documentation page that the account they
+         happen to have selected is a production one. */
+      .context {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        font-size: 0.875rem;
+        color: var(--ac-ink-dim);
+      }
+
+      .context strong {
+        font-weight: 500;
+        color: var(--ac-ink);
+      }
+
+      .notice {
+        margin: 0;
+        padding: 0.6rem 1.5rem;
+        font-size: 0.875rem;
+        color: var(--ac-ink-dim);
+        background: rgb(0 255 176 / 6%);
+        border-block-end: 1px solid var(--ac-line);
+      }
+
+      .notice strong {
+        font-weight: 500;
+        color: var(--ac-ink);
+      }
+
+      .notice a {
+        color: var(--ac-accent);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="bar">
+      <a class="mark" href="/" aria-label="AcmeAlias — home">
+        <img class="mark-logo" src="/brand/logo.svg" alt="" />
+        <span class="mark-word"><b>Acme</b>Alias</span>
+        <span class="mark-badge">API</span>
+      </a>
+      <p class="context" id="context">Working out which account you are signed in to…</p>
+    </header>
+
+    <p class="notice">
+      <strong>Send is live.</strong> Anything sent from this page is a real request against real
+      data, made as whoever this browser is signed in as — including the operations that delete
+      things. It is refused exactly as any other client would be refused; it is not sandboxed, and
+      there is nothing to undo it. The document itself is at
+      <a href="/api/v1/openapi.yaml">/api/v1/openapi.yaml</a>.
+    </p>
+
+    <div id="app"></div>
+
+    <script src="/api/swagger/scalar-api-reference-1.66.1.js"></script>
+    <script>
+      // The renderer, pointed at the document that is already published (task 2.4).
+      // There is no second copy of it here: this page renders whatever
+      // /api/v1/openapi.yaml currently says, which is what makes the two unable to
+      // drift.
+      Scalar.createApiReference('#app', {
+        url: '/api/v1/openapi.yaml',
+
+        // No preset theme: the palette above is the theme (design W7).
+        theme: 'none',
+        darkMode: true,
+        forceDarkModeState: 'dark',
+        hideDarkModeToggle: true,
+
+        // Scalar's own faces live on fonts.scalar.com. Off, or the one page in the
+        // product that documents it would be the one page that goes blank on a host
+        // with no route out (design W2).
+        withDefaultFonts: false,
+
+        // Scalar defaults this to empty, and it is stated anyway: the default is a
+        // property of a version we pinned, and a request proxy would send this
+        // service's callers — and their session cookie — through api.scalar.com.
+        proxyUrl: '',
+
+        // The renderer's own product, switched off. Both of these were found by
+        // looking at the rendered page rather than by reading the options, and
+        // both default to ON for exactly the hostname the development stack uses:
+        //
+        //   `showDeveloperTools` defaults to 'localhost', which puts a Configure
+        //   / Share / Deploy bar across the top of the page linking to
+        //   editor.scalar.com, client.scalar.com and dashboard.scalar.com.
+        //
+        //   `agent.disabled` is unset, and the agent turns itself on when the
+        //   hostname is localhost or ends in .test/.example/.invalid/.localhost —
+        //   an "Ask AI" control whose chat talks to api.scalar.com.
+        //
+        // Neither would appear on acmealias.com, so neither is a leak in
+        // production. They are turned off anyway, and stated, because a page whose
+        // whole argument is "no third party sees who reads our documentation"
+        // cannot rest that on a hostname check inside a vendored bundle — and
+        // because a developer evaluating us should not be met by somebody else's
+        // Deploy button on our shop window (design W2, W7).
+        showDeveloperTools: 'never',
+        agent: { disabled: true },
+      });
+
+      // Name the account before anything can be sent (task 3.2). `selected` comes back
+      // on every account in the list, so this is one request rather than /me followed by
+      // a lookup of the id it returns.
+      //
+      // 401 is not an error here and must not read as one: an unauthenticated reader is
+      // the AUDIENCE for this page (design W4), and what they need to know is that
+      // nothing they send will be answered until they sign in.
+      (function () {
+        var el = document.getElementById('context');
+        function say(html) {
+          el.innerHTML = html;
+        }
+        fetch('/api/v1/accounts', { headers: { Accept: 'application/json' } })
+          .then(function (r) {
+            if (r.status === 401) {
+              say('Not signed in — requests from this page will be refused.');
+              return null;
+            }
+            if (!r.ok) {
+              return Promise.reject(r.status);
+            }
+            return r.json();
+          })
+          .then(function (list) {
+            if (!list) {
+              return;
+            }
+            var selected = null;
+            for (var i = 0; i < list.length; i++) {
+              if (list[i].selected) {
+                selected = list[i];
+              }
+            }
+            if (!selected) {
+              say('Signed in, with no account selected — account-scoped requests will be refused.');
+              return;
+            }
+            var name = document.createElement('strong');
+            name.textContent = selected.name;
+            var slug = document.createElement('span');
+            slug.textContent = ' (' + selected.slug + ')';
+            el.textContent = 'Requests act in ';
+            el.appendChild(name);
+            el.appendChild(slug);
+          })
+          .catch(function () {
+            // Deliberately not silent. A page that cannot say whose data is at stake
+            // must not look like a page that said "nobody".
+            say('Could not work out which account you are signed in to.');
+          });
+      })();
+    </script>
+  </body>
+</html>
