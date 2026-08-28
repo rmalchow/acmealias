@@ -1,0 +1,19 @@
+title: i built a thing that takes the dns api token out of your reverse proxy config
+
+hi all — i posted about ondaire.net here a little while back; this is the other thing i've been building, and it's aimed squarely at a problem i think most of us have just decided to live with.
+
+if you want a wildcard cert, you need the dns-01 challenge. dns-01 needs your dns provider's api token. so the token goes into traefik's or caddy's or nginx-proxy-manager's config, on the box that is the most exposed thing you run — and that token doesn't prove control of one name, it can rewrite every record you own. mx records included. then it's in the config backup too, and in the git repo you keep the config in, and at some point you stop thinking about it.
+
+the fix has been known for years and it's the cname trick: you delegate just the challenge name. `_acme-challenge.example.com` becomes a cname pointing into someone else's zone, and that someone answers the txt record. the only thing the proxy holds after that is a credential that can set one txt record for one name, which is worth approximately nothing to whoever steals it.
+
+acme-dns (https://github.com/joohoi/acme-dns) is the canonical implementation of this and it is genuinely good software. the catch is that answering it well means running an authoritative nameserver on a public ip, with glue records at your registrar, that has to be up at renewal time or the cert doesn't renew. that's a real box with real uptime expectations, and i kept not wanting to be the one holding it — which is a funny thing to admit on this sub, but it's why acme-dns has fewer users than the idea deserves.
+
+so i built acmealias (https://www.acmealias.com): the managed version of that nameserver, and nothing else. you publish one cname per domain, by hand, once. after that every renewal is invisible. it speaks acme-dns's `/update` protocol, so acme.sh, cert-manager, certify the web and the certbot plugin work with no new code, and lego's `httpreq` provider, so traefik is a couple of env vars. on top of that there's a console: domains grouped into projects, one api key per load balancer rather than a credential file per domain, wildcard and apex sharing a single alias and a single cname (they validate at the same challenge name anyway), and a view of which certs actually got issued and when they expire.
+
+the thing i want to be straight about, because it's the first question on this sub and it deserves a real answer: today it's hosted only, and there is no self-hostable build yet. i intend for there to be one — this is a go binary with the angular console embedded in it and postgres behind it, so it isn't far — and the honest reason it isn't out is that i don't yet know what you'd want from it. so tell me. and either way you aren't locked in: because it speaks the acme-dns protocol, moving to your own acme-dns box, or to your own nameserver, is a cname change and a credentials file, not a migration.
+
+on money, since that's the other thing that gets asked early: there is pricing, and it's on the site — personal accounts are free and stay free, that's not a trial; team accounts are 39 ct per challenge answered, capped at 199 eur a month however many you answer, paid out of prepaid credit rather than a subscription. what isn't there is a real payment processor behind it, so nothing can actually be bought today. and to say the quiet part out loud: those numbers exist to cover nameservers, a database and the fact that somebody has to care when a renewal fails at 3am. this isn't a thing i expect to get rich from — i'd just rather it didn't cost me money to keep running for other people.
+
+no self-signup yet either. i'd rather hear what breaks for you than guess.
+
+happy to get into the mechanics of any of it.
