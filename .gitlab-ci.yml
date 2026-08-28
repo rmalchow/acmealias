@@ -52,6 +52,15 @@ test-go:
   stage: test
   image: golang:1.26.3-bookworm
   extends: .go-cache
+  # THE SAME `tags:` THE IMAGE JOBS GAINED, and for the same reason: the one
+  # runner this project has declares the tag `shared` and `run_untagged=false`,
+  # so an untagged job is never picked up. It does not fail — it sits pending
+  # until GitLab gives up and marks it `stuck_pending_no_matching_runners`,
+  # which is a red pipeline with an empty log, and the build jobs behind it are
+  # then SKIPPED rather than run. Two pipelines died that way before anybody
+  # read the failure reason rather than the failure.
+  tags:
+    - shared
   # Deliberately no TEST_DATABASE_URL here: the integration and
   # schema-drift tests `t.Skip` when it's unset, which is on purpose in CI
   # (design D13). They're a dev-stack activity, exercised locally against
