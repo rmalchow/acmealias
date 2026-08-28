@@ -164,10 +164,13 @@ import { Member, Role } from './roles.models';
                   <button nz-button nzSize="small" nzDanger (click)="removeMember(m)">Remove</button>
                 } @else {
                   <!--
-                    The last unrestricted member. Removing them would leave an account nobody can
-                    administer, and no screen should be able to produce that by accident.
+                    Two different refusals, said differently on purpose: they send somebody to two
+                    different actions. One wants a second administrator appointed; the other wants
+                    the account transferred, and appointing administrators will never help with it.
                   -->
-                  <span class="ac-muted">last administrator</span>
+                  <span class="ac-muted" [title]="whyNotRemovable(m).why">
+                    {{ whyNotRemovable(m).label }}
+                  </span>
                 }
               </td>
             </tr>
@@ -302,11 +305,24 @@ import { Member, Role } from './roles.models';
         gap: 0.5rem;
       }
       /* Two buttons touching read as one control, and one of them deletes. */
+      /* A <td>, kept a table cell.
+       *
+       * This was 'display: flex', which takes the element OUT of table layout: a cell that is not
+       * display:table-cell stops participating in its row's column grid, so the buttons drifted
+       * outside the table's right border and sat at the top of rows whose other cells were tall.
+       * The markup was never wrong — four headers, four cells — which is why it looked like a
+       * malformed row.
+       *
+       * The contents are laid out instead of the cell: text-align for the alignment, an adjacent
+       * sibling margin for the gap, and vertical-align because the grants column runs to seven
+       * lines and baseline-aligned buttons against it read as belonging to the row above. */
       .row-actions {
         white-space: nowrap;
-        display: flex;
-        gap: 0.5rem;
-        justify-content: flex-end;
+        text-align: right;
+        vertical-align: middle;
+      }
+      .row-actions button + button {
+        margin-inline-start: 0.5rem;
       }
       .ac-add {
         margin-block-start: 0.75rem;
@@ -378,7 +394,36 @@ export class RolesComponent implements OnInit {
     if (!m.roleId) return true;
     const role = this.roles().find((r) => r.id === m.roleId);
     if (!role?.unrestricted) return true;
+    // The owner never leaves the unrestricted role: they are billed for the account and would
+    // otherwise be paying for something they could no longer administer, invite into, or read the
+    // roster of. The way out is a transfer, not a removal.
+    if (m.owner) return false;
     return this.members().filter((other) => other.roleId === role.id).length > 1;
+  }
+
+  /**
+   * Why a membership cannot be removed, in the caller's terms.
+   *
+   * The two reasons are kept apart because their remedies are unrelated: one is fixed by appointing
+   * a second administrator, the other only by transferring the account. Collapsing them into "this
+   * member cannot be removed" would send half the readers to do something that cannot work.
+   *
+   * The owner comes first because when the owner is also the only administrator both hold, and
+   * appointing a second one still would not release the removal.
+   */
+  protected whyNotRemovable(m: Member): { label: string; why: string } {
+    if (m.owner) {
+      return {
+        label: 'account owner',
+        why:
+          'This account is billed to them, so they always administer it. ' +
+          'Transfer the account to somebody else first.',
+      };
+    }
+    return {
+      label: 'last administrator',
+      why: 'An account must keep at least one administrator. Appoint another one first.',
+    };
   }
 
   /** The role picked, but not yet submitted, for each member who holds none. */

@@ -85,16 +85,35 @@ import { openCheckout } from './checkout.modal';
         Buy now
       </button>
 
-      <p class="ac-hint">
-        Your personal account stays exactly as it is. Buying does not change it, move anything out
-        of it, or use it up.
-      </p>
+      <!--
+        A note box, not a hint line. This answers the question somebody actually hesitates on before
+        paying — "does buying disturb what I already have?" — and a grey line under a button is where
+        reassurance goes to be skimmed past.
+
+        The second sentence is deliberately in the FUTURE tense. Moving projects between accounts is
+        not built. Writing it as though it were would be worse here than anywhere else on the site or
+        in the console, because this is the one screen where somebody spends money on the strength of
+        what it says: they would buy a team account expecting to move their personal projects into
+        it, and find they cannot. So it says what is true — that nothing is permanently tied — and
+        does not claim the mechanism exists yet.
+      -->
+      <nz-alert
+        nzType="info"
+        nzMessage="Your personal account is not affected"
+        [nzDescription]="personalIsSafe"
+      />
     </div>
   `,
   styles: [
     `
       .up {
         max-width: 44rem;
+      }
+      /* The note under the button needs room above it. nz-alert's own margin is a BOTTOM one, set
+       * for the alerts higher up the page that precede their content; this one follows the control
+       * it qualifies, so without a top margin it sits against the button and reads as part of it. */
+      .up > nz-alert:last-of-type {
+        margin-block-start: 1.25rem;
       }
       nz-alert {
         display: block;
@@ -122,6 +141,13 @@ import { openCheckout } from './checkout.modal';
   ],
 })
 export class UpgradeComponent {
+  /** The note's body. A field rather than markup so the sentences stay one paragraph. */
+  protected readonly personalIsSafe =
+    'Buying does not change your personal account, move anything out of it, or use it up. ' +
+    'Projects are not permanently tied to the account they were made in either — moving them ' +
+    'between accounts is not built yet, and when it is, nothing you create now will be stranded.';
+
+
   private readonly modal = inject(NzModalService);
   private readonly router = inject(Router);
 
