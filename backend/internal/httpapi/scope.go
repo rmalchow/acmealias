@@ -232,3 +232,24 @@ func (a *admin) authorizeUnrestricted(c echo.Context, what string) error {
 	return fmt.Errorf("%w: %s is governed by membership of the account's unrestricted role, not by a grant",
 		authz.ErrNotPermitted, what)
 }
+
+// currentUser resolves the session's subject to the user row, which is where the
+// VERIFIED email address lives.
+//
+// It exists because invitations are bound to an address and the session is not:
+// model.Session carries a subject, a display name and the provider's groups, and
+// nothing about which address the provider proved. Adding a column to sessions
+// would have put a second copy of that fact in a row that outlives a sign-in, so
+// a session issued before somebody changed their address would carry the old
+// one — and the address is what decides who may join an account.
+//
+// FindOrCreateUser rather than a read, matching every other caller here: the row
+// is materialized at sign-in, and re-creating it costs one query on a path that
+// is already doing several.
+func (a *admin) currentUser(c echo.Context) (*model.User, error) {
+	sess := authz.SessionFromContext(c)
+	if sess == nil {
+		return nil, echo.ErrUnauthorized
+	}
+	return store.FindOrCreateUser(c.Request().Context(), a.db(), sess.Subject, sess.DisplayName, "")
+}

@@ -239,6 +239,24 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	sec.GET("/checkout/amounts", a.checkoutOffer)
 	sec.POST("/accounts/:accountId/checkout", a.checkout)
 
+	// Invitations, the invitee's half — and the reason this list is now longer
+	// than the four operations P19 named.
+	//
+	// Every one of these must work for a session that belongs to NOTHING. Alice
+	// authenticates because she was invited; at that instant she is a member of
+	// no team account, and requiring a selected account to accept would be a
+	// closed loop with no way in (design V5).
+	//
+	// The token travels in the request BODY rather than in the path, which is
+	// why resolve is a POST despite reading and changing nothing. A token in a
+	// URL lands in the reverse proxy's access log, in the browser's history and
+	// in the Referer of every subsequent request — and it is enough to see which
+	// account somebody was invited to.
+	sec.GET("/invitations", a.listMyInvitations)
+	sec.POST("/invitations/resolve", a.resolveInvitation)
+	sec.POST("/invitations/accept", a.acceptInvitation)
+	sec.POST("/invitations/decline", a.declineInvitation)
+
 	// --- account-scoped routes ---------------------------------------------
 	//
 	// The account is named in the path AND checked against the session's
@@ -308,6 +326,19 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	acct.GET("/members", a.listMembers)
 	acct.POST("/members", a.addMember)
 	acct.DELETE("/members/:id", a.removeMember)
+	// Giving a role to a member who holds none — somebody who accepted an
+	// invitation and is waiting. A distinct route from POST /members because it
+	// is a distinct event: they joined earlier, and this is the separate
+	// decision about what they may do (account-invitations V6).
+	acct.PUT("/members/:id/role", a.assignMemberRole)
+
+	// Invitations, the account's half. Reading is any member's; issuing,
+	// revoking and re-sending need the unrestricted role — the owner and the
+	// administrators, which are the same people.
+	acct.GET("/invitations", a.listInvitations)
+	acct.POST("/invitations", a.createInvitation)
+	acct.DELETE("/invitations/:id", a.revokeInvitation)
+	acct.POST("/invitations/:id/resend", a.resendInvitation)
 
 	// Transfer IS scoped, unlike checkout: handing over an account is something
 	// its owner does to a working account, and an owner who cannot pay for it

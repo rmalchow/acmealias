@@ -4,12 +4,14 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/invitation"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
@@ -58,6 +60,7 @@ func (a *admin) handleError(err error, c echo.Context) {
 }
 
 func (a *admin) mapError(err error, c echo.Context) (int, any) {
+	var limited *store.ErrRateLimited
 	var he *echo.HTTPError
 	if errors.As(err, &he) {
 		// A structured message (authz.NoRoleBody) goes out as it is; a string
@@ -117,6 +120,33 @@ func (a *admin) mapError(err error, c echo.Context) (int, any) {
 		return http.StatusConflict, ErrorBody{Message: err.Error()}
 	case errors.Is(err, inventory.ErrConflict), errors.Is(err, inventory.ErrNotEmpty):
 		return http.StatusConflict, ErrorBody{Message: err.Error()}
+	case errors.Is(err, invitation.ErrInvalidAddress):
+		// The person reading this is the person who made the typo, so it says
+		// what was wrong with what they typed. Contrast ErrInvalid below, which
+		// deliberately says as little as possible.
+		return http.StatusBadRequest, ErrorBody{Message: err.Error()}
+	case errors.Is(err, store.ErrAlreadyMember), errors.Is(err, store.ErrInvitationOutstanding):
+		return http.StatusConflict, ErrorBody{Message: err.Error()}
+	case errors.As(err, &limited):
+		// 429 with Retry-After, because "you are doing that too much" without a
+		// time is an instruction to retry in a loop — which is the behaviour the
+		// limit was trying to stop.
+		c.Response().Header().Set("Retry-After", limited.RetryAfter.UTC().Format(http.TimeFormat))
+		return http.StatusTooManyRequests, ErrorBody{Message: limited.Limit +
+			". Try again after " + limited.RetryAfter.UTC().Format(time.RFC1123)}
+	case errors.Is(err, invitation.ErrInvalid):
+		// ONE status and ONE sentence for every reason an invitation cannot be
+		// answered — unknown token, expired, revoked, declined, already
+		// accepted. The reason is in the wrapped error and goes to the log only.
+		//
+		// Distinguishing them would turn this endpoint into an oracle answering
+		// "was this token ever real", which is the single question the token's
+		// unguessability exists to make unanswerable. The console renders the
+		// same page for all of them: this invitation is no longer valid, ask the
+		// account for a new one.
+		a.log().InfoContext(c.Request().Context(), "invitation not usable", slog.Any("error", err))
+		return http.StatusNotFound, ErrorBody{Message: "this invitation is no longer valid. " +
+			"Ask whoever invited you to send a new one."}
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		return http.StatusNotFound, ErrorBody{Message: err.Error()}
 	}

@@ -195,8 +195,42 @@ components:
         userId: { type: string, format: uuid }
         subject: { type: string }
         displayName: { type: string }
+        # ABSENT for a member who holds no role — somebody who accepted an
+        # invitation and is waiting for one to be assigned. That is a legal
+        # state, not a broken row: they are in the account and authorised for
+        # nothing in it. A client must treat a missing roleId as "no authority"
+        # rather than as an error.
         roleId: { type: string, format: uuid }
         roleName: { type: string }
+    Invitation:
+      type: object
+      description: |
+        An outstanding offer of membership, addressed to an email address.
+
+        It names NO ROLE. Accepting makes the invited person a member holding none, and an
+        administrator assigns one afterwards — so joining and being allowed to do things are two
+        steps, decided at the two different moments somebody can decide them.
+
+        Nothing here can be used to accept the invitation: the token exists only in the message
+        that was sent, and only a hash of it is stored.
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        invitedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastSentAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    InvitationOffer:
+      type: object
+      description: |
+        What an invited person is shown before answering: which account, and the address the
+        invitation was sent to. Nothing else about the account is disclosed, and no role, because
+        the invitation offers none.
+      properties:
+        account: { type: string }
+        accountId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        expiresAt: { type: string, format: date-time }
     ApiKey:
       type: object
       properties:
@@ -622,6 +656,220 @@ paths:
       responses:
         "204": { description: Removed }
         "409": { description: This would leave the unrestricted role with no member }
+
+  /accounts/{accountId}/members/{id}/role:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    put:
+      summary: Give a role to a member who holds none
+      description: |
+        Completes what accepting an invitation began. An invitation names no role, so somebody who
+        accepted one is a member of the account and authorised for nothing in it until this is
+        called.
+
+        It is not a way to change an existing member's role: a membership that already holds one is
+        refused. Re-pointing somebody at a different role is a removal and an addition, which is
+        two audit entries because it is two decisions.
+
+        Requires membership of the account's unrestricted role.
+      responses:
+        "204": { description: Assigned }
+        "403": { description: The caller is not in the account's unrestricted role }
+        "409": { description: No membership is waiting for a role }
+
+  /accounts/{accountId}/invitations:
+    parameters: [{ $ref: "#/components/parameters/accountId" }]
+    get:
+      summary: Who has been invited and has not answered
+      description: |
+        Readable by any member without a grant, for the same reason the member list is: a pending
+        invitation nobody can see is how an account acquires a member nobody remembers inviting.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+    post:
+      summary: Invite somebody by email address
+      description: |
+        Requires membership of the account's unrestricted role — the account's owner and its
+        administrators.
+
+        The response is IDENTICAL whether or not the address already has a user here. That is a
+        property rather than an accident: a difference would make this endpoint an oracle telling
+        any account administrator whether a given address has an account with us.
+
+        The invitation expires in fourteen days and names no role. It is refused if the address
+        already holds a membership of this account, or already has an outstanding invitation to it —
+        re-send that one instead.
+
+        Rate limited three ways: per account per hour, per invited address per day across ALL
+        accounts, and per re-send. The middle one is the one that matters, because anybody may
+        create accounts freely and a per-account limit is therefore defeated by creating accounts.
+      responses:
+        "201":
+          description: Issued, and a message has been sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invitation" }
+        "403": { description: The caller is not in the account's unrestricted role }
+        "409": { description: Already a member, or already invited }
+        "429":
+          description: A rate limit was reached. Retry-After says when.
+
+  /accounts/{accountId}/invitations/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    delete:
+      summary: Revoke an invitation
+      description: |
+        The token stops resolving immediately. The row is kept as a record of what was offered to
+        whom, and no message is sent — telling somebody an offer they may never have seen has been
+        withdrawn is noise at best.
+      responses:
+        "204": { description: Revoked }
+        "403": { description: The caller is not in the account's unrestricted role }
+
+  /accounts/{accountId}/invitations/{id}/resend:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    post:
+      summary: Send the invitation again
+      description: |
+        Issues a NEW token and invalidates the previous one, and restarts the fourteen days.
+
+        Invalidating the old one is the point rather than tidiness: re-sending is what an
+        administrator does when told "I never got it", and the message that was never got is
+        exactly the one that might have gone somewhere unintended.
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invitation" }
+        "403": { description: The caller is not in the account's unrestricted role }
+        "429": { description: Re-sent too recently. Retry-After says when. }
+
+  /invitations:
+    get:
+      summary: The invitations issued to your own address
+      description: |
+        Across every account, needing no token and no selected account.
+
+        This is the second way into an invitation and it is not a fallback. A flow that depends on
+        a link depends on mail delivery being perfect, and it is not: the message lands in spam, a
+        corporate gateway rewrites the URL and breaks it, somebody reads it on a phone and signs in
+        on a laptop.
+
+        It grants nothing the token grants. Both routes require authenticating as the invited
+        address, and being signed in as that address is strictly stronger evidence than holding a
+        link sent to it.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/InvitationOffer" } }
+
+  /invitations/resolve:
+    post:
+      summary: Read the offer a token addresses
+      description: |
+        Consumes NOTHING, which is why it can be called repeatedly. Links in mail are opened by
+        things that are not people — security gateways follow every URL to scan them, clients
+        generate previews — and if arrival consumed the token a meaningful share of invitations
+        would be dead before their invitee ever saw them.
+
+        A POST despite reading nothing, because the token travels in the request BODY. A token in a
+        URL lands in access logs, in browser history and in the Referer header of every subsequent
+        request.
+
+        Reachable with NO account selected: the invitee is not a member of anything yet, which is
+        the entire point of an invitation.
+
+        Every reason a token cannot be used — unknown, expired, revoked, declined, already accepted
+        — answers the same 404 with the same sentence. Distinguishing them would answer "was this
+        token ever real", which is the one question its unguessability exists to make unanswerable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties: { token: { type: string } }
+      responses:
+        "200":
+          description: The offer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationOffer" }
+        "404": { description: This invitation is no longer valid }
+
+  /invitations/accept:
+    post:
+      summary: Accept an invitation
+      description: |
+        Creates the membership, consumes the token, and makes the joined account this session's
+        selection — leaving somebody in the empty state immediately after they joined something is
+        a dead end.
+
+        The membership holds NO ROLE. The new member is in the account and authorised for nothing
+        in it until an administrator assigns one.
+
+        ONLY a user whose verified address is the invited address may accept. A forwarded link
+        confers nothing, and there is deliberately no operation anywhere in this API that attaches
+        the invited address to whoever is signed in — holding a link sent to an address IS proof of
+        control of it, so such an operation would turn every bound invitation into a bearer one.
+
+        A refusal names the invited address only in masked form.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties: { token: { type: string } }
+      responses:
+        "200":
+          description: Joined
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvitationOffer" }
+        "403": { description: This invitation was sent to a different address }
+        "404": { description: This invitation is no longer valid }
+        "409": { description: Already a member of that account }
+
+  /invitations/decline:
+    post:
+      summary: Decline an invitation
+      description: |
+        Consumes the invitation exactly as accepting does, so a later stray click cannot undo it and
+        land somebody in an account they refused.
+
+        It exists because ignoring an invitation already expires it, and the two look identical to
+        the account while meaning opposite things: never saw it — re-send, or telephone — versus saw
+        it and said no, which makes re-sending a nuisance aimed at somebody who already answered.
+
+        It is NOT a block. The account may invite the same address again, because "not now" and
+        "never" are different answers and nothing here can tell which was meant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties: { token: { type: string } }
+      responses:
+        "204": { description: Declined }
+        "403": { description: This invitation was sent to a different address }
+        "404": { description: This invitation is no longer valid }
 
   /accounts/{accountId}/transfer:
     post:
