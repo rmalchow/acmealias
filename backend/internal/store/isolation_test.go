@@ -51,8 +51,35 @@ var crossAccountReaders = map[string]string{
 	"EnsurePersonalAccount":       "materializes the account a scope would have to name; it runs at sign-in, before one exists",
 	"Credit":                      "reachable in an account no scope-taking route will serve — its owner has to be able to pay for it (design C4)",
 	"AccountForSelection":         "reads the account a scope is about to be BUILT from; it is the producer, so it cannot take one",
+	"DueDelegations":              "the activation worker runs on a ticker with no session, and a delegation is due or not regardless of whose it is",
+	"RecordDelegationSeen":        recordDelegationWhy,
+	"RecordDelegationMissing":     recordDelegationWhy,
 	"AccountOwnedBy":              "checkout's producer: it asks 'the account with this id that this person owns' before any scope exists, and answers not-found for every other case so the route is not an existence oracle",
 }
+
+// recordDelegationWhy covers BOTH callers of the two stamping functions, because
+// the honest reason is not the one the worker alone would give.
+//
+// The activation worker runs on a ticker with no session and therefore no
+// app.account_id, so it has no scope to pass. But the console's "check now"
+// (httpapi.recheckPlan) calls the same two functions from an authenticated
+// request handler, where a scope IS in hand — so this is a request-path write
+// with the database-level net switched off, and that has to be stated rather
+// than left covered by a sentence about a ticker.
+//
+// What confines it there is the argument: the only thing either function takes
+// is an alias id, and recheckPlan's come from admin.plan, which resolves them
+// under the caller's scope. They are read out of the database, never off the
+// wire. And what a misdirected write could do is bounded by A3: the two
+// statements set timestamps and never clear last_success_at, so the worst a
+// wrong alias id could achieve is to activate a delegation, or record that
+// somebody looked at one.
+//
+// Rejected: scoped variants for the console path. Two near-identical pairs of
+// updates is how the pair drifts, and the one that must not drift is the one
+// that never writes NULL to last_success_at.
+const recordDelegationWhy = "stamps the delegation just looked at, in whatever account holds it: " +
+	"the worker has no session, and the console's check-now passes alias ids it resolved under a scope"
 
 // nonQueries are exported functions that touch no table at all.
 var nonQueries = map[string]bool{

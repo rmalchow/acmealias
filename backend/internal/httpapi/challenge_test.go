@@ -32,9 +32,14 @@ import (
 const testDatabaseURLEnv = "TEST_DATABASE_URL"
 
 const (
-	testFQDN  = "_acme-challenge.shop.example.com"
-	testLabel = "abc123def456"
-	testZone  = "dev.acmeservice.internal"
+	testFQDN = "_acme-challenge.shop.example.com"
+	// The domain testFQDN is the challenge name of. Aliases exist for domains,
+	// so a fixture holding one without the other models a state the inventory
+	// service cannot produce — and, since domain-activation, one that is
+	// refused.
+	testDomain = "shop.example.com"
+	testLabel  = "abc123def456"
+	testZone   = "dev.acmeservice.internal"
 	// testAliasName is what lego sends once it has followed the customer's
 	// CNAME: our own name, not theirs.
 	testAliasName = testLabel + "." + testZone
@@ -295,6 +300,7 @@ type env struct {
 	view    *zoneview.View
 	e       *echo.Echo
 	alias   *model.Alias
+	domain  *model.Domain
 	metrics *obs.Metrics
 
 	ours, theirs func(*http.Request) // basic-auth setters
@@ -352,6 +358,19 @@ func newEnv(t *testing.T) *env {
 		t.Fatalf("create alias: %v", err)
 	}
 
+	// The alias's domain, ACTIVATED — the state every domain in a working
+	// deployment is in (domain-activation A1). Without it every /present below
+	// is refused 409, which is correct behaviour and not what those tests are
+	// about; the fixture used to hold an alias with no domain at all, which is
+	// a shape the inventory service never creates.
+	domain := &model.Domain{LoadBalancerID: mine.ID, AliasID: alias.ID, Name: testDomain}
+	if err := store.CreateDomain(ctx, db, sc, domain); err != nil {
+		t.Fatalf("create domain: %v", err)
+	}
+	if _, err := store.RecordDelegationSeen(ctx, db, alias.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("activate domain: %v", err)
+	}
+
 	auth := func(loadBalancerID model.ID) func(*http.Request) {
 		k, secret, err := apikey.New()
 		if err != nil {
@@ -380,7 +399,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatalf("RegisterChallenge: %v", err)
 	}
-	return &env{t: t, db: db, view: view, e: e, alias: alias, metrics: metrics,
+	return &env{t: t, db: db, view: view, e: e, alias: alias, domain: domain, metrics: metrics,
 		ours: auth(mine.ID), theirs: auth(other.ID)}
 }
 
@@ -839,5 +858,72 @@ func TestHistoryWriteFailureFailsNeitherPresentNorCleanup(t *testing.T) {
 	v.assertAnswers()
 	if n := v.rows(); n != 0 {
 		t.Fatalf("%d challenge rows after the withdrawal, want 0", n)
+	}
+}
+
+// deactivate returns the fixture's domain to the state a domain is in the
+// moment it is added: never checked, never seen.
+//
+// It clears last_success_at directly, which is deliberately something no
+// production code path does — activation is one-way (domain-activation A3) and
+// the only way back to offline is a row that was never activated. A helper is
+// the honest way to reach that state, and a store function for it would be a
+// loaded gun left lying in the package.
+func (v *env) deactivate() {
+	v.t.Helper()
+	err := store.CrossAccount(v.t.Context(), v.db, func(tx *gorm.DB) error {
+		return tx.Exec(`update domains set last_checked_at = null, last_success_at = null where id = ?`,
+			v.domain.ID).Error
+	})
+	if err != nil {
+		v.t.Fatalf("deactivate domain: %v", err)
+	}
+}
+
+// The gate (domain-activation tasks 3.1–3.4).
+//
+// Four things at once, because they are one story and separating them would
+// invite each half to be "fixed" without the other: the refusal happens, it
+// publishes nothing, it says which record to publish, and once the delegation
+// has been seen no number of failed re-checks takes the domain offline again.
+func TestIntegrationChallengeIsRefusedUntilTheDelegationHasBeenSeen(t *testing.T) {
+	v := newEnv(t)
+	v.deactivate()
+
+	v.call("/present", testFQDN+".", "gfj9Xq", http.StatusConflict)
+	if n := v.rows(); n != 0 {
+		t.Fatalf("%d challenge rows after a refused publish, want 0 — the gate must decide before anything is written", n)
+	}
+
+	// The message lands in the log of the machine running lego, whose operator
+	// is the one person who can fix this. It has to carry both halves of the
+	// record: the name to publish it under and the target it points at.
+	rec := post(v.e, "/present", `{"fqdn":"`+testFQDN+`.","value":"gfj9Xq"}`, v.ours)
+	for _, want := range []string{testFQDN, testAliasName} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("the 409 does not name %q: %s", want, rec.Body.String())
+		}
+	}
+
+	// A withdrawal is not gated. Refusing it would leave a value we are already
+	// holding answerable until it expired — the gate making the storage it
+	// exists to bound last longer.
+	v.call("/cleanup", testFQDN+".", "gfj9Xq", http.StatusOK)
+
+	// Seen once: answerable.
+	if _, err := store.RecordDelegationSeen(t.Context(), v.db, v.alias.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	v.call("/present", testFQDN+".", "gfj9Xq", http.StatusOK)
+
+	// And it STAYS answerable through a delegation that has stopped resolving,
+	// however long for (A3). A customer migrating DNS providers must not have
+	// their renewals stopped by a blip nobody would notice for weeks.
+	for i := range 3 {
+		at := time.Now().UTC().Add(time.Duration(i) * time.Hour)
+		if _, err := store.RecordDelegationMissing(t.Context(), v.db, v.alias.ID, at); err != nil {
+			t.Fatalf("record missing: %v", err)
+		}
+		v.call("/present", testFQDN+".", "still-answerable", http.StatusOK)
 	}
 }

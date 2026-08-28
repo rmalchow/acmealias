@@ -349,6 +349,15 @@ type Domain struct {
 	Name           string
 	CreatedAt      time.Time
 
+	// Activation state, and nothing else derives from anything else (design
+	// domain-activation A1). Active is LastSuccessAt != nil; the check cadence
+	// is nil -> minutes, set -> daily; "broken since" is time.Since of it. There
+	// is deliberately no boolean and no failure counter beside these: either
+	// would be a second source of truth for one fact, and the first bug is the
+	// row where the two disagree.
+	LastCheckedAt *time.Time `gorm:"column:last_checked_at"`
+	LastSuccessAt *time.Time `gorm:"column:last_success_at"`
+
 	Alias *Alias `gorm:"foreignKey:AliasID"`
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/miekg/dns"
@@ -15,6 +16,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/inventory"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/resolvercheck"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
 // The DNS plan (acme-alias-service D5): structured, rendered, and checked
@@ -365,21 +367,105 @@ func groupForChecks(records []inventory.Record, issuers []string) []planCheck {
 // than "undetermined", which would read as a customer-side problem
 // (domain-setup-feedback D4).
 func verificationResolver(cfg config.Config, log *slog.Logger) string {
-	if addr := strings.TrimSpace(cfg.VerificationResolver); addr != "" {
-		if _, _, err := net.SplitHostPort(addr); err != nil {
-			addr = net.JoinHostPort(addr, "53")
-		}
-		return addr
-	}
-	sys, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err != nil || len(sys.Servers) == 0 {
+	addr, err := resolvercheck.ResolverAddress(strings.TrimSpace(cfg.VerificationResolver))
+	if err != nil {
 		log.Warn("no DNS verification resolver: ACME_VERIFY_RESOLVER is unset and no system resolver could be read",
 			slog.Any("error", err))
 		return ""
 	}
-	port := sys.Port
-	if port == "" {
-		port = "53"
+	return addr
+}
+
+// --- check now (domain-activation task 4.3) --------------------------------
+
+// recheckPlan is the verification above, run because somebody asked for it, and
+// RECORDED. It is the console's "check now": a customer who has just published
+// their CNAME should not have to wait out the poller's interval to see the
+// domain come online.
+//
+// Why this is a POST when GET /verification answers the identical body: the two
+// are different acts. The GET is an observation and stores nothing, which is
+// what lets it run on every screen open (domain-setup-feedback D1). This one
+// writes activation state, so it is a request somebody makes rather than one a
+// page makes on their behalf — and it goes through the CSRF token the console
+// already sends with every other write.
+//
+// Rejected: making the GET store whatever it saw. It would have activated
+// domains as a side effect of opening a screen, which is the kind of surprise
+// that makes a read unsafe to retry, and it would have made a page load a write
+// on the customer's behalf that they never asked for.
+//
+// Rejected: a per-domain route. The delegation is per ALIAS and the plan already
+// resolves every one of a load balancer's in a single bounded pass, so a
+// per-domain endpoint would ask the same questions once per row and still have
+// to apply each answer to both the apex and its wildcard.
+//
+// It NEVER deactivates. A pass here that fails to see a delegation stamps
+// last_checked_at and leaves last_success_at alone (A3) — pressing "check now"
+// while a zone is mid-rebuild must not be a way to take your own domain
+// offline.
+func (a *admin) recheckPlan(c echo.Context) error {
+	p, err := a.plan(c) // authorizes dns.plan on the load balancer, as the GET does
+	if err != nil {
+		return err
 	}
-	return net.JoinHostPort(sys.Servers[0], port)
+	// No resolver configured: the same 200 the GET answers, with every row
+	// reading "not checked", and nothing recorded. We are the ones who did not
+	// look, and stamping last_checked_at for a question we never asked would
+	// make the queue think this delegation had been attended to
+	// (domain-setup-feedback D4).
+	out := []checkResult{}
+	if a.resolver != "" {
+		out = runChecks(c.Request().Context(), a.checker,
+			groupForChecks(p.Records, a.opts.Config.CAAIssuers))
+	}
+	domains := domainChecks(p, a.opts.Config.CAAIssuers, out)
+	a.recordDelegations(c, domains)
+	return c.JSON(http.StatusOK, map[string]any{
+		"resolver": a.resolver,
+		"results":  out,
+		"domains":  domains,
+	})
+}
+
+// recordDelegations writes what the pass above saw, one write per alias.
+//
+// Collapsed by alias id because that is the unit of the delegation: a wildcard
+// and its apex produce two identical domainChecks from one lookup, and writing
+// twice would be two statements of one fact. The store's own updates are keyed
+// on alias_id for the same reason, so both rows are stamped by either write.
+//
+// A failure to record is logged and not returned. The customer asked what their
+// DNS says, and they get that answer; the durable stamp is a side effect, and
+// the worker will come round again regardless.
+func (a *admin) recordDelegations(c echo.Context, domains []domainCheck) {
+	ctx := c.Request().Context()
+	at := time.Now().UTC()
+	done := make(map[model.ID]bool, len(domains))
+	for _, d := range domains {
+		if d.AliasID == model.NilID || done[d.AliasID] {
+			continue
+		}
+		done[d.AliasID] = true
+
+		var err error
+		switch d.Delegation.Status {
+		case statusNotChecked:
+			// Nothing was asked, so nothing is recorded — not even that we
+			// looked, because we did not.
+			continue
+		case string(resolvercheck.StatusCorrect):
+			_, err = store.RecordDelegationSeen(ctx, a.db(), d.AliasID, at)
+		default:
+			// missing, incorrect and undetermined alike: we looked and cannot
+			// publish for this domain yet. The console draws the distinction
+			// between them from the answer above; the stored state does not
+			// need it, and A3 means nothing bad follows from an undetermined.
+			_, err = store.RecordDelegationMissing(ctx, a.db(), d.AliasID, at)
+		}
+		if err != nil {
+			a.opts.Log.WarnContext(ctx, "delegation check not recorded",
+				slog.String("delegation", d.ChallengeName), slog.Any("error", err))
+		}
+	}
 }

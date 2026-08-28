@@ -63,7 +63,8 @@ func TestIntegrationPresentIssuesNoExtraDatastoreReads(t *testing.T) {
 	//   4. read the alias's domain names for the interaction history
 	//   5. open the interaction row
 	//   6. read the account, to decide whether it is funded
-	//   7-11. the transaction wrapper's set_config for each scoped statement
+	//   7. read whether this alias's delegation has ever been seen
+	//   8-13. the transaction wrapper's set_config for each scoped statement
 	//
 	// One of those set_configs is worth naming: challenges inherits a
 	// row-level security policy from aliases, so the upsert runs inside a scope
@@ -86,7 +87,20 @@ func TestIntegrationPresentIssuesNoExtraDatastoreReads(t *testing.T) {
 	// expire or a process to restart (task 4.6). Caching it was the alternative
 	// and is what that requirement rules out. One indexed primary-key lookup on
 	// a row PostgreSQL has in shared buffers is the price of the whole of C3.
-	const ceiling = 15
+	// The ACTIVATION gate added the other two — the count and its set_config —
+	// and they are named for the same reason. The justification is the shape of
+	// the alternative: the question "has this domain's delegation ever been
+	// seen" can only be answered by a name resolution or by stored state, and
+	// resolving on this path would put certificate issuance behind a third
+	// party's availability (domain-activation, "the check must not run on the
+	// challenge path"). So it is a read, and it is one count on an indexed
+	// foreign key against rows PostgreSQL already has in shared buffers.
+	//
+	// Caching it was considered and is ruled out by the same requirement that
+	// rules out caching the funding answer: a customer who has just published
+	// their CNAME and pressed "check now" must be able to renew immediately,
+	// not after a cache expires.
+	const ceiling = 17
 	if n := statements.Load(); n > ceiling {
 		t.Fatalf("one publish issued %d datastore statements, want at most %d.\n"+
 			"The permission check on this path must read nothing: grants are preloaded "+

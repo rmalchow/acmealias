@@ -249,6 +249,36 @@ func errUnfunded(acc *model.Account, reason string) *echo.HTTPError {
 			". The API key is valid and permitted; add credit to the account and retry.")
 }
 
+// errNotActivated is the 409 for a domain whose delegation has never been seen
+// (domain-activation A4, task 3.2).
+//
+// 409 Conflict, and not 402, 403 or 404, because it is the only status that
+// says what is actually true: the request is well-formed, the credential
+// authenticated, the grant permitted it, and the account is fine — the resource
+// is simply not in a state that allows the operation. Each of the four refusals
+// on this path sends its reader somewhere different, and sharing a status is
+// how an operator ends up rotating a key over a missing CNAME:
+//
+//	402  the account cannot pay              →  add credit
+//	403  suspended, or the key lacks a grant →  talk to us, or fix the grant
+//	409  the delegation has never been seen  →  publish the record below
+//
+// Built per request rather than being a package-level value, because the whole
+// point is the record it names (task 3.3). This response lands in the log of
+// the machine running lego, whose operator is exactly the person who can go and
+// publish the CNAME — a bare "conflict" would send them to us instead.
+//
+// It does NOT say "we will check again shortly" in the imperative, but that is
+// what happens: the activation worker keeps looking and never gives up (A2), so
+// publishing the record is the entire remedy and there is nothing to re-submit
+// here afterwards.
+func errNotActivated(alias *model.Alias, zone string) *echo.HTTPError {
+	return echo.NewHTTPError(http.StatusConflict,
+		"the delegation for that name has never been observed, so nothing was published. "+
+			"Publish `"+alias.ChallengeFQDN+". IN CNAME "+alias.Label+"."+zone+".` "+
+			"and retry once it resolves; we re-check continuously and stop refusing as soon as we see it.")
+}
+
 // errStorage is the single 500. It names no datastore identifier, driver message
 // or query text; the real error goes to the log.
 var errStorage = echo.NewHTTPError(http.StatusInternalServerError, "challenge record could not be stored")
@@ -392,6 +422,41 @@ func (h *challenge) resolve(c echo.Context, action string) (*resolved, error) {
 		// refused on authority here.
 		h.refuse(ctx, key, name, form, "account not usable: "+reason)
 		return nil, errUnfunded(acc, reason)
+	}
+	// The fourth check, and the last thing that happens before any write
+	// (domain-activation task 3.1). A domain is offline until a check has seen
+	// its delegation, and this is where that is enforced.
+	//
+	// It reads STORED state and asks no resolver. The observation was made out
+	// of band by the activation worker; a live lookup here would put certificate
+	// issuance behind a third party's availability, which is the failure the
+	// whole design is arranged to avoid.
+	//
+	// PUBLISH ONLY. A withdrawal is exempt on purpose: /cleanup removes a value
+	// we are already holding, and refusing it would leave that value answerable
+	// in our zone until it expired — the gate would be making the storage it
+	// exists to bound last longer. There is also nothing to protect, since
+	// nothing is created.
+	//
+	// Nothing here, and nothing anywhere on this path, ever clears
+	// last_success_at (A3). A domain that activated once stays activated: a
+	// customer mid-DNS-migration whose delegation blips would otherwise have
+	// their renewals stopped silently, and with thirty days of slack nobody
+	// notices for weeks.
+	if action == challengePublish {
+		seen, err := store.DelegationSeen(ctx, h.opts.DB, scope, alias.ID)
+		if err != nil {
+			h.opts.Log.ErrorContext(ctx, "activation state lookup failed", slog.String("key_id", key.Identifier),
+				slog.String("fqdn", name), slog.Any("error", err))
+			return nil, errStorage
+		}
+		if !seen {
+			// Logged through the same outcome record as the refusals above, with
+			// a reason that is deliberately not the authz vocabulary: nothing
+			// was refused on authority here either.
+			h.refuse(ctx, key, name, form, "delegation never observed")
+			return nil, errNotActivated(alias, h.zone)
+		}
 	}
 	return &resolved{
 		key: key, fqdn: name, form: form, value: value, alias: alias,

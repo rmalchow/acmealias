@@ -195,6 +195,8 @@ func envFromMap(env map[string]string) ([]string, LookupFunc) {
 // five, so the legacy loader — which knows nothing about it — reads zero.
 var settingsTheLegacyLoaderNeverHad = map[string]string{
 	"ProjectsPerPersonalAccount": "added by personal-and-team-accounts task 3.5a; the frozen loader predates the field",
+	"ActivationFreshInterval":    "added by domain-activation task 2.4; the frozen loader predates the field",
+	"ActivationSettledInterval":  "added by domain-activation task 2.4; the frozen loader predates the field",
 }
 
 func diffConfig(want, got Config) []string {

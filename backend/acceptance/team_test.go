@@ -100,9 +100,13 @@ func TestTheTeamAccountArc(t *testing.T) {
 		http.StatusCreated, &lb); err != nil {
 		t.Fatalf("creating a load balancer: %v", err)
 	}
+	// Under example.com, the zone the fake internet serves, because the domain
+	// has to be able to ACTIVATE: a domain whose delegation has never been seen
+	// is offline and /present refuses it (domain-activation A1). The name stays
+	// unique per run.
 	var domain domainRef
 	if err := owner.json(http.MethodPost, owner.acct("/loadbalancers/"+lb.ID+"/domains"),
-		map[string]string{"name": slug + ".example.net"}, http.StatusCreated, &domain); err != nil {
+		map[string]string{"name": slug + ".example.com"}, http.StatusCreated, &domain); err != nil {
 		t.Fatalf("creating a domain: %v", err)
 	}
 	key := mintKey(t, owner, lb.ID, "acceptance: team account", nil)
@@ -112,6 +116,18 @@ func TestTheTeamAccountArc(t *testing.T) {
 	publish := func(what string) int {
 		return present(t, "/"+what, key.Key.Identifier, key.Secret, domain.ChallengeName, value, nil)
 	}
+	// The account is funded and nobody has published the delegation yet, so the
+	// refusal here is about the DOMAIN and says so with 409 — the same call
+	// answers 402 in step 4 for the same key and the same domain, once the money
+	// runs out. The two refusals are the whole point of design A4 being a
+	// separate status, and this is the only place they are seen side by side.
+	if got := publish("present"); got != http.StatusConflict {
+		t.Fatalf("publishing for a funded account whose domain has no delegation yet: got %d, "+
+			"want 409 (domain-activation A4)", got)
+	}
+	// The customer's half of the setup, and the check that records it.
+	onboardDomain(t, owner, lb.ID, domain)
+
 	if got := publish("present"); got != http.StatusOK {
 		t.Fatalf("publishing for a funded account: got %d, want 200", got)
 	}

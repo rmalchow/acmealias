@@ -557,9 +557,22 @@ one is accepted and has no effect.
 | `challenge.lifetime` | `ACME_CHALLENGE_LIFETIME` | `1h` | How long an uncleaned challenge record survives. Far longer than an issuance needs, short enough that a crashed client leaves nothing lingering. |
 | `challenge.sweep_interval` | `ACME_SWEEP_INTERVAL` | `5m` | Deletion of expired rows. Expired values stop being answered immediately regardless, so this is housekeeping, not correctness. |
 | `challenge.interaction_retention` | `ACME_INTERACTION_RETENTION` | `0s` | How long a closed interaction row is kept; `0` means forever. These rows hold a customer load balancer's client IP, so nothing is deleted until you say so. `4320h` — two Let's Encrypt renewal cycles — is the recommendation on record. |
+| `challenge.activation_fresh_interval` | `ACME_ACTIVATION_FRESH_INTERVAL` | `5m` | How often a domain whose delegation has never been seen is re-checked. It is offline until one check sees it, and it is never given up on — somebody who adds a domain on Friday and publishes the CNAME on Monday is activated on Monday. |
+| `challenge.activation_settled_interval` | `ACME_ACTIVATION_SETTLED_INTERVAL` | `24h` | How often an already-activated domain is re-checked. This only informs: a failed re-check never takes a domain offline, so the number is about how soon you would like to tell somebody their delegation broke, not how fast you must react. |
 | `challenge.trusted_proxy_cidrs` | `ACME_TRUSTED_PROXY_CIDRS` | *empty* | Peers whose forwarding headers are believed. Required if any API key is address-restricted. A list in the file, comma-separated in the variable. |
-| `challenge.verify_resolver` | `ACME_VERIFY_RESOLVER` | *system resolver* | Resolver used to check customer records. Prefer a public resolver over an internal one with a split-horizon view. |
+| `challenge.verify_resolver` | `ACME_VERIFY_RESOLVER` | *system resolver* | Resolver used to check customer records, and **the thing that activates a domain at all**. Prefer a public resolver over an internal one with a split-horizon view — see the note below. |
 | `challenge.alias_use_domain` | `ACME_ALIAS_USE_DOMAIN` | `false` | Derive each new alias label from the domain (`demo-example-com`) instead of generating a random one. Readable in a log line, but computable by anyone, so the served zone will answer "is this domain a customer?" for free — set it only for a deployment serving one organisation. It governs aliases created afterwards; an existing alias is never re-labelled, so decide before onboarding domains. |
+
+**The resolver is not a tuning knob.** A domain is offline until a check has seen its delegation,
+and this setting names the only thing that ever looks. With no resolver — unset, and no usable
+`/etc/resolv.conf` in the container — the activation worker does not start, says so once at boot
+(`domain activation checks are not running: no resolver to ask`), and **every domain added
+afterwards is refused with `409` for ever**. Domains that existed before the upgrade are
+unaffected: the migration activates them.
+
+A split-horizon resolver fails the same way, quietly: it answers for the internal view of a
+customer's name, sees no `_acme-challenge` `CNAME`, and the domain never activates while the
+public internet has had the record all along. Point this at a public recursor.
 
 ### `limits` and `log`
 

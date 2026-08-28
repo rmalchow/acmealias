@@ -75,6 +75,8 @@ func (c Config) Validate() error {
 	positive("ACME_CHALLENGE_LIFETIME", c.ChallengeLifetime)
 	positive("ACME_VIEW_REFRESH_INTERVAL", c.ZoneViewRefreshInterval)
 	positive("ACME_SWEEP_INTERVAL", c.SweepInterval)
+	positive("ACME_ACTIVATION_FRESH_INTERVAL", c.ActivationFreshInterval)
+	positive("ACME_ACTIVATION_SETTLED_INTERVAL", c.ActivationSettledInterval)
 	positive("ACME_SESSION_IDLE_TIMEOUT", c.SessionIdleTimeout)
 	positive("ACME_SESSION_MAX_LIFETIME", c.SessionMaxLifetime)
 	positive("ACME_SHUTDOWN_GRACE", c.ShutdownGracePeriod)

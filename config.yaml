@@ -159,6 +159,14 @@ challenge:
 
   sweep_interval: '${ACME_SWEEP_INTERVAL:5m}'
 
+  # How often the activation worker re-checks a domain's delegation. A domain
+  # whose CNAME has never been seen is offline, and is checked on the first
+  # interval until it appears; one that has been seen is checked on the second,
+  # only so we can say when it broke — a failed re-check never takes a domain
+  # offline again.
+  activation_fresh_interval:   '${ACME_ACTIVATION_FRESH_INTERVAL:5m}'
+  activation_settled_interval: '${ACME_ACTIVATION_SETTLED_INTERVAL:24h}'
+
   # How long a CLOSED interaction row is kept. Zero means keep forever, and
   # that is the default on purpose: the rows hold a customer load balancer's
   # client IP and nobody has signed off on a retention period for it. The

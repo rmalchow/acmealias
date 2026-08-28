@@ -158,6 +158,13 @@ type challengeBlock struct {
 	TrustedProxyCIDRs    []string      `koanf:"trusted_proxy_cidrs"`
 	VerifyResolver       string        `koanf:"verify_resolver"`
 	AliasUseDomain       bool          `koanf:"alias_use_domain"`
+
+	// The two activation cadences (domain-activation A2). They live in the
+	// challenge block because what they gate is whether a challenge is
+	// published at all, and because the resolver they are asked through —
+	// verify_resolver, two lines up — is already here.
+	ActivationFreshInterval   time.Duration `koanf:"activation_fresh_interval"`
+	ActivationSettledInterval time.Duration `koanf:"activation_settled_interval"`
 }
 
 func (challengeBlock) Defaults() map[string]any {
@@ -165,6 +172,14 @@ func (challengeBlock) Defaults() map[string]any {
 		"ttl":            30 * time.Second,
 		"lifetime":       time.Hour,
 		"sweep_interval": 5 * time.Minute,
+		// Minutes, because the person who has just been shown the record to
+		// publish is publishing it right now, and minutes is the difference
+		// between "it worked" and "did I get it wrong?" (A2). Daily for a
+		// settled domain, because nothing acts on that answer (A3) — it is
+		// chosen for how soon we would like to TELL somebody their delegation
+		// broke, against thirty days of renewal slack.
+		"activation_fresh_interval":   5 * time.Minute,
+		"activation_settled_interval": 24 * time.Hour,
 		// Zero means keep forever. challenge_interactions holds a customer
 		// load balancer's client_ip and nobody has signed off on a retention
 		// period for it, so nothing is deleted until an operator says so.
@@ -244,6 +259,9 @@ func (f fileConfig) toConfig() Config {
 		TrustedProxyCIDRs:       f.Challenge.TrustedProxyCIDRs,
 		VerificationResolver:    f.Challenge.VerifyResolver,
 
+		ActivationFreshInterval:   f.Challenge.ActivationFreshInterval,
+		ActivationSettledInterval: f.Challenge.ActivationSettledInterval,
+
 		OIDCIssuer:       f.OIDC.Issuer,
 		OIDCClientID:     f.OIDC.ClientID,
 		OIDCClientSecret: f.OIDC.ClientSecret,
@@ -285,7 +303,7 @@ type envBinding struct {
 }
 
 // envBindings is the whole of the flat namespace, mapped onto the nested one.
-// Forty variables, none renamed (G5, task 2.5).
+// Forty-two variables, none renamed (G5, task 2.5).
 //
 // The table is not the mapping mechanism — the schema is, and envAliases below
 // derives from this table only the entries the schema cannot reach on its own.
@@ -340,6 +358,8 @@ var envBindings = []envBinding{
 	{"ACME_TRUSTED_PROXY_CIDRS", "challenge.trusted_proxy_cidrs", kindList},
 	{"ACME_VERIFY_RESOLVER", "challenge.verify_resolver", kindString},
 	{"ACME_ALIAS_USE_DOMAIN", "challenge.alias_use_domain", kindBool},
+	{"ACME_ACTIVATION_FRESH_INTERVAL", "challenge.activation_fresh_interval", kindDuration},
+	{"ACME_ACTIVATION_SETTLED_INTERVAL", "challenge.activation_settled_interval", kindDuration},
 
 	{"ACME_ALLOW_ACCOUNT_CREATION", "limits.allow_account_creation", kindBool},
 	{"ACME_PROJECT_QUOTA", "limits.projects_per_personal_account", kindInt},

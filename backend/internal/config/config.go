@@ -160,6 +160,19 @@ type Config struct {
 	// Empty means use the system resolver.
 	VerificationResolver string
 
+	// ActivationFreshInterval and ActivationSettledInterval are how often the
+	// activation worker re-checks a domain's delegation
+	// (ACME_ACTIVATION_FRESH_INTERVAL, ACME_ACTIVATION_SETTLED_INTERVAL;
+	// domain-activation A2). Fresh is a domain whose delegation has never been
+	// seen, settled is one whose has.
+	//
+	// They are settings rather than constants for the same reason the project
+	// quota is: the fresh one is felt by a customer standing at a screen and
+	// the settled one is a load on somebody's recursor, and both are the sort
+	// of number an operator wants to move without a release.
+	ActivationFreshInterval   time.Duration
+	ActivationSettledInterval time.Duration
+
 	// OIDC settings (design D10).
 	OIDCIssuer       string // ACME_OIDC_ISSUER
 	OIDCClientID     string // ACME_OIDC_CLIENT_ID

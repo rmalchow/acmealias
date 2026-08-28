@@ -49,3 +49,17 @@ staff:
 
 log:
   level: debug
+
+challenge:
+  # The activation poller, fast. Production checks a never-activated domain every
+  # five minutes, which is right when somebody is publishing a CNAME by hand and
+  # wrong here: the seed publishes the delegation and traefik-lb orders a
+  # certificate seconds later, so a five-minute wait is a five-minute wait on
+  # every reset — and reset cost is the thing that made an acceptance gate
+  # unprovable once already.
+  #
+  # The cost of fifteen seconds is one DNS lookup per unactivated domain against
+  # a CoreDNS in the same network. The settled interval is left alone: nothing in
+  # development waits on it.
+  activation_fresh_interval: '15s'
+

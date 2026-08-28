@@ -45,6 +45,7 @@ curl -si -u "k_7f3a91c4:$ACME_KEY" -X POST https://acme-api.cloudpowered.service
 | `SERVFAIL` from public resolvers, but `dig` at the server works | A [DS record on an unsigned delegation](#ds-record-on-an-unsigned-delegation). |
 | Traefik logs `401` from acmeservice | A [key revoked or expired, or a source address outside the key's CIDR restriction](#401-from-acmeservice) — both look identical on purpose. |
 | Traefik logs `403` | The [domain is not in the inventory](#403-from-acmeservice) for that load balancer. |
+| Traefik logs `409` | The [domain's delegation has never been observed](#409-from-acmeservice), so nothing is published for it yet. |
 | Traefik logs `400` | [`HTTPREQ_MODE=RAW` is set](#400-from-acmeservice), or a malformed request body. |
 | Traefik cannot connect to the endpoint at all | The [API hostname was put inside the delegated zone](#traefik-cannot-connect-at-all) (our DNS serves no `A` records), or a firewall rule. |
 | Issuance hangs in the propagation check | [The delegation is not live yet](#issuance-hangs-in-the-propagation-check), or Traefik's `dnsChallenge.resolvers` points at a split-horizon internal resolver. |
@@ -117,6 +118,30 @@ Authorization is a positive allowlist: a key can publish only for domains explic
 its own load balancer. A `403` means the FQDN in the request is not in that load balancer's domain list —
 check the load balancer's **Domains** screen, or the audit log for a recent removal. This is
 usually benign and just means a domain someone added to Traefik was never added to the inventory.
+
+### 409 from acmeservice
+
+A domain is offline until we have seen its delegation. It exists in the inventory, it holds an
+alias, and the key is permitted to publish for it — but nobody has yet observed the `CNAME` that
+makes a published challenge value reachable, so the service refuses rather than publish something
+that could never validate.
+
+The response body names the exact record, because this is the one refusal whose fix belongs to
+whoever is reading the load balancer's log:
+
+```
+the delegation for that name has never been observed, so nothing was published.
+Publish `_acme-challenge.shop.example.com. IN CNAME shop-example-com.acmeservice.cloudpowered.services.`
+and retry once it resolves; we re-check continuously and stop refusing as soon as we see it.
+```
+
+Publish it, confirm with `dig +short _acme-challenge.<domain> CNAME`, and either wait a few
+minutes for the background check or press **Check now** on the domain's row in the console. Once
+the delegation has been seen the domain stays active permanently — a later `409` is never a
+domain that was switched off, only one that was never switched on.
+
+Distinguish it from its neighbours by the status alone: `402` is an account that cannot pay,
+`403` is a suspended account or a key without the grant, `409` is this.
 
 ### 400 from acmeservice
 

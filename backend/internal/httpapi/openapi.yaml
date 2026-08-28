@@ -512,6 +512,16 @@ paths:
         "not-checked": a deployment that declined the feature is not broken.
       responses:
         "200": { description: OK }
+    post:
+      summary: The same check, run on request, and recorded
+      description: >
+        Identical body to the GET. The difference is that what it saw is stored:
+        a delegation observed here activates its domains immediately, which is
+        the "check now" for somebody who has just published the record and does
+        not want to wait for the poller. It never deactivates — a check that
+        fails to see a delegation records only that we looked.
+      responses:
+        "200": { description: OK }
 
   /accounts/{accountId}/loadbalancers/{id}/interactions:
     parameters:

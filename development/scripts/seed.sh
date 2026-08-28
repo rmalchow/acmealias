@@ -172,9 +172,26 @@ else
   warn "  development/scripts/logs.sh authentik-worker"
 fi
 
+# --- wait for the delegation to be seen ---------------------------------------
+#
+# A domain is offline until the activation worker has seen its delegation
+# (domain-activation A1), and the zone above is what publishes it. Without this
+# wait the seed returns while demo.example.com is still refusing /present with
+# 409, and traefik-lb — which orders a certificate the moment it starts — fails
+# its first attempt for a reason that looks nothing like the cause.
+say "waiting for the delegation to be seen"
+n=0
+until [ "$(compose exec -T postgres psql -qtAX -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+        -c "select count(*) from domains where last_success_at is not null" 2>/dev/null | tr -d ' ')" != "0" ]; do
+  n=$((n + 2))
+  [ "$n" -ge 120 ] && { warn "no domain activated after ${n}s — is ACME_VERIFY_RESOLVER set, and is the worker running?"; break; }
+  sleep 2; printf '.'
+done
+printf ' ok\n'
+
 echo
 say "generated DNS plan for demo/prod:"
 acmectl adminctl loadbalancer dns demo/prod || warn "could not render the DNS plan"
 
 echo
-say "seeded — sign in at http://acme-console.localhost as admin-user / devpass"
+say "seeded — sign in at http://console.localhost as admin@example.com / devpass"

@@ -256,6 +256,11 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	// Verification is a read: it resolves names and stores nothing, so it is a
 	// GET and needs no CSRF token.
 	acct.GET("/loadbalancers/:id/verification", a.verifyPlan)
+	// The same check, asked for deliberately and RECORDED: the console's "check
+	// now", for somebody who has just published their CNAME and does not want
+	// to wait out the activation poller (domain-activation task 4.3). A POST
+	// because it writes, which is also what puts it behind the CSRF token.
+	acct.POST("/loadbalancers/:id/verification", a.recheckPlan)
 
 	acct.GET("/challenges", a.listChallenges)
 	acct.GET("/audit", a.listAudit)

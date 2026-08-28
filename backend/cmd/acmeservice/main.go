@@ -13,12 +13,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"gorm.io/gorm"
 
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/activation"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/apikey"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
@@ -29,6 +31,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/oidcauth"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/queryobs"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/reporting"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/resolvercheck"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/sweeper"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/webui"
@@ -248,6 +251,29 @@ func runService(cfg config.Config, log *slog.Logger) error {
 	// (project, day) — see reporting.Snapshot.
 	go reporting.RunSnapshots(ctx, db, reporting.SnapshotInterval, log)
 	go sampleActiveChallenges(ctx, db, metrics, cfg.ZoneViewRefreshInterval, log)
+	// A domain is offline until a check has seen its delegation
+	// (domain-activation A1), and this is the only thing that ever sees one.
+	// Out of band, on its own goroutine, and never from /present: a resolver
+	// call on the challenge path would make certificate issuance depend on a
+	// third party's availability.
+	//
+	// It does not start without a resolver, and that refusal is deliberate. A
+	// worker asking an empty address would answer "undetermined" for every
+	// delegation in the deployment for ever, which stamps last_checked_at and
+	// never last_success_at — a service that looks busy and activates nothing.
+	// Not starting says so once, in a line naming the setting.
+	if resolver, err := resolvercheck.ResolverAddress(strings.TrimSpace(cfg.VerificationResolver)); err != nil {
+		log.Warn("domain activation checks are not running: no resolver to ask",
+			"setting", "ACME_VERIFY_RESOLVER", "error", err)
+	} else {
+		go activation.Run(ctx, db, &resolvercheck.Checker{Resolver: resolver}, activation.Options{
+			Zone:            cfg.Zone,
+			FreshInterval:   cfg.ActivationFreshInterval,
+			SettledInterval: cfg.ActivationSettledInterval,
+		}, log)
+		log.Info("domain activation checks running", "resolver", resolver,
+			"fresh", cfg.ActivationFreshInterval, "settled", cfg.ActivationSettledInterval)
+	}
 
 	up.set(true)
 	log.Info("acmeservice ready", "zone", cfg.Zone)

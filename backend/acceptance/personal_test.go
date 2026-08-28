@@ -81,9 +81,12 @@ func TestThePersonalAccountArc(t *testing.T) {
 		http.StatusCreated, &lb); err != nil {
 		t.Fatalf("creating a load balancer: %v", err)
 	}
+	// Under example.com because that is the zone the fake internet is
+	// authoritative for, and a domain that resolves nowhere can never activate
+	// (domain-activation A1). The name stays unique per run.
 	var domain domainRef
 	if err := s.json(http.MethodPost, s.acct("/loadbalancers/"+lb.ID+"/domains"),
-		map[string]string{"name": slug + ".example.net"}, http.StatusCreated, &domain); err != nil {
+		map[string]string{"name": slug + ".example.com"}, http.StatusCreated, &domain); err != nil {
 		t.Fatalf("creating a domain: %v", err)
 	}
 
@@ -110,6 +113,33 @@ func TestThePersonalAccountArc(t *testing.T) {
 	key := mintKey(t, s, lb.ID, "acceptance: personal account", nil)
 	const value = "acceptance-personal-account-value"
 	alias := aliasNameFor(domain.AliasLabel)
+
+	// 5a. And it is refused first, because nobody has published the delegation
+	// yet (domain-activation A1, A4, task 5.6).
+	//
+	// This is the one place the gate can be proven distinguishable rather than
+	// merely present: the account is personal, so it is funded by definition and
+	// a 402 is impossible; nothing has suspended it, so a 403 is impossible; the
+	// key was minted on this very load balancer, so a 403 for authority is
+	// impossible; and the domain exists, so a 404 is impossible. The only thing
+	// wrong with this request is the state of the domain, and 409 is the only
+	// answer that says so. The very next lines fix exactly that one thing and
+	// the same call succeeds.
+	if got := present(t, "/present", key.Key.Identifier, key.Secret, domain.ChallengeName, value, nil); got != http.StatusConflict {
+		t.Fatalf("publishing for %s before its delegation exists: got %d, want 409 — a domain "+
+			"whose CNAME has never been seen is offline, and it is refused as a state "+
+			"problem the customer can fix (409), not as money (402), a suspension (403) or "+
+			"an unknown name (404)", domain.Name, got)
+	}
+	if vals, _, err := txtValues(serviceDNS, alias); err != nil {
+		t.Fatalf("querying %s: %v", alias, err)
+	} else if len(vals) != 0 {
+		t.Errorf("%s answers %v after a refused publish; a 409 must leave nothing behind", alias, vals)
+	}
+
+	// 5b. The customer publishes the delegation, and we look. Now it works.
+	onboardDomain(t, s, lb.ID, domain)
+
 	if got := present(t, "/present", key.Key.Identifier, key.Secret, domain.ChallengeName, value, nil); got != http.StatusOK {
 		t.Fatalf("publishing a challenge for %s: got %d, want 200", domain.Name, got)
 	}

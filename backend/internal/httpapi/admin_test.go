@@ -551,6 +551,13 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"GET", proj + "/inventory-history", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", lb + "/interactions", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", lb + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
+		// "Check now" writes activation state, but the authority it needs is the
+		// authority to run the check — dns.plan, exactly as the GET — because it
+		// asks the same questions of the same names. A read-only member watching
+		// a domain they have just delegated is the person this control exists
+		// for, and requiring inventory.write of them would put it out of reach
+		// of everyone except the account's administrators.
+		{"POST", lb + "/verification", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 
 		// Projects: ADMIN only.
 		{"POST", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects", `{"slug":"other","name":"Other"}`, []string{"ADMIN"}, nil},

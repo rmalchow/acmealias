@@ -190,7 +190,47 @@ Every domain in the table checks itself when you open the load balancer, with no
 press. Nothing is stored: the row is what a resolver answered a moment ago, and reopening the
 screen asks again.
 
-Each record type gets its own chip, because they answer different questions.
+There are two columns, and the difference between them is the difference between what DNS says
+right now and what the service has actually seen.
+
+### Challenges — will we publish for this domain at all
+
+A domain is **offline until we have seen its delegation**. Adding it is not enough: something has
+to observe the customer's `CNAME` before we will answer a `/present` for that name. A background
+check looks for it every few minutes and never gives up, so this resolves itself once the record
+is published — usually within minutes of it propagating.
+
+| Chip | What is true | Who fixes it |
+| --- | --- | --- |
+| **waiting for delegation** | We have never seen the `CNAME`. Certificate requests for this domain are refused with a `409` naming the record to publish. | The customer publishes it. This is the normal state of a domain added five minutes ago, not a fault. |
+| **active** | We have seen it. Challenges for this domain are published. | Nobody. |
+| **not resolving** | We have seen it before, and the last time we looked it was gone. | The customer, when they can — their next renewal will fail until it resolves again. |
+
+**A domain is never switched off.** Once we have seen the delegation the domain stays active, no
+matter how many later checks fail. A zone being rebuilt, a provider migration or a TTL change
+makes a delegation blip, and deactivating on that would stop renewals silently for weeks. "not
+resolving" is information, never a countdown.
+
+Underneath the chip the row says when we last looked, or — where a delegation has stopped
+resolving — when we last saw it. That is the question anybody actually asks: not how many checks
+have failed, but since when.
+
+**Check now** appears on any domain a check could change: one that is still waiting, and one that
+is **not resolving**. Press it after publishing — or republishing — the record rather than waiting
+for the poller; it runs the lookup immediately and, if the delegation is there, the domain is
+active before the page finishes reloading. It cannot do harm — a check that does not find the
+record only records that we looked.
+
+It is the same lookup as **Run verification** on the plan below, which also records what it saw:
+either control brings a domain online, and both re-check every domain on the load balancer at
+once, because the delegation is one record per alias rather than one per domain.
+
+### Validation — what a live lookup says about the records
+
+This column is a fresh resolver answer, asked when the screen opened, and it can legitimately
+disagree with the column beside it for the few minutes between a customer publishing their record
+and our next check noticing. Each record type gets its own chip, because they answer different
+questions.
 
 **Delegation** — is the one `CNAME` the customer publishes actually there?
 

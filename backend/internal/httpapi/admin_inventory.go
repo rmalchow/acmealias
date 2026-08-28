@@ -70,6 +70,24 @@ type domainView struct {
 	AliasID        model.ID  `json:"aliasId"`
 	AliasLabel     string    `json:"aliasLabel"`
 	CreatedAt      time.Time `json:"createdAt"`
+
+	// Activation, as the two timestamps and nothing else (domain-activation
+	// A1). There is deliberately no `active` boolean on the wire either: the
+	// console derives it from lastSuccessAt exactly as the service does, and a
+	// third representation of one fact is a third thing that can disagree with
+	// the other two.
+	//
+	// Both are nullable and mean different absences. lastCheckedAt null is "we
+	// have not looked yet" — the state of a domain added a moment ago, and the
+	// state every domain that predates this feature was migrated into.
+	// lastSuccessAt null is "we have never seen the delegation", which is what
+	// makes /present refuse.
+	//
+	// lastCheckedAt AFTER lastSuccessAt is the third state worth reading: we
+	// looked and did not see it. It is information, never a countdown — nothing
+	// is ever switched off because of it (A3).
+	LastCheckedAt *time.Time `json:"lastCheckedAt"`
+	LastSuccessAt *time.Time `json:"lastSuccessAt"`
 }
 
 // aliasView is the audit payload for an alias. Aliases have no route of their
@@ -123,7 +141,8 @@ func toDomain(d model.Domain, aliases map[model.ID]model.Alias) domainView {
 		ID: d.ID, LoadBalancerID: d.LoadBalancerID, Name: d.Name,
 		ChallengeName: dnsname.ChallengeName(d.Name),
 		AliasID:       d.AliasID, AliasLabel: aliases[d.AliasID].Label,
-		CreatedAt: d.CreatedAt,
+		CreatedAt:     d.CreatedAt,
+		LastCheckedAt: d.LastCheckedAt, LastSuccessAt: d.LastSuccessAt,
 	}
 }
 

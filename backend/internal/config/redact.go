@@ -35,6 +35,8 @@ func (c Config) LogValue() slog.Value {
 		slog.Duration("interaction_retention", c.InteractionRetention),
 		slog.Any("trusted_proxy_cidrs", c.TrustedProxyCIDRs),
 		slog.String("verification_resolver", c.VerificationResolver),
+		slog.Duration("activation_fresh_interval", c.ActivationFreshInterval),
+		slog.Duration("activation_settled_interval", c.ActivationSettledInterval),
 		slog.String("oidc_issuer", c.OIDCIssuer),
 		slog.String("oidc_client_id", c.OIDCClientID),
 		slog.String("oidc_client_secret", redactNonEmpty(c.OIDCClientSecret)),

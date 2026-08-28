@@ -195,6 +195,8 @@ table domains
   column alias_id uuid not null
   column created_at timestamp with time zone not null default now()
   column id uuid not null default uuidv7()
+  column last_checked_at timestamp with time zone null
+  column last_success_at timestamp with time zone null
   column load_balancer_id uuid not null
   column name text not null
   column project_id uuid not null
@@ -207,6 +209,7 @@ table domains
   constraint domains_pkey primary key (id)
   index domains_account_id_idx CREATE INDEX domains_account_id_idx ON domains USING btree (account_id)
   index domains_account_id_name_key CREATE UNIQUE INDEX domains_account_id_name_key ON domains USING btree (account_id, name)
+  index domains_activation_due_idx CREATE INDEX domains_activation_due_idx ON domains USING btree (last_checked_at NULLS FIRST, last_success_at)
   index domains_alias_id_idx CREATE INDEX domains_alias_id_idx ON domains USING btree (alias_id)
   index domains_pkey CREATE UNIQUE INDEX domains_pkey ON domains USING btree (id)
   index domains_project_id_idx CREATE INDEX domains_project_id_idx ON domains USING btree (project_id)
