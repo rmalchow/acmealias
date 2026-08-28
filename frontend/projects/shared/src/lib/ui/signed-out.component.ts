@@ -43,7 +43,7 @@ import { SessionService } from '../core/session.service';
   imports: [NzButtonModule, NzIconModule],
   template: `
     <main class="out">
-      <span class="brand-box"><img src="brand/logo.svg" alt="" /></span>
+      <img class="mark" src="brand/logo.svg" alt="" />
       <h1>{{ product() }}</h1>
       <p>{{ blurb() }}</p>
       <button nz-button nzType="primary" nzSize="large" (click)="session.signIn()">
@@ -65,19 +65,12 @@ import { SessionService } from '../core/session.service';
         gap: 0.75rem;
       }
 
-      .brand-box {
-        display: grid;
-        place-items: center;
-        inline-size: 3rem;
+      /* NO BOX. The mark draws its own rectangle — it is a stroked outline around the
+         letterforms, and that outline IS the box. Putting a second one around it gives the corner
+         a box inside a box, which is what the shell's bar used to do and why it stopped. */
+      .mark {
         block-size: 3rem;
-        border: 1px solid var(--ac-accent-line);
-        border-radius: 8px;
-        background: var(--ac-accent-soft);
-      }
-
-      .brand-box img {
-        inline-size: 1.7rem;
-        block-size: auto;
+        inline-size: auto;
         display: block;
       }
 
