@@ -1,4 +1,3 @@
-import { DatePipe } from '@angular/common';
 import { Component, computed, inject, input, OnChanges, signal } from '@angular/core';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
@@ -42,7 +41,6 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
 @Component({
   selector: 'app-project-detail',
   imports: [
-    DatePipe,
     PageHeaderComponent,
     ApiKeysPanelComponent,
     InteractionsPanelComponent,
