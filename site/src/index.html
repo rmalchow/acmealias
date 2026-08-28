@@ -382,7 +382,7 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
             <h3>We issue you an alias</h3>
             <p>
               One randomly generated label inside <em>our</em> zone —
-              <code>acme.acmealias.com</code>, which is delegated to us and holds nothing but these
+              <code>edgedns.cloud</code>, which is delegated to us and holds nothing but these
               — created with the domain and never re-labelled. The console shows it on the domain's
               row.
             </p>
@@ -401,7 +401,7 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
             </p>
             <div class="term" role="img"
                  aria-label="A zone file line delegating the challenge name to the alias with a CNAME record.">
-              <pre>_acme-challenge.shop.example.com.  300  IN  CNAME  k7f2q.acme.acmealias.com.</pre>
+              <pre>_acme-challenge.shop.example.com.  300  IN  CNAME  k7f2q.edgedns.cloud.</pre>
             </div>
             <p class="note">
               For a wildcard, the record is at <code>_acme-challenge.example.com</code> — the
@@ -441,10 +441,10 @@ lego --dns acme-dns -d shop.example.com run</pre></div>
             <div class="term" role="img"
                  aria-label="A dig command showing the challenge name is a CNAME into the acmealias zone, and a second dig showing that alias answering a TXT record during validation.">
               <pre><span class="p">$</span> dig +short _acme-challenge.shop.example.com CNAME
-<span class="o">k7f2q.acme.acmealias.com.</span>
+<span class="o">k7f2q.edgedns.cloud.</span>
 <span class="c"># published once, by you. Never changes again.</span>
 
-<span class="p">$</span> dig +short k7f2q.acme.acmealias.com TXT
+<span class="p">$</span> dig +short k7f2q.edgedns.cloud TXT
 <span class="o">"3sT4kQ9x_LbW2vPd8nZmR1cYhE0aJfKu6iGtOs5A"</span>
 <span class="c"># answered only while a validation is in flight,
 # then withdrawn. Ask again tomorrow and it is empty.</span></pre>
