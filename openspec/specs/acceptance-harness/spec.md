@@ -152,36 +152,27 @@ documented, not silently omitted.
 ### Requirement: The acceptance suite exercises sign-in and role enforcement against a real identity provider
 
 The suite SHALL complete the authorization code flow against the stack's identity provider over
-HTTP, without a browser, for each seeded user, and SHALL use the resulting session to assert that
-authority is held per account: a signed-in user with no account selected holds no role and no
-permission, and a user holds a role because they are a member of an account with that role. The
-suite SHALL assert that a group claim grants nothing. The suite SHALL NOT weaken the service's own
-cookie attributes in order to complete the flow.
+that provider's own sign-in mechanism, whatever form that mechanism takes, and SHALL NOT establish a
+session by any route a person could not use.
 
-#### Scenario: Sign-in establishes a session and selects nothing
+The identity provider the suite runs against SHALL be the one the production design names. A
+development stack authenticating through different software than production is deemed to prove
+nothing about sign-in.
 
-- **WHEN** a seeded user completes the sign-in flow
-- **THEN** a session is established, no account is selected, and the identity endpoint reports the user's groups with no roles and no permissions
+#### Scenario: Suite signs in as a real user
 
-#### Scenario: A role is held in one account and nowhere else
+- **WHEN** the acceptance suite authenticates as a seeded user
+- **THEN** it completes the provider's own sign-in exchange and obtains a session the service accepts
 
-- **WHEN** that user selects an account they are a member of
-- **THEN** the identity endpoint reports the role their membership names, and reports it only while that account is selected
+#### Scenario: No test-only route to a session
 
-#### Scenario: A read-only user is refused a change
+- **WHEN** the service is searched for a route or setting that establishes a session without the identity provider
+- **THEN** none exists
 
-- **WHEN** the user holding the `READ_ONLY` role in that account attempts to create a domain
-- **THEN** the request is refused
+#### Scenario: Each seeded user resolves to its configured role
 
-#### Scenario: A configuration administrator is allowed the same change
-
-- **WHEN** the user holding `CONFIG_ADMIN` attempts the same creation
-- **THEN** the request succeeds
-
-#### Scenario: Key rotation is refused the inventory but allowed a key
-
-- **WHEN** the user holding `KEY_ROTATION` attempts to create a domain and then to create an API key
-- **THEN** the domain creation is refused and the key creation succeeds
+- **WHEN** the suite signs in as each seeded user in turn
+- **THEN** each holds exactly the role its group is configured to grant, and role enforcement refuses what that role may not do
 
 ### Requirement: The suite is a single-command local gate, and the pipeline does not run it
 

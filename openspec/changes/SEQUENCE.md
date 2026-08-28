@@ -10,15 +10,23 @@ the bottom.
 
 ## The order
 
-**Where this stands, 2026-08-28.** Entries 1 through 12 are ARCHIVED except one: everything from
-`tenancy-and-permissions` to `acme-dns-protocol` is built and its specs are in the main specs, and
-what remains open below that line is `transactional-email` (entry 5, 15 of 17) and
-`authentik-and-self-signup`, which sits outside the numbering. The per-entry notes further down were
-written while those changes were in flight and have not all been rewritten — where an entry says how
-many of its tasks are done, read the archive rather than the note. `collapse-project-and-loadbalancer`
-was the last of them, archived after dropping a REMOVED block naming a requirement the main specs
-never held; its task 1.8 records that. **The next body of real work is entry 14,
-`domain-diagnostics`, at 5 of 93.**
+**Where this stands, end of 2026-08-28.** Everything numbered 1 through 14 is ARCHIVED —
+`tenancy-and-permissions` through `domain-diagnostics`, including `transactional-email` (entry 5)
+and `domain-diagnostics` (entry 14), whose 109 tasks landed today. `authentik-and-self-signup`,
+which sits outside the numbering, is archived too, with TWO TASKS DELIBERATELY LEFT OPEN in its
+archived task list rather than ticked: 5c.4's walk of a password reset through to a successful
+sign-in, and 5b.5's assertion that signing in again after sign-out reaches a flow rather than the
+callback. Both need a new end-to-end test, both are named where somebody will find them, and
+neither is claimed as done.
+
+The per-entry notes below were written while those changes were in flight and count tasks in the
+present tense; where an entry says how many of its tasks are done, read the archive rather than the
+note.
+
+**What is left is 15 and 16 — `metering-and-credits` and `public-edition` — plus `staff-plane` and
+`move-projects-between-accounts`, which sit outside the numbering.** None of them has been started.
+The next decision is not which to build but whether the trigger for either has fired: metering waits
+on manual credit grants becoming unreasonable, and public-edition waits on strangers arriving.
 
 1. **`tenancy-and-permissions`** — the floor, and the only change that is substantially cheaper now
    than later, because it rewrites the shape of every table while the only data is ours.
