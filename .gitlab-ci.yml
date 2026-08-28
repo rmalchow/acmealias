@@ -52,9 +52,21 @@ test-go:
   stage: test
   image: golang:1.26.3-bookworm
   extends: .go-cache
-  # No `rules:` here, deliberately: this is the job that runs EVERYWHERE, on
-  # every branch and every merge request. The image build below is the one
-  # confined to the default branch.
+  # EVERY BRANCH EXCEPT MAIN, which is the mirror image of the image jobs below.
+  #
+  # The suite takes about eight minutes on the one runner this project has, and
+  # on main that time buys nothing anybody waits for: main is reached by pushing
+  # a branch whose pipeline ALREADY RAN it, and what main is wanted for is the
+  # image. Leaving it here meant every deploy sat eight minutes behind a rerun
+  # of the run that let the code onto main in the first place — with both image
+  # jobs queued behind it on the same runner.
+  #
+  # WHAT THIS COSTS, stated here rather than discovered later: main has no test
+  # gate of its own. A commit that reaches main WITHOUT passing through a branch
+  # pipeline — a fast-forward of unpushed work, a web-UI edit, a commit that
+  # swept up somebody else's staged changes — is now tested by nothing. That is
+  # not hypothetical; it happened once already today. The branch run is the only
+  # gate left, so a red branch pipeline is a block on merging rather than a note.
   #
   # THE SAME `tags:` THE IMAGE JOBS GAINED, and for the same reason: the one
   # runner this project has declares the tag `shared` and `run_untagged=false`,
@@ -65,6 +77,8 @@ test-go:
   # read the failure reason rather than the failure.
   tags:
     - shared
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
   # Deliberately no TEST_DATABASE_URL here: the integration and
   # schema-drift tests `t.Skip` when it's unset, which is on purpose in CI
   # (design D13). They're a dev-stack activity, exercised locally against
