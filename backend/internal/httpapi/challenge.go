@@ -24,8 +24,43 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/zoneview"
 )
 
-// The challenge API: POST /present and POST /cleanup, speaking lego's httpreq
-// contract in its default mode (design D2).
+// The challenge API: two dialects of one operation.
+//
+//	POST /present, POST /cleanup   lego's httpreq contract, default mode (design D2),
+//	                               also served under /acme/httpreq
+//	POST /update                   the acme-dns protocol (design N1)
+//	POST /register                 acme-dns's registration, deliberately refusing
+//
+// WHY TWO. The httpreq contract covers lego and Traefik and leaves every other
+// ACME client needing an adapter written by us, one at a time, forever. acme-dns
+// is a server with the SAME DESIGN as this product — a permanent CNAME from the
+// customer's zone into one we run, and an HTTP call that sets the TXT when a
+// certificate authority asks — and its API has become the de facto standard for
+// that pattern. We did not adopt a competitor's protocol; we arrived at their
+// architecture independently and then chose a different spelling for the one
+// call it needs.
+//
+// The arithmetic is the whole argument (design N2). Native adapters mean a
+// cert-manager WEBHOOK — a deployable apiserver extension with its own release
+// cycle — a Caddy libdns module, an acme.sh plugin and a Posh-ACME plugin: four
+// projects to keep working. Speaking /update is one route, and cert-manager,
+// acme.sh, win-acme, Posh-ACME, Certify The Web and the rest work the day it
+// ships.
+//
+// It is a TRANSLATION and not a second implementation. /update decodes a
+// different body, labels the interaction with its dialect, and answers with the
+// value; everything between is the same code /present runs, because the two
+// servers do the same thing. If this file ever grows a rule that applies to one
+// dialect and not the other, that is the signal they have diverged.
+//
+// Two things acme-dns has that we deliberately do not. Its /register is
+// UNAUTHENTICATED and mints an account and a subdomain on demand, which is the
+// precise shape this product's tenancy model exists to prevent — so it refuses
+// and says where credentials come from (design N3). And it has no withdrawal
+// operation at all, so a value published through /update is removed by
+// ChallengeLifetime and the sweeper rather than on a signal (design N4).
+//
+// The httpreq half, in detail:
 //
 // The body lego sends is {"fqdn": "...", "value": "gfj9Xq..."} — note the
 // trailing dot on the name.
@@ -189,6 +224,25 @@ func RegisterChallenge(ctx context.Context, e *echo.Echo, o ChallengeOptions) er
 		e.POST(prefix+"/present", h.present, auth, limit)
 		e.POST(prefix+"/cleanup", h.cleanup, auth, limit)
 	}
+
+	// The acme-dns dialect, at the paths its clients hard-code (design N1, N2).
+	//
+	// UNPREFIXED, and that is forced rather than chosen: cert-manager's acmeDNS
+	// solver, acme.sh, Posh-ACME, win-acme and lego's acme-dns provider all take
+	// a HOST and append /update themselves. There is no base-path setting to
+	// point at /acme/acme-dns, so a prefix would be a route no client can reach.
+	//
+	// Same middleware, same body limit, same everything: /update is a /present
+	// with a different spelling, and if it ever needs logic of its own that is
+	// the signal the two dialects have diverged (design N1).
+	e.POST("/update", h.update, auth, limit)
+
+	// And the one route that is deliberately NOT the protocol. It carries no
+	// authentication middleware because acme-dns's own /register carries none —
+	// a client calling it is unauthenticated by definition, and a 401 here would
+	// send its operator to look for credentials they are being told they cannot
+	// mint (design N3).
+	e.POST("/register", h.register, limit)
 	return nil
 }
 
@@ -316,6 +370,44 @@ func decodeChallenge(r *http.Request) (fqdn, value string, err error) {
 	return body.FQDN, body.Value, nil
 }
 
+// errBadUpdateBody is errBadBody's counterpart for the acme-dns dialect. Its own
+// message, because its own field names: telling an acme.sh operator that we
+// expected "fqdn" and "value" would send them to the wrong documentation.
+var errBadUpdateBody = echo.NewHTTPError(http.StatusBadRequest,
+	`expected a JSON body with non-empty string fields "subdomain" and "txt" (acme-dns protocol)`)
+
+// decodeUpdate reads the acme-dns body and rewrites it into the pair the rest of
+// this file already speaks.
+//
+// `subdomain` is acme-dns's name for the label under its zone that the
+// customer's CNAME points at, and that is exactly our alias label (design N6).
+// So the name handed on is `<label>.<zone>` — which findAlias resolves through
+// its in-zone branch, by label, landing on the SAME authorization check
+// /present lands on. That is the whole translation, and it is the reason there
+// is no second implementation: two spellings must not be two authorization
+// surfaces.
+func (h *challenge) decodeUpdate(r *http.Request) (fqdn, value string, err error) {
+	var body struct {
+		Subdomain string `json:"subdomain"`
+		TXT       string `json:"txt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return "", "", errBadUpdateBody
+	}
+	if body.Subdomain == "" || body.TXT == "" {
+		return "", "", errBadUpdateBody
+	}
+	// A subdomain carrying dots or a trailing dot is not a label and cannot name
+	// an alias. Refusing here rather than building a name that happens to match
+	// nothing keeps the 400 (a malformed request) distinct from the 403 (a name
+	// this key may not write), which is the difference between "fix your config"
+	// and "fix your grants".
+	if strings.ContainsAny(body.Subdomain, ".") {
+		return "", "", errBadUpdateBody
+	}
+	return body.Subdomain + "." + h.zone, body.TXT, nil
+}
+
 // resolved is the state both handlers share once the request has been validated
 // and authorized.
 type resolved struct {
@@ -339,12 +431,21 @@ const (
 	// formChallenge is the customer's own _acme-challenge.<domain> — the
 	// client left the aliasing to us.
 	formChallenge = "challenge"
+	// formAcmeDNS is the acme-dns dialect: the client sent a bare `subdomain`,
+	// which is our alias label, and never sends anything else.
+	//
+	// It is a third value of the SAME field rather than a column of its own, and
+	// the reason is that the field already means "which spelling the client
+	// sent". acme-dns is a third spelling. Recording it here is also what stops a
+	// publication with no withdrawal from being reported as abandoned — see
+	// store.AbandonStaleInteractions, which is the one place that reads it back.
+	formAcmeDNS = "acme-dns"
 )
 
 // resolve validates the body, normalizes the name, resolves it to an alias and
 // checks that the alias belongs to the load balancer the presented key is scoped to.
 // Authorization is positive: the alias must exist AND be ours to write to.
-func (h *challenge) resolve(c echo.Context, action string) (*resolved, error) {
+func (h *challenge) resolve(c echo.Context, action string, decode func(*http.Request) (string, string, error)) (*resolved, error) {
 	ctx := c.Request().Context()
 
 	key := apikey.FromContext(c)
@@ -355,7 +456,7 @@ func (h *challenge) resolve(c echo.Context, action string) (*resolved, error) {
 		return nil, echo.ErrUnauthorized
 	}
 
-	fqdn, value, err := decodeChallenge(c.Request())
+	fqdn, value, err := decode(c.Request())
 	if err != nil {
 		return nil, err
 	}
@@ -543,24 +644,100 @@ func (h *challenge) formLog(form string) *slog.Logger {
 }
 
 func (h *challenge) present(c echo.Context) error {
-	r, err := h.resolve(c, challengePublish)
+	r, err := h.resolve(c, challengePublish, decodeChallenge)
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
+	if err := h.publish(c, r); err != nil {
+		return err
+	}
+	return h.refreshed(c, r, obs.EventPublish, "published")
+}
 
-	// Present ADDS a value; it never displaces the alias's other values. A
-	// certificate covering example.com and *.example.com validates two
-	// authorizations at ONE challenge name and the CA expects to find both TXT
-	// values there at once. Repeating a value is an upsert on (alias_id, value),
-	// so idempotency comes from the unique constraint, not a read-then-write.
+// update is the acme-dns dialect of present (design N1, N2).
+//
+// Three lines of difference and no fourth: a different body decoder, a form
+// label, and a response carrying the value back. Everything between — resolve,
+// the account check, the tenancy comparison, the grant evaluation, the
+// activation gate, the write, the interaction record, the zone refresh — is the
+// same code, because the two servers do the same thing and there is no
+// impedance to absorb. If this function ever grows logic of its own, that is the
+// signal the two dialects have diverged rather than a feature.
+//
+// THERE IS NO /update COUNTERPART TO /cleanup, and there cannot be: acme-dns has
+// no withdrawal operation, so a client speaking it never tells us it is
+// finished. The value is withdrawn by ChallengeLifetime and the sweeper instead
+// (design N4). That is not a gap in this handler; it is the protocol.
+func (h *challenge) update(c echo.Context) error {
+	r, err := h.resolve(c, challengePublish, h.decodeUpdate)
+	if err != nil {
+		return err
+	}
+	// The form is overwritten rather than derived, because findAlias saw a name
+	// inside our zone and correctly called it the alias form. It is right about
+	// the spelling and wrong about the dialect, and the dialect is what the
+	// interaction history needs to know: an acme-dns publication that is never
+	// withdrawn is behaving exactly as specified, and a row that said "alias"
+	// would later be closed as abandoned.
+	r.form = formAcmeDNS
+	if err := h.publish(c, r); err != nil {
+		return err
+	}
+	if err := h.refresh(c, r, obs.EventPublish, "published"); err != nil {
+		return err
+	}
+	// The protocol's response, and clients do check it: acme-dns answers with
+	// the value it stored, which is how a client confirms the write landed
+	// rather than trusting a bare 200.
+	return c.JSON(http.StatusOK, map[string]string{"txt": r.value})
+}
+
+// register refuses, and the refusal is the feature (design N3).
+//
+// acme-dns's POST /register is UNAUTHENTICATED and creates an account and a
+// subdomain on demand. That is right for acme-dns, which is a single-purpose
+// daemon somebody runs for themselves. It is exactly wrong here: this service
+// has accounts that are bought, quotas that bound them, domains added
+// deliberately and an activation gate before any of it answers. An
+// unauthenticated endpoint that mints inventory is the precise shape
+// `tenancy-and-permissions` and `personal-and-team-accounts` exist to prevent,
+// and adding one for protocol fidelity would hand away the whole model to
+// satisfy a client that does not need it.
+//
+// A 404 WOULD BE WORSE THAN A REFUSAL, which is why this route exists at all.
+// A client that gets a 404 reports a wrong URL, and its operator goes looking
+// for a base path they mistyped. The truth is "that is not how credentials are
+// obtained here", and only a route can say it.
+//
+// Rejected: implementing it behind API-key authentication. A client that calls
+// /register calls it unauthenticated — that is what registration MEANS — so an
+// authenticated one is a route that exists only to be able to say it exists.
+func (h *challenge) register(c echo.Context) error {
+	obs.LogOutcome(c.Request().Context(), h.formLog(formAcmeDNS), obs.EventAuthzRefusal,
+		"", "", "", "acme-dns registration refused: credentials are issued by the console")
+	return echo.NewHTTPError(http.StatusForbidden,
+		"this service does not mint acme-dns registrations: accounts and domains are created "+
+			"deliberately, not by an unauthenticated call. Open the domain in the console and choose "+
+			"\"acme-dns credentials\" to get the username, password, fulldomain and subdomain this "+
+			"client expects. No /register call is needed — renewal only ever uses /update.")
+}
+
+// publish is the write both publication dialects share.
+//
+// Present ADDS a value; it never displaces the alias's other values. A
+// certificate covering example.com and *.example.com validates two
+// authorizations at ONE challenge name and the CA expects to find both TXT
+// values there at once. Repeating a value is an upsert on (alias_id, value), so
+// idempotency comes from the unique constraint, not a read-then-write.
+func (h *challenge) publish(c echo.Context, r *resolved) error {
+	ctx := c.Request().Context()
 	if _, err := store.Present(ctx, h.opts.DB, r.scope, r.alias.ID, r.value, r.key.Identifier, h.opts.Lifetime); err != nil {
 		h.opts.Log.ErrorContext(ctx, "challenge value not stored",
 			slog.String("key_id", r.key.Identifier), slog.String("fqdn", r.fqdn), slog.Any("error", err))
 		return errStorage
 	}
 	h.openInteraction(c, r)
-	return h.refreshed(c, r, obs.EventPublish, "published")
+	return nil
 }
 
 // openInteraction records the publication for the console's interaction history.
@@ -613,7 +790,7 @@ func (h *challenge) openInteraction(c echo.Context, r *resolved) {
 }
 
 func (h *challenge) cleanup(c echo.Context) error {
-	r, err := h.resolve(c, challengeWithdraw)
+	r, err := h.resolve(c, challengeWithdraw, decodeChallenge)
 	if err != nil {
 		return err
 	}
@@ -659,6 +836,17 @@ func (h *challenge) cleanup(c echo.Context) error {
 // caller is told the state it asked for is not in effect, and lego retries. Both
 // operations are idempotent, so a retry costs nothing.
 func (h *challenge) refreshed(c echo.Context, r *resolved, event, outcome string) error {
+	if err := h.refresh(c, r, event, outcome); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusOK)
+}
+
+// refresh is refreshed without the response, for the dialect that has a body to
+// write. The two are split rather than parameterized because the ORDER is the
+// contract: the view is replaced before anything is answered, whatever is
+// answered.
+func (h *challenge) refresh(c echo.Context, r *resolved, event, outcome string) error {
 	ctx := c.Request().Context()
 	if err := h.opts.View.Refresh(ctx); err != nil {
 		h.opts.Log.ErrorContext(ctx, "zone view not refreshed after challenge write",
@@ -666,5 +854,5 @@ func (h *challenge) refreshed(c echo.Context, r *resolved, event, outcome string
 		return errStorage
 	}
 	obs.LogOutcome(ctx, h.formLog(r.form), event, r.key.Identifier, r.fqdn, r.alias.Label, outcome)
-	return c.NoContent(http.StatusOK)
+	return nil
 }

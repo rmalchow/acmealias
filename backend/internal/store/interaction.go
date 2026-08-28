@@ -191,6 +191,24 @@ func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.O
 	return out, len(obs) - len(out), nil
 }
 
+// StaleClosure is what one sweep of the open interactions did, split by what the
+// rows MEAN rather than by how many were touched.
+//
+// The split exists because two protocols end a publication in two different
+// ways, and one number for both would have made the honest end look like the
+// broken one — see AbandonStaleInteractions.
+type StaleClosure struct {
+	// Abandoned is a client that should have withdrawn and did not.
+	Abandoned int64
+	// Validated is an acme-dns publication that expired on its timer having
+	// been queried: the certificate authority came and looked.
+	Validated int64
+	// Unqueried is an acme-dns publication that expired having never been
+	// queried, which is the same signal it is in any other dialect — suspect the
+	// customer's CNAME.
+	Unqueried int64
+}
+
 // AbandonStaleInteractions closes interactions whose challenge is gone without a
 // cleanup ever arriving.
 //
@@ -204,17 +222,61 @@ func AliasIDsByLabel(ctx context.Context, db *gorm.DB, obs map[string]queryobs.O
 // A row is stale once its publication is older than the challenge lifetime plus
 // a margin: past that point the value cannot still be answerable, so whatever
 // happened has happened.
-func AbandonStaleInteractions(ctx context.Context, db *gorm.DB, olderThan time.Duration) (int64, error) {
+//
+// AN ACME-DNS ROW IS CLOSED BUT NOT MARKED ABANDONED (design N4, task 5.2).
+// "Abandoned" means a client that should have withdrawn did not, and that cannot
+// be true of a protocol with no withdrawal operation: acme-dns has only
+// /update, so a client speaking it NEVER tells us it is finished, and expiring
+// on the timer is its normal and only ending. Marking those rows abandoned would
+// paint every correct acme-dns renewal red in the interaction history, and a
+// column that flags healthy behaviour as a fault is a column people learn to
+// ignore — taking the genuine abandonments down with it.
+//
+// So the distinction is made HERE, once, in the row's own flag, rather than in
+// the two places that derive an outcome from it (httpapi.outcomeOf and
+// reporting.outcomeOf). Both of those then keep working unchanged: an acme-dns
+// row closed here reads as `validated` when it was queried and `unqueried` when
+// it was not, which is exactly what it is.
+func AbandonStaleInteractions(ctx context.Context, db *gorm.DB, olderThan time.Duration) (StaleClosure, error) {
 	cutoff := time.Now().Add(-olderThan)
-	res := db.WithContext(ctx).
-		Model(&model.ChallengeInteraction{}).
-		Where("withdrawn_at IS NULL AND published_at < ?", cutoff).
-		Updates(map[string]any{"withdrawn_at": time.Now(), "abandoned": true})
-	if res.Error != nil {
-		return 0, fmt.Errorf("store: abandon stale interactions: %w", res.Error)
+	var out StaleClosure
+
+	// The acme-dns rows are counted before they are closed, because after the
+	// update they are indistinguishable from any other withdrawn row.
+	stale := func(tx *gorm.DB) *gorm.DB {
+		return tx.Model(&model.ChallengeInteraction{}).
+			Where("withdrawn_at IS NULL AND published_at < ?", cutoff)
 	}
-	return res.RowsAffected, nil
+	if err := stale(db.WithContext(ctx)).
+		Where("fqdn_form = ? AND query_count > 0", FormAcmeDNS).
+		Count(&out.Validated).Error; err != nil {
+		return StaleClosure{}, fmt.Errorf("store: count expired acme-dns interactions: %w", err)
+	}
+	if err := stale(db.WithContext(ctx)).
+		Where("fqdn_form = ? AND query_count = 0", FormAcmeDNS).
+		Count(&out.Unqueried).Error; err != nil {
+		return StaleClosure{}, fmt.Errorf("store: count expired acme-dns interactions: %w", err)
+	}
+
+	res := stale(db.WithContext(ctx)).
+		Updates(map[string]any{
+			"withdrawn_at": time.Now(),
+			// The flag is the expression, so the two kinds of ending are decided
+			// in the same statement that closes them and cannot drift apart.
+			"abandoned": gorm.Expr("fqdn_form <> ?", FormAcmeDNS),
+		})
+	if res.Error != nil {
+		return StaleClosure{}, fmt.Errorf("store: abandon stale interactions: %w", res.Error)
+	}
+	out.Abandoned = res.RowsAffected - out.Validated - out.Unqueried
+	return out, nil
 }
+
+// FormAcmeDNS is the challenge_interactions.fqdn_form value written by the
+// acme-dns dialect, named here because this package reads it back and
+// internal/httpapi writes it. It is a string on both sides and would otherwise
+// be a literal in two files that must agree.
+const FormAcmeDNS = "acme-dns"
 
 // DeleteOldClosedInteractions deletes CLOSED interactions (withdrawn_at IS NOT
 // NULL) whose withdrawal is older than olderThan. An OPEN interaction is never

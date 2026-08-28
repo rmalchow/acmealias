@@ -294,6 +294,13 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	acct.GET("/projects/:id/domains", a.listDomains)
 	acct.POST("/projects/:id/domains", a.createDomain)
 	acct.DELETE("/domains/:id", a.deleteDomain)
+	// The acme-dns credentials file for one domain (acme-dns-protocol N3).
+	//
+	// A POST because it CREATES a project key — the file carries a secret, and a
+	// secret is shown exactly once. It hangs off the DOMAIN rather than the
+	// project because the file names one alias, and a domain is what somebody is
+	// looking at when they set a client up.
+	acct.POST("/domains/:id/acme-dns", a.issueAcmeDNSCredentials)
 
 	acct.GET("/projects/:id/interactions", a.listInteractions)
 	// Keys, on the two screens their two kinds belong to (design K8). A PROJECT

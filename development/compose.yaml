@@ -606,6 +606,13 @@ services:
     environment:
       # lego posts challenges to our challenge API...
       HTTPREQ_ENDPOINT: "http://api:8080/"
+      # ...and, for the second resolver, does the same thing in the acme-dns
+      # dialect. Same host, same key; the credentials live in the storage file
+      # because that is where lego's acme-dns provider looks for them, and
+      # finding them there is what stops it calling the /register this service
+      # refuses (acme-dns-protocol design N3).
+      ACME_DNS_API_BASE: "http://api:8080"
+      ACME_DNS_STORAGE_PATH: "/data/acmedns.json"
       # ...and must trust pebble's throwaway CA to talk to it at all.
       # up.sh --acme copies this out of the pebble image.
       LEGO_CA_CERTIFICATES: /pebble/minica.pem

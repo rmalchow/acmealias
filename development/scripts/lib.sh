@@ -36,6 +36,13 @@ KEY_ENV="data/acme-key.env"
 ZONE_TMPL="dns/zones/example.com.zone.tmpl"
 ZONE_FILE="dns/zones/example.com.zone"
 
+# The acme-dns credentials file, which is the other half of proving BOTH
+# dialects work. lego reads it at ACME_DNS_STORAGE_PATH and, finding an account
+# for the domain, never calls /register — which this service refuses on purpose.
+# Written by seed.sh from the same key it hands traefik-lb for httpreq; a key is
+# a key, and the two protocols differ only in how it is spelled on the wire.
+ACMEDNS_STORE="data/traefik_lb/acmedns.json"
+
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror\033[0m %s\n' "$*" >&2; exit 1; }
@@ -77,6 +84,16 @@ HTTPREQ_PASSWORD=
 EOF
 }
 ensure_key_env
+
+# lego reads the storage file at startup. An empty object is a file it loads
+# happily; a MISSING one is fine too, but then a first issuance would try to
+# register — and this service answers 403 to that, deliberately, so the failure
+# would look like a bug in the endpoint rather than an unseeded stack.
+ensure_acmedns_store() {
+  mkdir -p "$DEV_DIR/data/traefik_lb"
+  [ -f "$DEV_DIR/$ACMEDNS_STORE" ] || printf '{}\n' >"$DEV_DIR/$ACMEDNS_STORE"
+}
+ensure_acmedns_store
 
 # render_zone [record-line...] — write the served zone from the template,
 # replacing the @@CHALLENGE_DELEGATION@@ marker with the given records (one

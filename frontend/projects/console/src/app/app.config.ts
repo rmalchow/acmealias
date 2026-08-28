@@ -24,6 +24,7 @@ import {
   DownOutline,
   DownloadOutline,
   FilterOutline,
+  KeyOutline,
   LoginOutline,
   LogoutOutline,
   PlusOutline,
@@ -71,6 +72,9 @@ export const appConfig: ApplicationConfig = {
       DownOutline,
       DownloadOutline,
       FilterOutline,
+      // The domain row's "acme-dns credentials" action, which is the one place a key is minted
+      // from a screen that is not the key panel.
+      KeyOutline,
       // The signed-out screen's one control.
       LoginOutline,
       LogoutOutline,

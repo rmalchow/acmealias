@@ -234,9 +234,16 @@ export class InteractionsPanelComponent implements OnChanges {
   }
 
   formHint(i: Interaction): string {
-    return i.fqdnForm === 'alias'
-      ? 'The client followed the customer CNAME and sent our alias name.'
-      : 'The client sent the customer’s own _acme-challenge name and left the aliasing to us.';
+    switch (i.fqdnForm) {
+      case 'alias':
+        return 'The client followed the customer CNAME and sent our alias name.';
+      case 'acme-dns':
+        // Worth spelling out, because the row will end differently from the others and somebody
+        // reading the column should know why before they go looking for a bug.
+        return 'The client spoke the acme-dns protocol, which names the alias by its label. It has no withdrawal operation, so this value expires on its own rather than being cleaned up.';
+      default:
+        return 'The client sent the customer’s own _acme-challenge name and left the aliasing to us.';
+    }
   }
 
   outcomeColour(outcome: Interaction['outcome']): string {
@@ -255,7 +262,7 @@ export class InteractionsPanelComponent implements OnChanges {
   outcomeHint(outcome: Interaction['outcome']): string {
     switch (outcome) {
       case 'validated':
-        return 'Published, queried by the CA, then withdrawn — a normal validation.';
+        return 'Published, queried by the CA, then withdrawn — a normal validation. An acme-dns client withdraws nothing, so for those it means the value expired after being queried, which is the same good ending.';
       case 'unqueried':
         return 'Published and withdrawn without ever being queried. The customer’s _acme-challenge CNAME is the first thing to check.';
       case 'live':

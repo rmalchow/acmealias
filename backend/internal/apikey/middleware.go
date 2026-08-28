@@ -52,8 +52,9 @@ var errUnauthorized = echo.NewHTTPError(http.StatusUnauthorized, "invalid creden
 
 // Middleware authenticates a request from an API key presented as HTTP Basic
 // credentials (identifier as username, secret as password — this is what lego's
-// httpreq provider sends), as `Authorization: Bearer <identifier>.<secret>`, or
-// as `X-API-Key: <identifier>.<secret>`.
+// httpreq provider sends), as `Authorization: Bearer <identifier>.<secret>`, as
+// `X-API-Key: <identifier>.<secret>`, or as the acme-dns pair `X-Api-User` and
+// `X-Api-Key`.
 func Middleware(opts Options) echo.MiddlewareFunc {
 	log := opts.Logger
 	if log == nil {
@@ -96,14 +97,36 @@ func Middleware(opts Options) echo.MiddlewareFunc {
 	}
 }
 
-// credentials pulls an identifier/secret pair out of whichever of the three
+// credentials pulls an identifier/secret pair out of whichever of the four
 // accepted transports the request used.
+//
+// THE ACME-DNS PAIR IS CHECKED BY ITS USER HEADER, and that ordering is the
+// whole of the collision handling. acme-dns sends `X-Api-User: <username>` and
+// `X-Api-Key: <password>` — two headers, each half of the pair — while this
+// service's own third form sends `X-API-Key: <identifier>.<secret>`, one header
+// carrying both. HTTP header names are case-insensitive, so those two are the
+// SAME HEADER with two different meanings, and something has to tell them apart.
+//
+// The presence of X-Api-User does, unambiguously: nothing but an acme-dns client
+// sends it, and a caller using our own form sends no user header at all. So a
+// request carrying X-Api-User is read as the acme-dns pair and a request without
+// one falls through to the dotted form, which is what every existing caller
+// sends and which keeps working byte for byte.
+//
+// This is deliberately NOT gated on which route was hit. A credential is a
+// credential, the grant model underneath is identical either way (design N5),
+// and a middleware that authenticated differently per path would be the first
+// step towards two authentication surfaces.
 func credentials(r *http.Request) (identifier, secret string, ok bool) {
 	if id, sec, basic := r.BasicAuth(); basic {
 		return id, sec, id != "" && sec != ""
 	}
 	if raw, found := strings.CutPrefix(r.Header.Get(echo.HeaderAuthorization), "Bearer "); found {
 		return splitToken(raw)
+	}
+	if user := r.Header.Get("X-Api-User"); user != "" {
+		pass := r.Header.Get("X-Api-Key")
+		return user, pass, pass != ""
 	}
 	if raw := r.Header.Get("X-API-Key"); raw != "" {
 		return splitToken(raw)

@@ -17,6 +17,29 @@ info:
     the number of rows the caller MAY SEE that match the filter — not the number in the table —
     because a total counting invisible rows would leak their existence through a number.
 
+    ## Publishing challenge values
+
+    This document describes the management API only. Publishing a challenge value happens on a
+    separate, unversioned surface, because it is spoken by ACME clients rather than by programs
+    written against this contract, and those clients decide the spelling:
+
+      POST /present, POST /cleanup   lego's httpreq protocol, also served under /acme/httpreq
+      POST /update                   the acme-dns protocol
+
+    Both authenticate with the same API keys as this API. `/update` takes
+    `{"subdomain": "<alias label>", "txt": "<value>"}` with `X-Api-User` and `X-Api-Key`, and
+    answers `{"txt": "<value>"}`; it publishes exactly what `/present` publishes, subject to
+    exactly the same grants.
+
+    `POST /register`, which acme-dns defines as an unauthenticated call that creates an account
+    and a subdomain, is deliberately NOT implemented — it exists only to refuse and to say where
+    credentials come from. Clients never need it: registration in acme-dns is a one-time bootstrap
+    whose output is a credentials file, renewal only ever calls `/update`, and that file is
+    produced by POST /accounts/{accountId}/domains/{id}/acme-dns below.
+
+    acme-dns has no withdrawal operation, so a value published through `/update` is removed when
+    its lifetime expires rather than on a signal from the client.
+
 servers:
   - url: /api/v1
 
@@ -291,6 +314,42 @@ components:
         disabledAt: { type: string, format: date-time, nullable: true }
         active: { type: boolean }
 
+    AcmeDnsIssued:
+      type: object
+      description: |
+        The credentials file, the key it belongs to, and the record the customer publishes.
+
+        The four field names inside `credentials` are acme-dns's and are not ours to tidy:
+        cert-manager unmarshals a Kubernetes Secret into exactly them, and so do acme.sh, win-acme
+        and the rest. `username` and `password` are the key's identifier and secret, sent as
+        `X-Api-User` and `X-Api-Key`; `fulldomain` is the name the customer's CNAME points at; and
+        `subdomain` is its first label, which is what `POST /update` names in its body.
+
+        acme-dns's own file also carries `allowfrom`. It is omitted: clients ignore it, and this
+        service's equivalent is the key's own address restrictions, which are shown on the key.
+      properties:
+        credentials:
+          type: object
+          properties:
+            username: { type: string }
+            password: { type: string }
+            fulldomain: { type: string }
+            subdomain: { type: string }
+        domain:
+          type: string
+          description: |
+            The domain these credentials are for. It is here because there is no single acme-dns
+            credentials FILE format: lego, Traefik, cert-manager and certbot's plugin read a JSON
+            object keyed by domain; win-acme and Certify The Web read a flat object in a file named
+            for the domain; Posh-ACME reads a positional four-element array keyed by
+            `_acme-challenge.<domain>`. The four fields above are the same in every one of them,
+            so a client of this API composes the wrapper its target expects.
+        key: { $ref: "#/components/schemas/ApiKey" }
+        notice: { type: string }
+        cname:
+          type: string
+          description: The record the customer publishes, in zone-file form.
+
   responses:
     NoAccountSelected:
       description: |
@@ -508,6 +567,31 @@ paths:
       summary: Remove a domain, and its alias if nothing else uses it
       responses:
         "200": { description: Deleted }
+
+  /accounts/{accountId}/domains/{id}/acme-dns:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    post:
+      summary: Issue acme-dns credentials for this domain
+      description: |
+        Creates a project key and answers with the credentials file acme-dns clients read. This is
+        what replaces acme-dns's unauthenticated `POST /register`: the same four fields, produced
+        deliberately by somebody who is already authorized, rather than minted on demand by anyone
+        who can reach the service.
+
+        The secret is in this response and nowhere else, ever. Calling this twice produces two
+        keys, which is correct — each is revocable on its own, and rotating a client's credentials
+        is issuing a second file and then revoking the first.
+
+        `restrictToNodes` limits the key to the addresses configured on the domain's project's
+        nodes, resolved when a request arrives.
+      responses:
+        "201":
+          description: Created — the secret is in this response and nowhere else, ever
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcmeDnsIssued" }
 
   /accounts/{accountId}/projects/{id}/keys:
     parameters:

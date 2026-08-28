@@ -67,13 +67,29 @@ func Sweep(ctx context.Context, db *gorm.DB, interactionRetention time.Duration,
 	// publication as still in flight forever. The margin over the challenge
 	// lifetime is deliberate: a row is only stale once its value could not
 	// possibly still be answerable.
-	abandoned, err := store.AbandonStaleInteractions(ctx, db, interactionStaleAfter)
+	//
+	// The three counters, and why one would have been wrong: an acme-dns
+	// publication has no withdrawal in its protocol, so expiring on this timer is
+	// its NORMAL ending rather than an abandonment (design N4). Those rows are
+	// counted as what they are, which is also where the validated/unqueried
+	// increments for that dialect come from — /cleanup is where the httpreq ones
+	// are made, and an acme-dns client never calls it.
+	closed, err := store.AbandonStaleInteractions(ctx, db, interactionStaleAfter)
 	if err != nil {
 		log.Error("stale interactions not closed", "error", err)
 		return
 	}
-	if m != nil && abandoned > 0 {
-		m.ChallengeInteractions.WithLabelValues(obs.OutcomeAbandoned).Add(float64(abandoned))
+	abandoned := closed.Abandoned
+	if m != nil {
+		for outcome, n := range map[string]int64{
+			obs.OutcomeAbandoned: closed.Abandoned,
+			obs.OutcomeValidated: closed.Validated,
+			obs.OutcomeUnqueried: closed.Unqueried,
+		} {
+			if n > 0 {
+				m.ChallengeInteractions.WithLabelValues(outcome).Add(float64(n))
+			}
+		}
 	}
 
 	// Retention: delete CLOSED interactions past the configured age. A no-op

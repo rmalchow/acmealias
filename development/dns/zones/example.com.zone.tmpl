@@ -33,6 +33,12 @@ ns  IN A   172.28.0.53
 demo    IN A 172.28.0.30
 *.demo  IN A 172.28.0.30
 
+; The second dialect's name. traefik-lb serves this one through a certificate it
+; obtained over the ACME-DNS protocol rather than lego's httpreq, from the same
+; Traefik and the same API key — which is the whole of acme-dns-protocol task
+; 6.1. It is a separate name only because two routers cannot share a Host rule.
+alt     IN A 172.28.0.30
+
 ; The one record the whole design turns on. `demo.example.com` and
 ; `*.demo.example.com` are two domain rows sharing ONE challenge name, hence
 ; ONE alias, hence ONE CNAME — a certificate covering both validates two

@@ -8,7 +8,7 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzMessageService } from 'ng-zorro-antd/message';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAAStatus, CAN_WRITE, CheckResult, DNSPlan, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
+import { ApiService, CAAStatus, CAN_WRITE, CAN_WRITE_KEYS, CheckResult, DNSPlan, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
@@ -16,6 +16,7 @@ import { InteractionsPanelComponent } from './interactions-panel.component';
 import { openNodeCreateModal } from './node-create.modal';
 import { openNodeEditModal } from './node-edit.modal';
 import { openDomainHelpModal } from './domain-help.modal';
+import { openAcmeDnsCredentialsModal } from '../domains/acmedns-credentials.modal';
 import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } from './domain-status';
 
 /**
@@ -225,6 +226,23 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
                 }
               </td>
               <td class="row-actions">
+                <!--
+                  What acme-dns's unauthenticated POST /register does elsewhere, done here by
+                  somebody who is already authorized. It mints a key, so it is gated on the same
+                  permission the key panel is, not on the one that reads this table.
+                -->
+                <button
+                  nz-button
+                  nzType="text"
+                  nzSize="small"
+                  [disabled]="!canWriteKeys()"
+                  nz-tooltip
+                  [nzTooltipTitle]="canWriteKeys() ? 'acme-dns credentials for this domain' : NOT_PERMITTED"
+                  aria-label="acme-dns credentials"
+                  (click)="acmeDnsCredentials(d)"
+                >
+                  <span nz-icon nzType="key"></span>
+                </button>
                 <button
                   nz-button
                   nzType="text"
@@ -430,6 +448,12 @@ export class ProjectDetailComponent implements OnChanges {
    * rather than a set of buttons that turn out to be refused.
    */
   readonly canWrite = computed(() => may(this.project(), CAN_WRITE));
+  /**
+   * Minting an acme-dns credentials file mints a KEY, so it is gated on the key permission and
+   * not on the one that edits the inventory. They differ: KEY_ROTATION rotates secrets and may
+   * not add a domain, and the whole point of that role is that the two are separable.
+   */
+  readonly canWriteKeys = computed(() => may(this.project(), CAN_WRITE_KEYS));
   protected readonly NOT_PERMITTED = NOT_PERMITTED;
 
   readonly subtitle = () => {
@@ -730,6 +754,18 @@ export class ProjectDetailComponent implements OnChanges {
       },
       error: (err) => this.error.set(apiErrorMessage(err)),
     });
+  }
+
+  /**
+   * The credentials an acme-dns client reads, for one domain.
+   *
+   * It reloads afterwards because the key it created shows up in this project's key panel — the
+   * file is not the only record of it, and somebody who loses the file revokes the key rather
+   * than being stuck with a credential they cannot see.
+   */
+  acmeDnsCredentials(d: Domain): void {
+    openAcmeDnsCredentialsModal(this.modal, { domain: d, nodes: this.project()?.nodes ?? [] })
+      .afterClose.subscribe(() => this.load());
   }
 
   async deleteDomain(d: Domain): Promise<void> {

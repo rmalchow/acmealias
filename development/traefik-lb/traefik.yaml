@@ -29,6 +29,28 @@ certificatesResolvers:
         # _acme-challenge CNAME into our zone. An IP, because lego wants one.
         resolvers: ["172.28.0.53:53"]
 
+  # THE SECOND DIALECT, in the same Traefik and against the same challenge API.
+  #
+  # `acme-dns` is lego's provider for the acme-dns protocol, and it is what
+  # cert-manager, acme.sh, win-acme, Posh-ACME and Certify The Web all speak. The
+  # rig runs both resolvers side by side because the claim under test is not
+  # "acme-dns works" but "BOTH dialects work, at once, from one key" — a
+  # translation that quietly diverged would still pass a test of either alone.
+  #
+  # ACME_DNS_STORAGE_PATH is the registration, placed by seed.sh. It is not an
+  # optimisation: lego calls POST /register for any domain it cannot find in
+  # that file, and this service refuses registration deliberately (design N3) —
+  # so an unseeded run fails with "failed to register account", which is the
+  # right failure and a confusing one to meet by accident.
+  pebble-acmedns:
+    acme:
+      email: dev@example.com
+      storage: /data/acme-acmedns.json
+      caServer: https://pebble:14000/dir
+      dnsChallenge:
+        provider: acme-dns
+        resolvers: ["172.28.0.53:53"]
+
 log:
   level: INFO
 

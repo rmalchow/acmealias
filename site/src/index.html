@@ -103,10 +103,11 @@
             <p class="kicker">Integrate</p>
             <h2>Works with what you use</h2>
             <p>
-              The challenge API implements <a href="https://go-acme.github.io/lego/dns/httpreq/">lego's
-              <code>httpreq</code> protocol</a> — <strong>Traefik</strong> needs one provider line and
-              no plugin. <a href="https://github.com/joohoi/acme-dns">acme-dns</a> is next, the dialect
-              cert-manager, acme.sh and certbot already speak.
+              The challenge API speaks two protocols: <a href="https://go-acme.github.io/lego/dns/httpreq/">lego's
+              <code>httpreq</code></a>, which <strong>Traefik</strong> configures in one line, and
+              <a href="https://github.com/joohoi/acme-dns">acme-dns</a>, which cert-manager, acme.sh,
+              win-acme, Posh-ACME and Certify The Web already speak. No webhook, no plugin to install
+              for those — you paste a credentials file the console gives you.
             </p>
           </li>
           <li>
@@ -141,20 +142,40 @@
         guidelines and go in src/brand/clients/; this list becomes <img>s without the layout moving.
 
         =========================================================================================
-        THIS LIST IS AHEAD OF THE CODE. Traefik and lego work today, through lego's httpreq
-        protocol. The other seven need the acme-dns dialect, which is the `acme-dns-protocol` change
-        and is sequenced at 11 - BEFORE the first customers, which is what makes writing the claim
-        now safe and leaving it unchecked not.
+        THIS LIST WAS AHEAD OF THE CODE AND NO LONGER IS. `acme-dns-protocol` shipped the /update
+        endpoint, and task 7.1 was to verify every name here against the client's own source rather
+        than against its marketing. Two of the nine did not survive that unqualified and are now
+        footnoted rather than quietly left standing:
 
-        `acme-dns-protocol` task 7.1 is what closes this: the site already says these work, so that
-        change is what makes it true. If the sequence is ever reordered so strangers reach this page
-        first, this list has to be split back into what works and what is coming.
+          certbot  ships NO acme-dns authenticator. It needs a third-party plugin, and only one of
+                   them — certbot-dns-acmedns — refrains from calling /register, which we refuse.
+                   The panel names it. It used to promise "the console gives you the script", which
+                   was a script we do not ship.
+          Caddy    has no acme-dns module in the stock binary. caddy-dns/acmedns is an xcaddy build.
+                   The panel says so.
+
+        Every other client is built in and needs nothing installed — but ALL of them, certbot and
+        Caddy included, work only because the credentials file is placed BEFORE the first run.
+        Left to themselves, lego, Traefik, acme.sh, win-acme, Posh-ACME and Certify The Web try to
+        register when they find no credentials, and this service refuses that deliberately (design
+        N3). That is the one sentence that has to survive every edit to this section, which is why
+        it is stated above the tabs and not only inside them.
+
+        Two client-specific details this page must not break, both from source:
+          - acme.sh greps the /update response for the quoted value. Our 200 {"txt": "..."} is what
+            satisfies it; a 204 or an empty body would break acme.sh and nothing else.
+          - libdns (Caddy) insists on status exactly 200, not 201 or 204.
         =========================================================================================
       -->
       <section class="clients">
         <h2>Your client, configured once</h2>
         <p class="section-lede">
           The challenge is the only part that touches us, and in every one of these it is a few lines.
+        </p>
+        <p class="section-lede">
+          For the acme-dns clients, place the credentials file the console gives you <strong>before
+          the client's first run</strong>. Left to themselves most of them try to register a new
+          account, and we do not mint those — accounts and domains are created deliberately here.
         </p>
 
         <div class="tabs">
@@ -201,11 +222,21 @@
           key: acmedns.json</pre></div>
           </div>
           <div role="tabpanel" id="panel-certbot" aria-labelledby="tab-certbot" hidden>
-            <p>certbot reaches us through an auth hook — the console gives you the script.</p>
-            <div class="term"><pre>certbot certonly \
-  --preferred-challenges dns \
-  --manual-auth-hook /etc/acmealias/present \
-  -d shop.example.com</pre></div>
+            <p>
+              certbot ships no acme-dns authenticator, so this one needs a plugin:
+              <a href="https://github.com/pan-net-security/certbot-dns-acmedns"><code>certbot-dns-acmedns</code></a>.
+              It is the one that reads a registration file and never tries to register.
+            </p>
+            <div class="term"><pre>pip install certbot-dns-acmedns
+
+certbot certonly \
+  --authenticator certbot-dns-acmedns:dns-acmedns \
+  --certbot-dns-acmedns:dns-acmedns-credentials /etc/acmealias/certbot.ini \
+  -d shop.example.com
+
+# certbot.ini points at the credentials file from the console:
+#   certbot_dns_acmedns:dns_acmedns_api_url = https://api.acmealias.com
+#   certbot_dns_acmedns:dns_acmedns_registration_file = /etc/acmealias/acmedns.json</pre></div>
           </div>
           <div role="tabpanel" id="panel-acme-sh" aria-labelledby="tab-acme-sh" hidden>
             <p>Four environment variables from the credentials file, then issue as usual.</p>
@@ -216,13 +247,25 @@ export ACMEDNS_SUBDOMAIN="shop-example-com"
 acme.sh --issue --dns dns_acmedns -d shop.example.com</pre></div>
           </div>
           <div role="tabpanel" id="panel-lego" aria-labelledby="tab-lego" hidden>
-            <p>The same provider Traefik uses, because Traefik is lego underneath.</p>
+            <p>
+              The same provider Traefik uses, because Traefik is lego underneath. Either protocol
+              works; <code>httpreq</code> needs no file on disk.
+            </p>
             <div class="term"><pre>HTTPREQ_ENDPOINT=https://api.acmealias.com/ \
 HTTPREQ_USERNAME=... HTTPREQ_PASSWORD=... \
-lego --dns httpreq -d shop.example.com run</pre></div>
+lego --dns httpreq -d shop.example.com run
+
+# or acme-dns, with the credentials file placed first:
+ACME_DNS_API_BASE=https://api.acmealias.com \
+ACME_DNS_STORAGE_PATH=/etc/acmealias/acmedns.json \
+lego --dns acme-dns -d shop.example.com run</pre></div>
           </div>
           <div role="tabpanel" id="panel-caddy" aria-labelledby="tab-caddy" hidden>
-            <p>One tls block, using Caddy's acmedns DNS module.</p>
+            <p>
+              Caddy needs a custom build — the acmedns module is not in the stock binary:
+              <code>xcaddy build --with github.com/caddy-dns/acmedns</code>. After that it is one
+              tls block.
+            </p>
             <div class="term"><pre>tls {
   dns acmedns {
     server_url https://api.acmealias.com
@@ -233,13 +276,27 @@ lego --dns httpreq -d shop.example.com run</pre></div>
 }</pre></div>
           </div>
           <div role="tabpanel" id="panel-win-acme" aria-labelledby="tab-win-acme" hidden>
-            <p>Choose <strong>acme-dns</strong> as the validation method and give it the credentials from the console. win-acme remembers them for every renewal.</p>
+            <p>
+              The <strong>acme-dns</strong> validation plugin is built in. Save the credentials from
+              the console as <code>&lt;domain&gt;.json</code> in win-acme's <code>acme-dns</code>
+              folder before the first run — an unattended run with no stored registration fails
+              rather than registering. After that it remembers them for every renewal.
+            </p>
           </div>
           <div role="tabpanel" id="panel-posh-acme" aria-labelledby="tab-posh-acme" hidden>
-            <p>The <strong>AcmeDns</strong> plugin ships with Posh-ACME. Point it at the endpoint and pass the credentials from the console.</p>
+            <p>
+              The <strong>AcmeDns</strong> plugin ships with Posh-ACME. Its credentials are shaped
+              differently from everyone else's — a positional array keyed by the challenge name —
+              and the console emits exactly that, so paste it into <code>-ACMERegistration</code>
+              and set <code>-DnsAlias</code> to the <code>fulldomain</code>.
+            </p>
           </div>
           <div role="tabpanel" id="panel-certify" aria-labelledby="tab-certify" hidden>
-            <p>Add <strong>acme-dns</strong> as a credential in the UI, paste what the console gave you, and pick it on the certificate.</p>
+            <p>
+              The <strong>acme-dns</strong> provider is built in. Add it as a credential, paste what
+              the console gave you into its credentials JSON, and pick it on the certificate — with
+              that filled in it never tries to register.
+            </p>
           </div>
           </div>
         </div>

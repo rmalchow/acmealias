@@ -159,6 +159,17 @@ func KeyCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Writer, 
 	}
 
 	if describedFor != "" {
+		// SOMETHING PARSES THIS LINE. development/scripts/seed.sh reads the
+		// identifier back out of it with sed, because the secret is printed
+		// exactly once and there is no second chance to read it — so a failed
+		// parse is not a cosmetic bug, it is a minted credential nobody can ever
+		// use and a development stack that comes up with no key at all.
+		//
+		// It happened: this line said "created api key" and became "created
+		// project api key" when keys acquired kinds, and the seed's pattern was
+		// anchored on the old phrase. The seed now matches on the quoted
+		// identifier instead, which is the durable half. Keep `api key "<id>"`
+		// intact anyway — it is the shape anything else parsing this will find.
 		fmt.Fprintf(out, "created project api key %q (id %s) for project %q: %s\n", k.Identifier, k.ID, describedFor, note)
 	} else {
 		fmt.Fprintf(out, "created api key %q (id %s): %s\n", k.Identifier, k.ID, note)

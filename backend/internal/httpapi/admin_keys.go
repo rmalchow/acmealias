@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -364,6 +365,20 @@ func impliedGrants(k *model.APIKey) []store.Grant {
 // kind hangs off — everything except the identifier and the digest, which only
 // apikey.New can produce.
 func (a *admin) mint(c echo.Context, k *model.APIKey, note string, networks []string, expires *time.Time, action string) error {
+	return a.mintWith(c, k, note, networks, expires, action, func(v keyView, secret string) any {
+		return keyCreated{Key: v, Secret: secret, Notice: secretNotice}
+	})
+}
+
+// mintFor is mint for a caller that answers with something other than
+// keyCreated. The action is always key.create: whatever the response looks like,
+// what happened is that a key was created, and an audit trail that said
+// otherwise would be describing the SCREEN rather than the event.
+func (a *admin) mintFor(c echo.Context, k *model.APIKey, note string, networks []string, expires *time.Time, respond func(keyView, string) any) error {
+	return a.mintWith(c, k, note, networks, expires, authz.ActionKeyCreate, respond)
+}
+
+func (a *admin) mintWith(c echo.Context, k *model.APIKey, note string, networks []string, expires *time.Time, action string, respond func(keyView, string) any) error {
 	ctx := c.Request().Context()
 	sc, err := a.scope(c)
 	if err != nil {
@@ -409,7 +424,7 @@ func (a *admin) mint(c echo.Context, k *model.APIKey, note string, networks []st
 	}); err != nil {
 		return err
 	}
-	return c.JSON(http.StatusCreated, keyCreated{Key: v, Secret: secret, Notice: secretNotice})
+	return c.JSON(http.StatusCreated, respond(v, secret))
 }
 
 // restrictKey replaces a key's source-address restrictions wholesale. An
@@ -613,4 +628,135 @@ func parseExpiry(in string) (*time.Time, error) {
 	}
 	t := time.Now().UTC().Add(d)
 	return &t, nil
+}
+
+// --- acme-dns credentials ---------------------------------------------------
+
+// acmeDNSCredentials is the file every acme-dns client reads, in the field names
+// they read it by (design N3, task 4.3).
+//
+// The names are not ours and must not be tidied. cert-manager's acmeDNS solver
+// unmarshals a Kubernetes Secret into exactly these four keys, acme.sh's
+// `dns_acmedns` reads the same four, and a Secret is not somewhere a person
+// notices a typo — a near-miss here fails at renewal time, weeks later, inside a
+// cluster.
+//
+//	username    the API key's identifier, sent as X-Api-User
+//	password    its secret, sent as X-Api-Key
+//	fulldomain  the name the customer's CNAME points AT — our alias, in our zone
+//	subdomain   just the label, which is what /update names in its body
+//
+// acme-dns's own file also carries `allowfrom`, which is its per-registration
+// CIDR list. It is omitted deliberately: clients ignore it (it is a server-side
+// property they cannot change), and our equivalent is the key's own address
+// restrictions, which are shown on the key rather than pasted into a Secret
+// nobody re-reads.
+type acmeDNSCredentials struct {
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	FullDomain string `json:"fulldomain"`
+	Subdomain  string `json:"subdomain"`
+}
+
+// acmeDNSIssued is what the console renders once and never again.
+//
+// It carries the credentials file AND the key view, because they answer two
+// different questions: the file is what gets pasted into a client, and the key
+// is the thing that will appear in the project's key list afterwards and can be
+// revoked. Handing back only the file would leave somebody holding a secret with
+// no way to find the row it belongs to.
+type acmeDNSIssued struct {
+	Credentials acmeDNSCredentials `json:"credentials"`
+	// Domain is the name the credentials are for, and it is on the wire because
+	// HALF THE CLIENTS KEY THE FILE BY IT. There is no single acme-dns
+	// credentials format: lego, Traefik, cert-manager and certbot's plugin read
+	// a JSON object keyed by domain; win-acme and Certify The Web read a flat
+	// object in a file named for the domain; Posh-ACME reads a positional
+	// four-element array keyed by `_acme-challenge.<domain>`. The four FIELDS are
+	// the same in all of them, so the service answers with the fields and the
+	// console wraps them per client — which is why the domain has to come along.
+	Domain string  `json:"domain"`
+	Key    keyView `json:"key"`
+	Notice string  `json:"notice"`
+	// CNAME is the record the customer publishes, repeated here because this is
+	// the screen somebody is on when they set a client up, and it is the other
+	// half of making that client work. It is the same record the DNS plan shows.
+	CNAME string `json:"cname"`
+}
+
+// issueAcmeDNSCredentials mints a project key for a domain's project and answers
+// with the acme-dns credentials file built from it.
+//
+// WHY THIS IS ONE ROUTE AND NOT TWO. The console could mint a key and assemble
+// the file itself — it has the label, and the zone is on the DNS plan. It would
+// then be the console's job to concatenate a hostname correctly, and to keep
+// doing so, for a file whose whole failure mode is a near-miss discovered weeks
+// later. The service knows the zone it is authoritative for; it should be the
+// one that writes the name down.
+//
+// The key is a PROJECT key (api-key-kinds K1): bound to the domain's project by
+// a foreign key, holding that project's challenge answering and nothing else,
+// and deleted with the project. This is the whole reason that change sits before
+// this one — a credentials file handing out a key assembled by hand out of the
+// grant grammar is the file somebody pastes into a Kubernetes Secret and never
+// looks at again.
+//
+// It is a POST because it CREATES a credential. Somebody who opens this screen
+// twice has two keys, which is correct and is what the key list is for; making
+// it a GET would either mean storing the secret or answering a different secret
+// each time to a verb that promises neither.
+func (a *admin) issueAcmeDNSCredentials(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	domainID, err := idParam(c, "id")
+	if err != nil {
+		return err
+	}
+	var body struct {
+		Note            string `json:"note"`
+		RestrictToNodes bool   `json:"restrictToNodes"`
+		ExpiresIn       string `json:"expiresIn"`
+	}
+	if err := bind(c, &body); err != nil {
+		return err
+	}
+	expires, err := parseExpiry(body.ExpiresIn)
+	if err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	d, err := store.GetDomain(ctx, a.db(), sc, domainID)
+	if err != nil {
+		return err
+	}
+	al, err := store.GetAlias(ctx, a.db(), sc, d.AliasID)
+	if err != nil {
+		return err
+	}
+	if body.Note == "" {
+		body.Note = "acme-dns for " + d.Name
+	}
+
+	zone := strings.TrimSuffix(a.opts.Config.Zone, ".")
+	k := &model.APIKey{
+		Kind: model.APIKeyKindProject, ProjectID: &d.ProjectID,
+		RestrictToProjectNodes: body.RestrictToNodes,
+	}
+	return a.mintFor(c, k, body.Note, nil, expires, func(v keyView, secret string) any {
+		return acmeDNSIssued{
+			Credentials: acmeDNSCredentials{
+				Username:   v.Identifier,
+				Password:   secret,
+				FullDomain: al.Label + "." + zone,
+				Subdomain:  al.Label,
+			},
+			Domain: d.Name,
+			Key:    v,
+			Notice: secretNotice,
+			CNAME:  al.ChallengeFQDN + ". IN CNAME " + al.Label + "." + zone + ".",
+		}
+	})
 }

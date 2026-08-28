@@ -15,6 +15,16 @@ http:
           - main: "demo.example.com"
             sans: ["*.demo.example.com"]
 
+    # The same backend, reached over a certificate obtained through the OTHER
+    # dialect. One name, no wildcard: what is under test here is the protocol,
+    # and the wildcard case is already covered by the router above.
+    whoami-acmedns:
+      rule: "Host(`alt.example.com`)"
+      entryPoints: ["websecure"]
+      service: whoami
+      tls:
+        certResolver: pebble-acmedns
+
   services:
     whoami:
       loadBalancer:

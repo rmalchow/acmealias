@@ -144,6 +144,19 @@ type Config struct {
 
 	// ChallengeLifetime bounds how long a published challenge value is
 	// answered before the sweep may remove it (ACME_CHALLENGE_LIFETIME).
+	//
+	// IT IS A MECHANISM NOW AND NOT ONLY A BACKSTOP, and anybody lowering it
+	// should know why (design N4, task 5.3). With lego's httpreq dialect a
+	// client publishes and then explicitly withdraws, so a value is normally
+	// gone seconds after validation and this bound catches only the client that
+	// died in between. The acme-dns dialect has NO withdrawal operation — a
+	// client speaking it never tells us it is finished — so for those
+	// publications this is the only thing that ever removes the value.
+	//
+	// Which means shortening it is no longer a free tightening. Set it below the
+	// time a slow certificate authority takes to come and look, and an acme-dns
+	// renewal fails with nothing in the logs to say why: the value was there,
+	// and then it was not.
 	ChallengeLifetime time.Duration
 
 	// ZoneViewRefreshInterval is how often the in-memory zone view reloads

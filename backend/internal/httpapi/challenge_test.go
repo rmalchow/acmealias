@@ -304,6 +304,12 @@ type env struct {
 	metrics *obs.Metrics
 
 	ours, theirs func(*http.Request) // basic-auth setters
+
+	// The same two credentials as the pair the acme-dns dialect sends in its own
+	// headers. Kept rather than closed over, so acmedns_test.go can assert that
+	// the two transports reach the same key.
+	oursUser, oursPass     string
+	theirsUser, theirsPass string
 }
 
 // challengeAccount creates the account these fixtures act in.
@@ -370,7 +376,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatalf("activate domain: %v", err)
 	}
 
-	auth := func(projectID model.ID) func(*http.Request) {
+	auth := func(projectID model.ID) (func(*http.Request), string, string) {
 		k, secret, err := apikey.New()
 		if err != nil {
 			t.Fatalf("new api key: %v", err)
@@ -384,7 +390,7 @@ func newEnv(t *testing.T) *env {
 		if err := store.CreateAPIKey(ctx, db, sc, k, store.AllowAnyGrant); err != nil {
 			t.Fatalf("create api key: %v", err)
 		}
-		return func(r *http.Request) { r.SetBasicAuth(k.Identifier, secret) }
+		return func(r *http.Request) { r.SetBasicAuth(k.Identifier, secret) }, k.Identifier, secret
 	}
 
 	view := zoneview.New(zoneview.FromDB(db))
@@ -403,8 +409,10 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatalf("RegisterChallenge: %v", err)
 	}
-	return &env{t: t, db: db, view: view, e: e, alias: alias, domain: domain, metrics: metrics,
-		ours: auth(mine.ID), theirs: auth(other.ID)}
+	v := &env{t: t, db: db, view: view, e: e, alias: alias, domain: domain, metrics: metrics}
+	v.ours, v.oursUser, v.oursPass = auth(mine.ID)
+	v.theirs, v.theirsUser, v.theirsPass = auth(other.ID)
+	return v
 }
 
 // call posts fqdn/value to path as the load balancer-"a" key and asserts the status.

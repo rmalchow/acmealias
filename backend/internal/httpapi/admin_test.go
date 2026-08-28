@@ -237,6 +237,15 @@ func seedDomain(t *testing.T, v *adminEnv, suffix string) string {
 	return "/api/v1/accounts/" + v.sc.AccountID().String() + "/domains/" + res.Domains[0].ID.String()
 }
 
+// seedDomainPath is seedDomain plus a tail, for the routes that hang off a
+// domain rather than addressing it.
+func seedDomainPath(tail string) func(*testing.T, *adminEnv, string) string {
+	return func(t *testing.T, v *adminEnv, suffix string) string {
+		t.Helper()
+		return seedDomain(t, v, suffix) + tail
+	}
+}
+
 // seedKeyPath returns a seeder for a key route, since the key rows differ only
 // by what follows the identifier.
 func seedKeyPath(tail string) func(*testing.T, *adminEnv, string) string {
@@ -608,6 +617,11 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedNode},
 		{"POST", proj + "/domains", `{"name":"shop.example.com"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedDomain},
+		// The acme-dns credentials file. It MINTS A KEY, so it is governed like
+		// key creation and not like a domain read: KEY_ROTATION reaches it and
+		// READ_ONLY does not. A row that let every member produce one would be a
+		// key screen with a friendlier name.
+		{"POST", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, seedDomainPath("/acme-dns")},
 
 		// Keys: ADMIN, CONFIG_ADMIN and KEY_ROTATION.
 		{"POST", proj + "/keys", `{"note":"traefik"}`, []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION"}, nil},

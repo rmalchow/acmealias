@@ -31,7 +31,14 @@ export interface Interaction {
   domainNames: string[];
   keyId: string | null;
   clientIp: string | null;
-  fqdnForm: 'alias' | 'challenge';
+  /**
+   * Which spelling the client sent, which is a property of the CLIENT and not of the customer's
+   * DNS. `alias` is our own name, followed through the CNAME; `challenge` is the customer's own
+   * _acme-challenge name; `acme-dns` is the acme-dns protocol, which names the alias by its bare
+   * label — and which has no withdrawal operation, so those publications end by expiring rather
+   * than by being cleaned up.
+   */
+  fqdnForm: 'alias' | 'challenge' | 'acme-dns';
   publishedAt: string;
   withdrawnAt: string | null;
   firstQueriedAt: string | null;

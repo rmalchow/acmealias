@@ -498,12 +498,45 @@ func TestIntegrationAbandonStaleInteractions(t *testing.T) {
 	}
 	fresh := v.insert(v.interaction("fresh", time.Now()))
 
-	n, err := AbandonStaleInteractions(ctx, v.db, time.Hour)
+	// And an acme-dns publication of the same age, which has no withdrawal in
+	// its protocol and must NOT be called abandoned for behaving as specified
+	// (design N4, task 5.2).
+	expired := v.insert(v.interaction("expired", time.Now().Add(-2*time.Hour)))
+	if err := v.db.Model(&model.ChallengeInteraction{}).Where("id = ?", expired.ID).
+		Updates(map[string]any{"fqdn_form": FormAcmeDNS, "query_count": 3}).Error; err != nil {
+		t.Fatalf("seed acme-dns row: %v", err)
+	}
+	silent := v.insert(v.interaction("silent", time.Now().Add(-2*time.Hour)))
+	if err := v.db.Model(&model.ChallengeInteraction{}).Where("id = ?", silent.ID).
+		Update("fqdn_form", FormAcmeDNS).Error; err != nil {
+		t.Fatalf("seed acme-dns row: %v", err)
+	}
+
+	closed, err := AbandonStaleInteractions(ctx, v.db, time.Hour)
 	if err != nil {
 		t.Fatalf("abandon: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("abandoned %d rows, want 1", n)
+	if closed.Abandoned != 1 {
+		t.Fatalf("abandoned %d rows, want 1", closed.Abandoned)
+	}
+	if closed.Validated != 1 || closed.Unqueried != 1 {
+		t.Fatalf("acme-dns rows closed as %d validated and %d unqueried, want one of each",
+			closed.Validated, closed.Unqueried)
+	}
+	// Closed, so the console stops reporting them as still in flight — but not
+	// abandoned, so it does not report a correct renewal as a fault. That
+	// distinction is made here, once, rather than in the two places that derive
+	// an outcome from the flag.
+	for _, id := range []model.ID{expired.ID, silent.ID} {
+		got := v.reload(id)
+		if got.WithdrawnAt == nil {
+			t.Errorf("acme-dns row %s was left open; nothing will ever close it", id)
+		}
+		if got.Abandoned {
+			t.Errorf("acme-dns row %s was marked abandoned. Its protocol has no withdrawal "+
+				"operation, so expiring on the timer is its normal ending — flagging that would "+
+				"paint every correct renewal red and train somebody to ignore the column", id)
+		}
 	}
 	got := v.reload(stale.ID)
 	if got.WithdrawnAt == nil || !got.Abandoned {
