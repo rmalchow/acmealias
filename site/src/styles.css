@@ -497,6 +497,53 @@ h1 {
   max-inline-size: 62ch;
 }
 
+/* ── The clients ──────────────────────────────────────────────────────────
+   A quiet strip, not a feature. It substantiates the claim the card above it
+   makes and should not compete with it — so the names are set in the body face
+   at one weight and one colour, which is also the only way nine wordmarks sit
+   together without one of them shouting. */
+.clients {
+  padding-block: 0 3rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.client-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.client-group li {
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.client-label {
+  margin: 0 0 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.7rem;
+  color: var(--ink-dim);
+}
+
+/* Dimmer, because these do not work yet. The distinction is carried by the LABEL
+   above each group and not by the colour alone — dimming is a hint, and a reader
+   who does not register it would otherwise read a promise. */
+.pending li {
+  color: var(--ink-dim);
+}
+
+.client-label a {
+  color: inherit;
+  text-decoration-color: rgb(255 255 255 / 30%);
+}
+
 /* ── The terminal ─────────────────────────────────────────────────────────────
    Deliberately not a screenshot. Text scales with the reader's font size, can be
    selected and pasted into their own shell — which is the entire point of the

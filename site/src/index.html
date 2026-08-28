@@ -130,6 +130,50 @@
       </section>
 
       <!--
+        The clients, as WORDMARKS SET IN OUR OWN TYPE rather than as their logos.
+
+        That is a deliberate choice and not a placeholder. Every name here is somebody's trademark —
+        Traefik Labs', the CNCF's, the EFF's — and each of those projects has a brand policy governing
+        how its mark may be reproduced. Setting the names as text is nominative use, needs no licence,
+        and cannot be got subtly wrong the way a stretched or recoloured logo can. It also renders in
+        one weight and one colour on every surface, which a row of real logos never does: they arrive
+        at nine different optical weights and turn a quiet strip into a scrapbook.
+
+        If real logos are wanted later they must be taken from each project's own brand assets under
+        its own guidelines, not lifted from a search result. Drop them in src/brand/clients/ and this
+        list becomes <img>s without the layout changing.
+
+        THE TWO GROUPS ARE THE HONEST PART. Only the first works today. Putting cert-manager and
+        certbot in a single undifferentiated row would be describing the roadmap in the present tense
+        — the exact thing the reasons section above is careful not to do — and it is a claim somebody
+        would discover was false at the worst possible moment, having already chosen us for it.
+      -->
+      <section class="clients">
+        <h2 class="sr-only">Supported ACME clients</h2>
+
+        <div class="client-group">
+          <p class="client-label">Works today</p>
+          <ul>
+            <li>Traefik</li>
+            <li>lego</li>
+          </ul>
+        </div>
+
+        <div class="client-group pending">
+          <p class="client-label">Next, with <a href="https://github.com/joohoi/acme-dns">acme-dns</a></p>
+          <ul>
+            <li>cert-manager</li>
+            <li>certbot</li>
+            <li>acme.sh</li>
+            <li>Caddy</li>
+            <li>win-acme</li>
+            <li>Posh-ACME</li>
+            <li>Certify The Web</li>
+          </ul>
+        </div>
+      </section>
+
+      <!--
         The mechanism, shown rather than described.
 
         This is the section a technical reader trusts, because it is the only one they can check
