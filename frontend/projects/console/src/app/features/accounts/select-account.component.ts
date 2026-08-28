@@ -102,6 +102,18 @@ import { InvitationOffer } from '../invitations/invitations.models';
                 selected, so a rule kept in two places is a rule that will be edited in one.
               -->
               <h3><span nz-icon [nzType]="icon(a)" class="kind"></span>{{ label(a) }}</h3>
+              <!--
+                What is in the account, so the cards are telling somebody apart rather than just
+                naming them. A slug distinguishes two accounts on paper; "5 projects · 14 nodes ·
+                31 domains" beside "1 project · 2 nodes · 2 domains" is what tells you which one is
+                the work.
+
+                Rendered only when the service counted — the field is absent, not zero, on the
+                responses that do not count (see Account.projectCount).
+              -->
+              @if (summary(a); as s) {
+                <p class="summary">{{ s }}</p>
+              }
               @if (a.kind === 'personal') {
                 <!--
                   No 'Personal' tag. The heading already says the word, and a badge repeating the
@@ -169,6 +181,14 @@ import { InvitationOffer } from '../invitations/invitations.models';
         gap: 0.75rem;
         grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
         margin-block-end: 2rem;
+      }
+      /* Between the name and whatever the card says next, in the muted ink the hints use: it is
+         orienting information, not a claim. */
+      .summary {
+        margin: 0 0 0.35rem;
+        color: var(--ac-muted);
+        font-size: 0.8125rem;
+        font-variant-numeric: tabular-nums;
       }
       .ac-list h3 {
         margin: 0 0 0.25rem;
@@ -268,6 +288,26 @@ export class SelectAccountComponent implements OnInit {
   /** What each account is called and shown as, from the one rule both this and the switcher use. */
   protected readonly label = accountLabel;
   protected readonly icon = accountIcon;
+
+  /**
+   * What is in the account, as one line, or null when the service did not count.
+   *
+   * An EMPTY account says so in words rather than as three zeroes. "0 projects · 0 nodes · 0
+   * domains" is a row of noughts somebody has to read three times to learn one thing, and it is
+   * the state a brand-new account is in — the commonest thing this card will ever show.
+   *
+   * Singulars are worth the two lines. "1 projects" is the detail that makes an interface feel
+   * unfinished, and the picker is the first screen after signing in.
+   */
+  protected summary(a: Account): string | null {
+    if (a.projectCount === undefined) return null;
+    const p = a.projectCount;
+    const n = a.nodeCount ?? 0;
+    const d = a.domainCount ?? 0;
+    if (p === 0 && n === 0 && d === 0) return 'Empty';
+    const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+    return [plural(p, 'project'), plural(n, 'node'), plural(d, 'domain')].join(' · ');
+  }
 
   /** Personal first: it is the one account everybody has, and the one a new user means. */
   protected readonly shown = computed(() => {

@@ -37,6 +37,22 @@ type accountView struct {
 	// answered here rather than by comparing user identifiers in the browser —
 	// the console has no user id, only a subject.
 	Owner bool `json:"owner"`
+	// ProjectCount, NodeCount and DomainCount are how much is IN the account.
+	//
+	// They travel with the listing because the picker is where somebody chooses
+	// between accounts, and a slug tells them nothing: two accounts look alike
+	// until one of them says it holds five projects and thirty-one domains. A
+	// count of zero is sent as zero — a new account genuinely holds nothing, and
+	// how to SAY that is the console's job, not this type's.
+	//
+	// POINTERS, so that "not asked for" and "none" stay different answers. Only
+	// the LISTING counts; the responses to creating an account and to a checkout
+	// return the same shape without them, and a plain int there would report
+	// zero projects for an account that has forty. The same reason projectView
+	// carries its two counts this way.
+	ProjectCount *int `json:"projectCount,omitempty"`
+	NodeCount    *int `json:"nodeCount,omitempty"`
+	DomainCount  *int `json:"domainCount,omitempty"`
 	// Credits and Suspended are the funded state (design C3, C4). Both travel
 	// with the LISTING and not only with the selected account, because a
 	// suspended account is shown in the picker as suspended rather than omitted
@@ -67,6 +83,16 @@ func toAccount(acc model.Account, selected bool, viewerID model.ID) accountView 
 		Suspended:       !store.Usable(&acc),
 		SuspendedReason: store.SuspensionReason(&acc),
 	}
+}
+
+// toAccountListed is toAccount plus what is in the account, for the picker.
+//
+// Separate rather than an argument, so a caller that has no counts cannot pass
+// zeroes by accident — the only way to report a count here is to have one.
+func toAccountListed(l store.AccountListing, selected bool, viewerID model.ID) accountView {
+	v := toAccount(l.Account, selected, viewerID)
+	v.ProjectCount, v.NodeCount, v.DomainCount = &l.ProjectCount, &l.NodeCount, &l.DomainCount
+	return v
 }
 
 // checkoutAmountsView is what the console offers on the buy screen. It is served
@@ -116,7 +142,7 @@ func (a *admin) listAccounts(c echo.Context) error {
 	out := make([]accountView, 0, len(accounts))
 	for _, acc := range accounts {
 		selected := sess.SelectedAccountID != nil && *sess.SelectedAccountID == acc.ID
-		out = append(out, toAccount(acc, selected, user.ID))
+		out = append(out, toAccountListed(acc, selected, user.ID))
 	}
 	return c.JSON(http.StatusOK, out)
 }

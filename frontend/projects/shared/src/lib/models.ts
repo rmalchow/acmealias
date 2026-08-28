@@ -355,6 +355,17 @@ export interface Account {
   kind: AccountKind;
   /** Whether the reader is the person this account answers to — the only person who may pay. */
   owner: boolean;
+  /**
+   * How much is IN the account, from the listing only.
+   *
+   * OPTIONAL because the service sends them only when it counted. Creating an account and
+   * completing a checkout return the same shape without them, and a zero there would report an
+   * empty account to somebody who has forty projects — so absent means "not asked for" and never
+   * "none".
+   */
+  projectCount?: number;
+  nodeCount?: number;
+  domainCount?: number;
   /** Always zero for a personal account; being free is what it is (design C3). */
   credits: number;
   /** The negation of the service's one usable() predicate (C3, C6), not a second reading of it. */

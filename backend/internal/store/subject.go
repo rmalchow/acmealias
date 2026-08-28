@@ -62,11 +62,47 @@ func MembershipsFor(ctx context.Context, db *gorm.DB, accountID, userID model.ID
 // session with no selection shows. Cross-account by construction: the question
 // is which accounts this person can reach, which cannot be answered from inside
 // any one of them.
-func AccountsForUser(ctx context.Context, db *gorm.DB, userID model.ID) ([]model.Account, error) {
-	var accs []model.Account
+// AccountListing is an account plus how much is in it: projects, nodes and
+// domains.
+//
+// The three answer what somebody at the picker is actually choosing between.
+// Slugs alone make two accounts look alike; "5 projects · 14 nodes · 31 domains"
+// beside "1 project · 2 nodes · 2 domains" tells you which one is the work.
+//
+// Zeroes are reported as zeroes. A brand-new account genuinely holds nothing,
+// and saying so is the console's job — the same split ProjectListing makes.
+type AccountListing struct {
+	model.Account `gorm:"embedded"`
+	ProjectCount  int `gorm:"column:project_count"`
+	NodeCount     int `gorm:"column:node_count"`
+	DomainCount   int `gorm:"column:domain_count"`
+}
+
+// accountCounts is the counting half of the listing SELECT.
+//
+// Correlated subqueries for the reason projectCounts gives: LEFT JOINs multiply
+// — an account with five projects, fourteen nodes and thirty-one domains
+// produces over two thousand rows before DISTINCT — and a query per row is the
+// shape that looks fine with two accounts and does not with twenty.
+//
+// THE DIFFERENCE FROM projectCounts, and it is the one that matters here: this
+// runs inside CrossAccount, where row-level security is not filtering anything.
+// projectCounts can let the caller's policies scope its subqueries because it
+// runs under an ordinary scope; these subqueries have no such protection and
+// must name the account themselves. Every one of them carries
+// `account_id = accounts.id`, and without it this counts the whole deployment
+// and reports it to whoever asked.
+const accountCounts = `accounts.*,
+	(select count(*) from projects p where p.account_id = accounts.id) as project_count,
+	(select count(*) from lb_nodes n where n.account_id = accounts.id) as node_count,
+	(select count(*) from domains d where d.account_id = accounts.id) as domain_count`
+
+func AccountsForUser(ctx context.Context, db *gorm.DB, userID model.ID) ([]AccountListing, error) {
+	var accs []AccountListing
 	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
 		return tx.
 			Table("accounts").
+			Select(accountCounts).
 			Joins("join account_members m on m.account_id = accounts.id").
 			Where("m.user_id = ?", userID).
 			Distinct().
