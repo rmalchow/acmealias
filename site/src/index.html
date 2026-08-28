@@ -79,30 +79,87 @@
         </p>
       </section>
 
-      <section class="steps">
-        <ol>
+      <!--
+        Three reasons, and they are NOT NUMBERED — which is the whole difference from what stood
+        here before.
+
+        This was an ordered list: publish a record, we answer, you see what happened. The numbers
+        were justified, because those genuinely happen in sequence. Reasons do not, and leaving
+        `01 02 03` on them would assert an order that is not there — the numbered marker is a
+        structural claim, and a false one is worse than none. The mechanism they used to describe is
+        now shown properly in the terminal below, where a reader can check it.
+
+        Every claim here is about something that EXISTS. The temptation on a page like this is to
+        describe the roadmap in the present tense; what is on the roadmap is named as such.
+      -->
+      <section class="reasons">
+        <ul>
           <li>
-            <h2>You publish one record</h2>
+            <h2>It speaks to what you already run</h2>
             <p>
-              <code>_acme-challenge.example.com</code> becomes a <code>CNAME</code> pointing into our
-              zone. That is the entire integration, and it is permanent.
+              The challenge API implements <a href="https://go-acme.github.io/lego/dns/httpreq/">lego's
+              <code>httpreq</code> protocol</a>, so anything built on lego works unchanged —
+              <strong>Traefik</strong> needs one provider line and no plugin. cert-manager and Caddy
+              reach DNS through their own interfaces and want a small adapter each; those are being
+              written.
             </p>
           </li>
           <li>
-            <h2>We answer the one question</h2>
+            <h2>An API key reaches exactly one thing</h2>
             <p>
-              When a certificate authority follows that record, we answer with the challenge value for
-              as long as the validation lasts, then withdraw it.
+              A key carries grants, not a role: this action, on this object, and nothing adjacent. Give
+              a staging host a key that can answer for staging and it cannot touch production — not
+              because it is asked not to, but because there is no grant that would let it. Add an
+              address range and an expiry and the key stops being a permanent secret.
             </p>
           </li>
           <li>
-            <h2>You see what happened</h2>
+            <h2>Every challenge is on the record</h2>
             <p>
-              Every publication, every query a certificate authority made, and — afterwards — whether a
-              certificate was actually installed and what names it covers.
+              Who published a value, whether a certificate authority actually came and asked for it,
+              from which address, how many times, and whether the validation completed. DNS-01
+              normally fails silently and you find out when a certificate expires; here the answer to
+              <em>did it work</em> is a row you can read the same minute.
             </p>
           </li>
-        </ol>
+        </ul>
+      </section>
+
+      <!--
+        The mechanism, shown rather than described.
+
+        This is the section a technical reader trusts, because it is the only one they can check
+        without us: both commands run against the public internet and neither needs an account. A
+        claim about DNS that a reader can verify in ten seconds is worth more than three paragraphs
+        of the same claim in prose.
+
+        The values are real in SHAPE and fictional in CONTENT — example.com is reserved for exactly
+        this (RFC 2606), and inventing a customer's domain here would be putting somebody else's
+        name on our marketing.
+      -->
+      <section class="proof">
+        <h2>The whole integration, and how to check it</h2>
+        <p class="section-lede">
+          Two commands. The first is the record you publish once; the second is what we answer while a
+          certificate authority is asking, and nothing at all when one is not.
+        </p>
+
+        <div class="term" role="img"
+             aria-label="A dig command showing the challenge name is a CNAME into the acmealias zone, and a second dig showing that alias answering a TXT record during validation.">
+          <pre><span class="p">$</span> dig +short _acme-challenge.shop.example.com CNAME
+<span class="o">shop-example-com.acmealias.com.</span>
+<span class="c"># published once, by you. Never changes again.</span>
+
+<span class="p">$</span> dig +short shop-example-com.acmealias.com TXT
+<span class="o">"3sT4kQ9x_LbW2vPd8nZmR1cYhE0aJfKu6iGtOs5A"</span>
+<span class="c"># answered only while a validation is in flight,
+# then withdrawn. Ask again tomorrow and it is empty.</span></pre>
+        </div>
+
+        <p class="note">
+          Your DNS provider keeps every other record. We can answer one name, and it is a name that
+          exists for this and nothing else.
+        </p>
       </section>
 
       <section class="why">
@@ -112,6 +169,149 @@
           have, in order to change one. The alias model gives away exactly one thing: the right to
           answer one name that exists for this purpose alone.
         </p>
+      </section>
+
+      <!--
+        What this is NOT.
+
+        It reads as modesty and it is really qualification: the fastest way to lose an evaluator's
+        afternoon is to let them assume this replaces their DNS or their ACME client, and then find
+        out three screens into a trial. Saying it here costs one section and saves the wrong
+        customer a wasted evening — and us a support conversation that ends in a refund.
+
+        `public-edition` U11 / task 8.3 requires this page to carry it.
+      -->
+      <section class="scope">
+        <h2>What this is not</h2>
+        <ul class="nots">
+          <li>
+            <h3>We do not host your DNS</h3>
+            <p>
+              Your zone stays with whoever runs it now. We are authoritative for one name per domain,
+              inside our own zone, because you pointed a <code>CNAME</code> at it.
+            </p>
+          </li>
+          <li>
+            <h3>We do not issue certificates</h3>
+            <p>
+              Your ACME client and your certificate authority do that, exactly as they do today. We
+              answer the DNS question that stands between them.
+            </p>
+          </li>
+          <li>
+            <h3>We never hold a private key</h3>
+            <p>
+              Not your certificate's, not your account's. Nothing we store could be used to impersonate
+              you, because nothing we store is secret to you.
+            </p>
+          </li>
+        </ul>
+      </section>
+
+      <!--
+        Pricing, as a comparison rather than two cards side by side.
+
+        A comparison is the honest shape here because the free account is NOT a crippled version of
+        the paid one: the challenge answering, the API and the certificate observation are identical,
+        and a reader scanning two separate cards has to hold both in their head to notice that. Put
+        them in one table and the answer to "what do I actually get for money" is legible in a
+        glance — colleagues, roles and a project limit that goes away. Nothing is withheld from the
+        free account to make the paid one attractive.
+
+        The dashes matter as much as the ticks. A row where the free column is empty is a row about
+        OTHER PEOPLE, and a person working alone should be able to see at once that they are not
+        missing anything they would use.
+
+        A <table> and not a grid of divs: this is tabular data, a screen reader should announce it as
+        such, and the header cells are what make a row's dash mean "Personal: no colleagues" rather
+        than a dash floating in a box.
+      -->
+      <section class="pricing">
+        <h2>What money buys</h2>
+        <p class="section-lede">
+          Everything technical is in both. What a team account adds is other people — and no project
+          limit, because credit is the limit instead.
+        </p>
+
+        <div class="table-scroll">
+          <table class="compare">
+            <caption class="sr-only">Personal and team accounts compared</caption>
+            <thead>
+              <tr>
+                <td></td>
+                <th scope="col">Personal</th>
+                <th scope="col">Team</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="row-price">
+                <th scope="row">Price</th>
+                <td><strong>Free</strong><span class="sub">not a trial, does not expire</span></td>
+                <td>
+                  <strong>39 ct</strong> per challenge
+                  <span class="sub">capped at 199 EUR a month, however many you answer</span>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Projects</th>
+                <td>5</td>
+                <td>No limit</td>
+              </tr>
+              <tr>
+                <th scope="row">Domains per project</th>
+                <td>No limit</td>
+                <td>No limit</td>
+              </tr>
+              <tr>
+                <th scope="row">Challenge answering</th>
+                <td class="yes">Full</td>
+                <td class="yes">Full</td>
+              </tr>
+              <tr>
+                <th scope="row">API, CLI and audit trail</th>
+                <td class="yes">Yes</td>
+                <td class="yes">Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Certificate observation</th>
+                <td class="yes">Yes</td>
+                <td class="yes">Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Colleagues</th>
+                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
+                <td class="yes">Invited by email</td>
+              </tr>
+              <tr>
+                <th scope="row">Roles and permissions</th>
+                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
+                <td class="yes">Defined by you</td>
+              </tr>
+              <tr>
+                <th scope="row">Transfer ownership</th>
+                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
+                <td class="yes">Yes</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="note">
+          Credit is prepaid in 25, 50 or 100 EUR top-ups. No subscription and no minimum term — an
+          account with credit works, and one without it waits for you rather than deleting anything.
+        </p>
+      </section>
+
+      <section class="cta">
+        <h2>One record, and you are done with it</h2>
+        <p>
+          Start on a personal account. Publish one <code>CNAME</code> and see the next renewal happen
+          without you.
+        </p>
+        <a class="button" href="http://console.localhost/">
+          <span class="icon" aria-hidden="true">→</span>
+          Create an account
+        </a>
       </section>
     </main>
 
