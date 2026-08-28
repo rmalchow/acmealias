@@ -813,21 +813,30 @@ footer {
   background: var(--ground);
   border-block-start: 1px solid var(--line);
   margin-block-start: 2rem;
-  padding: 1.5rem;
+  padding: 2.25rem 1.5rem;
   /* Never compressed to fit. Without this a flex parent may shrink the footer on a
      viewport shorter than its content, which crops the very line it exists to carry. */
   flex-shrink: 0;
 }
 
-/* The footer's own links, above the placeholder note rather than beside it: the
-   note is about the state of the site and the links are how to move around it,
-   and running them together makes both read as small print. */
+/* The footer holds the links and nothing else now.
+ *
+ * It used to carry a paragraph saying the site was a placeholder and naming the
+ * change that lists what it still owes. That was honest and it was addressed to
+ * US: a visitor reading "this page exists so the hostname and its build are
+ * real" learns that we have not finished, on the page that is supposed to make
+ * them trust us with their DNS. What the site owes — imprint, privacy, terms,
+ * abuse contact — is tracked in public-edition 8.5-8.8, which is where it
+ * belongs, and its absence is visible there rather than announced here.
+ *
+ * The vertical padding replaces it. Without something the footer collapses to a
+ * rule with two links against it, which reads as the page having been cut off
+ * rather than ended. */
 .foot-nav {
   display: flex;
   gap: 1.25rem;
   max-inline-size: var(--page);
   margin-inline: auto;
-  margin-block-end: 0.75rem;
   font-size: 0.9rem;
 }
 
