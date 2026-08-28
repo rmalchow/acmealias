@@ -29,6 +29,7 @@ import {
   ReloadOutline,
   SearchOutline,
   ShoppingCartOutline,
+  TeamOutline,
   UserOutline,
   WalletOutline,
 } from '@ant-design/icons-angular/icons';
@@ -57,10 +58,10 @@ export const appConfig: ApplicationConfig = {
     // components. Adding an `nz-icon` to a template means adding it to this list.
     provideNzIcons([
       CheckOutline,
-      // The switcher has always drawn `cluster` and it was never registered here — which never
-      // threw only because the switcher used to render nothing below two accounts. It renders
-      // always now (design C12), so this line is what stands between the first sign-in and a
-      // broken screen.
+      // `cluster` was never registered here — which never threw only because the switcher used to
+      // render nothing below two accounts. It renders always now (design C12), so this line is
+      // what stands between the first sign-in and a broken screen. It is no longer the account
+      // glyph (that is `team`); what still draws it is "Leave this account" in the user menu.
       ClusterOutline,
       DeleteOutline,
       EditOutline,
@@ -74,6 +75,8 @@ export const appConfig: ApplicationConfig = {
       ReloadOutline,
       SearchOutline,
       ShoppingCartOutline,
+      // The team account's glyph, in the picker's cards and the switcher (accountIcon in shared).
+      TeamOutline,
       UserOutline,
       WalletOutline,
     ]),

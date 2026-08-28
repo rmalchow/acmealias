@@ -381,11 +381,19 @@ export function accountLabel(a: Pick<Account, 'kind' | 'name'>): string {
 /**
  * The icon that goes with `accountLabel`.
  *
- * A person for the account that IS a person's own, a cluster for one with other people in it. It is
- * paired with the label here so a screen cannot render one rule's word beside the other's glyph.
+ * A person for the account that IS one person's own, a GROUP for one that has other people in it.
+ * That pairing is the whole distinction between the two kinds, drawn in one glyph: a team account
+ * is not a bigger personal account, it is one with a roster.
+ *
+ * It was `cluster`, which draws connected nodes — infrastructure, not people. On a page whose other
+ * icon is a person, it read as a different axis entirely.
+ *
+ * Paired with the label here so a screen cannot render one rule's word beside the other's glyph.
+ * Any icon named here must also be REGISTERED in each console's app.config: an unregistered
+ * `nz-icon` throws, and it surfaces as a broken screen rather than a missing glyph.
  */
 export function accountIcon(a: Pick<Account, 'kind'>): string {
-  return a.kind === 'personal' ? 'user' : 'cluster';
+  return a.kind === 'personal' ? 'user' : 'team';
 }
 
 /**

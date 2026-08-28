@@ -227,6 +227,29 @@ body {
   font-family: Barlow, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+
+  /* The footer sits at the bottom of the VIEWPORT when the page is short, and at the
+     bottom of the CONTENT when it is long.
+     
+     A placeholder page does not fill a screen, and a footer that stops halfway down
+     leaves the rule under it floating in the middle of the window with lit background
+     below — which reads as a page that failed to finish loading rather than as one that
+     is simply short.
+
+     Not `position: fixed`. That pins the footer over the content on every long page,
+     costing a strip of the window forever to fix a problem only short pages have, and
+     it takes the footer out of flow so the last paragraph slides underneath it. This
+     keeps it in flow and lets the space above it grow instead. */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The one element allowed to absorb the slack. `flex: 1` on main is what pushes the
+   footer down on a short page; on a long one main is already taller than the space and
+   the rule does nothing. */
+body > main {
+  flex: 1 0 auto;
 }
 
 code {
@@ -435,6 +458,9 @@ footer {
   border-block-start: 1px solid var(--line);
   margin-block-start: 2rem;
   padding: 1.5rem;
+  /* Never compressed to fit. Without this a flex parent may shrink the footer on a
+     viewport shorter than its content, which crops the very line it exists to carry. */
+  flex-shrink: 0;
 }
 
 footer p {
