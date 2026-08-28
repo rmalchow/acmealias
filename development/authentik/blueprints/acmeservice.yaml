@@ -85,6 +85,23 @@ entries:
   #
   # Everything here uses the password `devpass`.
 
+  # admin@example.com is ALSO an authentik administrator, through the built-in
+  # `authentik Admins` group — the one authentik ships with is_superuser set.
+  #
+  # Without it, administering the identity provider means signing in as the
+  # bootstrap account from development/.env: a second identity, a second password
+  # to have open, and the one credential in the stack that is not `devpass`. The
+  # practical effect was that nobody used it, and blueprint changes got verified
+  # through `ak shell` instead of through the interface a real operator would use
+  # — which is how a flow can be correct in the database and unreachable in the UI
+  # without anybody noticing.
+  #
+  # THIS IS A DEVELOPMENT CONVENIENCE AND MUST NOT BE COPIED FORWARD.
+  # `public-edition` task 5.6 requires provider administration to be a small group
+  # with mandatory multi-factor authentication; a test account whose password is
+  # committed to this repository is the opposite of that. The production instance
+  # is stood up from this blueprint (task 6.1), so this is exactly the entry
+  # somebody has to remember to drop — hence the shouting.
   - model: authentik_core.user
     identifiers: { username: admin@example.com }
     attrs:
@@ -96,6 +113,7 @@ entries:
       path: users
       groups:
         - !KeyOf group-admin
+        - !Find [authentik_core.group, [name, authentik Admins]]
 
   - model: authentik_core.user
     identifiers: { username: user@example.com }

@@ -6,6 +6,22 @@ objects a blueprint declares.
 
 The specification is `openspec/changes/self-service-signup/`; where the two disagree, that wins.
 
+## Signing in to authentik itself
+
+`admin@example.com` / `devpass` is an authentik administrator as well as a staff
+console user — it is in the built-in `authentik Admins` group.
+
+That is deliberate and it is a DEVELOPMENT convenience. Before this blueprint
+stands up a production instance (`public-edition` 6.1), that group membership has
+to come off: task 5.6 requires provider administration to be a small group with
+mandatory multi-factor authentication, and a password committed to this
+repository is the opposite of it.
+
+The bootstrap account in `development/.env` still works and is still the way in
+if the blueprint ever fails to apply — which is the one situation where a user
+defined BY the blueprint cannot help.
+
+
 ## Approving somebody
 
 A person who registers themselves at `console.localhost` is created **inactive**, and is
