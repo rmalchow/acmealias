@@ -308,6 +308,49 @@ func TestIntegrationInvitationsAppearWithoutTheLink(t *testing.T) {
 	}
 }
 
+// TestIntegrationInvitationAnsweredWithoutItsToken covers the second way in, and
+// the property that makes it safe.
+//
+// An identifier is guessable in a way a 256-bit token is not, so the lookup
+// requires the invited address IN ITS WHERE CLAUSE rather than comparing
+// afterwards. Somebody else's identifier is therefore indistinguishable from one
+// belonging to no invitation at all — the endpoint answers no question about
+// whether an invitation exists.
+func TestIntegrationInvitationAnsweredWithoutItsToken(t *testing.T) {
+	v := newAdminEnvWithMail(t)
+	admin := v.session("admin", roleAdmin)
+	v.inviteAs(t, admin, "alice@corp.example")
+
+	alice := v.invitedSession(t, "alice-subject", "alice@corp.example")
+	rec := alice.do(http.MethodGet, "/api/v1/invitations", "")
+	var mine []offerView
+	decode(t, rec, &mine)
+	if len(mine) != 1 || mine[0].ID == nil {
+		t.Fatalf("the listing carries no identifier to answer with: %s", rec.Body.String())
+	}
+	id := mine[0].ID.String()
+
+	// Mallory, holding the identifier, gets the same answer she would get for an
+	// identifier nobody ever issued.
+	mallory := v.invitedSession(t, "mallory-subject", "mallory@elsewhere.example")
+	hers := mallory.do(http.MethodPost, "/api/v1/invitations/accept", `{"id":"`+id+`"}`)
+	nothing := mallory.do(http.MethodPost, "/api/v1/invitations/accept",
+		`{"id":"01900000-0000-7000-8000-000000000000"}`)
+	if hers.Code != nothing.Code {
+		t.Fatalf("somebody else's invitation answers %d and a nonexistent one answers %d — "+
+			"the difference is an oracle telling anybody holding an identifier whether it names "+
+			"a real invitation", hers.Code, nothing.Code)
+	}
+	if hers.Code == http.StatusOK {
+		t.Fatal("a stranger accepted an invitation by naming its identifier")
+	}
+
+	// And Alice, who is the invited address, can — with no token anywhere.
+	if rec := alice.do(http.MethodPost, "/api/v1/invitations/accept", `{"id":"`+id+`"}`); rec.Code != http.StatusOK {
+		t.Fatalf("accepting off one's own list: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestInvitationDeclineIsDistinguishableFromSilence.
 //
 // The whole reason declining exists: fourteen days of silence tells an

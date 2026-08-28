@@ -55,7 +55,15 @@ type invitationView struct {
 // "Join cloudpowered?" and the answer to "as what" is "we will tell you when
 // somebody decides".
 type offerView struct {
-	Account string `json:"account"`
+	// ID is present on the listing of a person's OWN invitations and absent from
+	// a token resolution, which is the difference between the two ways in.
+	//
+	// It is not a credential and cannot be used as one: answering by identifier
+	// finds the row only when the invited address is the caller's own verified
+	// one, so an identifier belonging to somebody else's invitation is
+	// indistinguishable from one belonging to none.
+	ID      *model.ID `json:"id,omitempty"`
+	Account string    `json:"account"`
 	// AccountID lets the console select the account after acceptance without a
 	// second round trip. It discloses nothing: the holder of the token is about
 	// to be a member of it or is not, and either way an identifier is not a key.
@@ -358,9 +366,10 @@ func (a *admin) listMyInvitations(c echo.Context) error {
 		names[acc.ID] = acc.Name
 	}
 	out := make([]offerView, 0, len(invs))
-	for _, inv := range invs {
+	for i := range invs {
+		inv := invs[i]
 		out = append(out, offerView{
-			Account: names[inv.AccountID], AccountID: inv.AccountID,
+			ID: &inv.ID, Account: names[inv.AccountID], AccountID: inv.AccountID,
 			Email: inv.Email, ExpiresAt: inv.ExpiresAt,
 		})
 	}
@@ -394,7 +403,8 @@ func (a *admin) declineInvitation(c echo.Context) error {
 
 func (a *admin) answerInvitation(c echo.Context, accept bool) error {
 	var body struct {
-		Token string `json:"token"`
+		Token string    `json:"token"`
+		ID    *model.ID `json:"id"`
 	}
 	if err := bind(c, &body); err != nil {
 		return err
@@ -402,11 +412,34 @@ func (a *admin) answerInvitation(c echo.Context, accept bool) error {
 	ctx := c.Request().Context()
 	now := time.Now().UTC()
 
-	inv, acc, err := store.ResolveInvitation(ctx, a.db(), body.Token, now)
+	user, err := a.currentUser(c)
 	if err != nil {
 		return err
 	}
-	user, err := a.currentUser(c)
+
+	// Two ways to name the invitation, and the SAME rule governs both.
+	//
+	// The token is the path the mail takes. The identifier is the path somebody
+	// takes who never got the mail — it landed in spam, a gateway rewrote the
+	// URL, they read it on a phone and signed in on a laptop — and who is
+	// answering it off their own list instead (design V11).
+	//
+	// The second grants nothing the first does not, because the binding is to
+	// the ADDRESS and not to the token: both paths end at the same check below,
+	// and the identifier lookup additionally will not even find a row unless the
+	// invited address is the caller's own.
+	var inv *model.Invitation
+	var acc *model.Account
+	switch {
+	case body.ID != nil:
+		if user.Email == nil || *user.Email == "" {
+			return echo.NewHTTPError(http.StatusForbidden,
+				"your account has no verified email address, so no invitation can be matched to it")
+		}
+		inv, acc, err = store.ResolveInvitationForAddress(ctx, a.db(), *body.ID, *user.Email, now)
+	default:
+		inv, acc, err = store.ResolveInvitation(ctx, a.db(), body.Token, now)
+	}
 	if err != nil {
 		return err
 	}

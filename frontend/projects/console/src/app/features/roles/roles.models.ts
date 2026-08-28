@@ -34,8 +34,19 @@ export interface Member {
   userId: string;
   subject: string;
   displayName: string;
-  roleId: string;
-  roleName: string;
+  /**
+   * ABSENT for a member who holds no role.
+   *
+   * That is somebody who accepted an invitation and is waiting for one to be assigned, and it is
+   * a legal state rather than a broken row: an invitation offers membership and names no role, so
+   * "in the account" and "allowed to do things in the account" became two steps. Such a member is
+   * authorised for NOTHING until the second step happens.
+   *
+   * Optional rather than an empty string, so the screen can tell "no role" from "a role whose
+   * name did not load" — the first is a state to act on and the second is a bug.
+   */
+  roleId?: string | null;
+  roleName?: string;
 }
 
 /** The wildcard, spelled once. */

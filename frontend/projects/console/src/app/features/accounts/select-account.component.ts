@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
@@ -9,6 +9,8 @@ import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { Account, accountIcon, accountLabel, apiErrorMessage } from '@acme/shared';
 import { AccountsService } from './accounts.service';
+import { InvitationsService } from '../invitations/invitations.service';
+import { InvitationOffer } from '../invitations/invitations.models';
 
 /**
  * The picker: which account do you want to work in (design P19, C1).
@@ -44,6 +46,35 @@ import { AccountsService } from './accounts.service';
   template: `
     <div class="ac-select">
       <h1>Choose an account</h1>
+
+      <!--
+        Invitations, above the accounts, because somebody who has one is here BECAUSE of it.
+        The link in the mail is the path we advertise and it is the path that fails: the message
+        lands in spam, a corporate gateway rewrites the URL and breaks it, somebody reads it on a
+        phone and signs in on a laptop. Without this, arriving with no team account means an empty
+        product and an instruction to go and find an email (design V11).
+
+        It grants nothing the link grants. Both require being signed in as the invited address, and
+        being signed in as it is stronger evidence than holding a message sent to it.
+      -->
+      @for (i of invitations.mine(); track i.accountId) {
+        <nz-alert
+          class="invite"
+          nzType="info"
+          [nzMessage]="'You have been invited to join ' + i.account"
+          [nzDescription]="inviteBody"
+        >
+        </nz-alert>
+        <ng-template #inviteBody>
+          <p>Invited as {{ i.email }}. It lapses on {{ expiry(i) }}.</p>
+          <div class="invite-actions">
+            <button nz-button nzType="primary" nzSize="small" [disabled]="busy()" (click)="join(i)">
+              Join {{ i.account }}
+            </button>
+            <button nz-button nzSize="small" [disabled]="busy()" (click)="refuse(i)">Decline</button>
+          </div>
+        </ng-template>
+      }
 
       @if (accounts.accounts().length > 0) {
         <p class="ac-lead">Everything in this console belongs to one account. Pick the one you want to work in.</p>
@@ -152,15 +183,75 @@ import { AccountsService } from './accounts.service';
       .add {
         margin-block-start: 2rem;
       }
+      .invite {
+        margin-block-end: 1rem;
+      }
+      .invite-actions {
+        margin-block-start: 0.5rem;
+        display: flex;
+        gap: 0.5rem;
+      }
     `,
   ],
 })
-export class SelectAccountComponent {
+export class SelectAccountComponent implements OnInit {
   protected readonly accounts = inject(AccountsService);
+  protected readonly invitations = inject(InvitationsService);
   private readonly router = inject(Router);
 
   protected readonly query = signal('');
   protected readonly error = signal<string | null>(null);
+  protected readonly busy = signal(false);
+
+  ngOnInit(): void {
+    // Unlike the account list — loaded before the first paint by app.config's initializer — this
+    // is fetched on arrival, because it is the one thing on this screen that changes without the
+    // person doing anything: somebody else issues it.
+    void this.invitations.refreshMine();
+  }
+
+  protected expiry(i: InvitationOffer): string {
+    return new Date(i.expiresAt).toLocaleDateString();
+  }
+
+  /**
+   * Accepting from here rather than from the link.
+   *
+   * There is no token, and none is needed: the invitation is bound to the ADDRESS, and this
+   * session is authenticated as it. The token only ever addressed the row.
+   */
+  protected async join(i: InvitationOffer): Promise<void> {
+    this.error.set(null);
+    this.busy.set(true);
+    try {
+      if (!i.id) return;
+      const joined = await this.invitations.acceptById(i.id);
+      // The service has already made the joined account this session's selection; `select`
+      // re-posts it, points the API at it and reloads both the session and the account list, so
+      // the screen after this one belongs to the account just joined.
+      await this.accounts.select(joined.accountId);
+      await this.invitations.refreshMine();
+      await this.router.navigateByUrl('/projects');
+    } catch (err) {
+      this.error.set(apiErrorMessage(err));
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  protected async refuse(i: InvitationOffer): Promise<void> {
+    this.error.set(null);
+    this.busy.set(true);
+    try {
+      if (!i.id) return;
+      await this.invitations.declineById(i.id);
+      await this.invitations.refreshMine();
+    } catch (err) {
+      this.error.set(apiErrorMessage(err));
+    } finally {
+      this.busy.set(false);
+    }
+  }
 
   /** What each account is called and shown as, from the one rule both this and the switcher use. */
   protected readonly label = accountLabel;

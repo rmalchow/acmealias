@@ -424,10 +424,103 @@ holding two load balancers separately does not let you issue authority over the 
 them. That refusal is deliberate: those two may be the only load balancers in the project today, and
 a third added tomorrow would silently fall under a grant you were never entitled to make.
 
+A member can hold **no role at all**. That is somebody who accepted an invitation and has not been
+given one yet — see [Inviting people](#inviting-people). They are in the account and authorised for
+nothing in it, and their row carries the picker that fixes that.
+
 `ADMIN` shows as *fixed* rather than as a disabled form, and the last member of it has no
 **Remove** button. Both are the same rule: an account must always have someone who can administer
 it, and neither editing the role's authority nor removing its last member is a thing this screen
 will help you do by accident.
+
+## Inviting people
+
+An account of one cannot do much. **Settings → Invitations** is how a second person gets in, and it
+asks for one thing: an email address.
+
+> **It does not ask for a role, and that is deliberate.**
+>
+> An invitation offers *membership*. What the new person may then do is a separate decision, made
+> after they have accepted, by somebody with the account in front of them. Under the earlier design
+> you picked a role at the moment you knew least about what the person would be doing — a fortnight
+> before it took effect, against a list of roles you might have edited in the meantime.
+
+So joining is two steps, and the second one is yours:
+
+1. You send an invitation. It appears in the pending list immediately, visible to every member.
+2. They accept. They appear in **Members** with **no role yet**.
+3. You assign a role, on that row.
+
+**Between steps 2 and 3 they can do nothing.** They can pick the account and see its name; every
+screen inside it says they hold no role and that an administrator must give them one. That is worth
+knowing before somebody messages you to say the product is empty — it is empty *for them*, and
+correctly so.
+
+### What the invited person sees
+
+They get a message with a link. Opening it shows *Join &lt;account&gt;?* with two buttons: **Join**
+and **Decline**. Opening the link does nothing by itself — it can be followed by a mail-scanning
+gateway, previewed by a client, or opened and closed, and it still works afterwards.
+
+If the message never arrives — a spam filter, a corporate gateway that rewrites URLs and breaks
+them, or a colleague who deleted it — **they do not need it.** Signing in as the invited address
+shows the invitation on the account picker, with the same two buttons. Being signed in as the
+address is stronger evidence than holding a message sent to it, so nothing is being relaxed.
+
+### A forwarded link gives nobody anything
+
+**Only somebody signed in as the invited address can accept.** Forwarding the message to a colleague
+transfers nothing; they are told the invitation is not for them, and shown the address only partly
+masked — `a***e@corp.example` — so the right person can recognise which of their own addresses is
+wanted and a stranger learns nothing they did not already have.
+
+This has an honest cost. Somebody invited at `alice@corp.example` who habitually signs in as
+`alice@gmail.com` **must create an account for the work address.** There is no way to attach the
+invited address to the account they already have, and there is not going to be one in this design:
+holding a link sent to an address is itself proof of controlling that address, so an "add this
+address to my account" button would let anybody who was forwarded the message do exactly what the
+paragraph above says they cannot.
+
+For a membership of a company's billing account that is arguably the right outcome — the membership
+belongs to the work identity and survives a personal address changing — but it will generate
+support questions, and the answer is "create the work account", not "we can move it for you".
+
+### Declining, expiring, revoking and re-sending
+
+| | |
+| --- | --- |
+| **Decline** | Their answer. It leaves your pending list and cannot be undone by a later click on the same link. It is **not** a block: you may invite them again. |
+| **Expire** | Fourteen days of silence. The link stops working and says so, naming the account so they know who to ask. |
+| **Revoke** | Yours. The link stops working immediately. No message is sent — telling somebody an offer they may never have seen has been withdrawn is noise. |
+| **Re-send** | Issues a **new** link and kills the old one, and restarts the fourteen days. |
+
+**A decline and an expiry look the same in a list and mean opposite things**, which is why declining
+exists at all. Silence tells you neither that the message was never seen nor that the person said
+no, and those call for opposite responses — a phone call, or leaving them alone.
+
+Re-send kills the previous link on purpose. Re-sending is what you do when told "I never got it",
+and the message that was never got is exactly the one that might have gone somewhere unintended.
+
+### Limits
+
+Inviting makes this service send mail to an address you chose, which is a thing that can be abused,
+so it is bounded three ways: how many invitations one account may issue in an hour, how often one
+address may be invited in a day **across every account**, and how often one invitation may be
+re-sent. A refusal says which limit you reached and when you may try again.
+
+The middle one is the one that will occasionally surprise a legitimate user: if a colleague is being
+invited into three accounts on the same day, the third is refused. It counts across accounts because
+anybody may create accounts freely, so a per-account limit would be no limit at all.
+
+### Waiting for approval
+
+While registration is closed, a person who has never signed in before is held until a member of
+staff approves them — **including somebody you invited.** An invitation confirms an *address*; it
+does not admit a *person*.
+
+The clock does not stop while they wait. An approval that takes longer than fourteen days will
+expire the invitation of somebody who did everything right, and they will sign in for the first time
+to find a dead link. If that happens, re-send it: that is one click and a fresh fortnight.
 
 ## Settings
 

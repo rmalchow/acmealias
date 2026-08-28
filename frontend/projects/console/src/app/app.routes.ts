@@ -88,6 +88,18 @@ export const routes: Routes = [
     redirectTo: 'settings',
   },
   {
+    // The invitation link's landing page.
+    //
+    // NO GUARDS, and that is the whole point of where it sits: the person arriving here belongs to
+    // no team account — they signed up because they were invited — so `accountGuard` would bounce
+    // them to the picker and they would never reach the thing they clicked. Requiring a selected
+    // account to accept an invitation is a closed loop for exactly the person invitations exist to
+    // let in (design V5).
+    path: 'invitations/accept',
+    loadComponent: () =>
+      import('./features/invitations/accept-invitation.component').then((m) => m.AcceptInvitationComponent),
+  },
+  {
     path: 'forbidden',
     component: MessageComponent,
     data: {

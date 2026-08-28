@@ -45,3 +45,24 @@
   color: inherit;
   text-decoration: underline;
 }
+
+/* A member who has not been given a role. Built like the low-balance strip above and deliberately
+ * NOT in its colour: an empty balance is a warning about something going wrong, and this is a
+ * neutral fact about an account somebody has just joined. Alarming a new colleague on their first
+ * screen would be the wrong first impression of a product that is working exactly as intended.
+ *
+ * Two elements for the same reason the strip above has two: the tint spans the window so it reads
+ * as a condition of the account, while the text is held to `.ac-page` so its first word lines up
+ * with the navigation and the heading below it. */
+.no-role {
+  padding-block: 0.5rem;
+  background: var(--ac-info-soft, rgba(23, 125, 220, 0.12));
+  border-bottom: 1px solid var(--ac-info-line, rgba(23, 125, 220, 0.35));
+  font-size: 0.875rem;
+}
+
+.no-role-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}

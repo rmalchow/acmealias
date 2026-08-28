@@ -227,6 +227,11 @@ components:
         invitation was sent to. Nothing else about the account is disclosed, and no role, because
         the invitation offers none.
       properties:
+        # Present only on GET /invitations — your own list — and absent from a token resolution.
+        # It is not a credential: answering by identifier finds the row only when the invited
+        # address is the caller's own verified one, so somebody else's identifier is
+        # indistinguishable from one belonging to no invitation.
+        id: { type: string, format: uuid }
         account: { type: string }
         accountId: { type: string, format: uuid }
         email: { type: string, format: email }
@@ -829,12 +834,18 @@ paths:
         A refusal names the invited address only in masked form.
       requestBody:
         required: true
+        description: |
+          Name the invitation by `token` (from the message) or by `id` (from GET /invitations).
+          Both are governed by the same rule: the caller must be authenticated as the invited
+          address. The identifier path additionally will not find a row unless that is already
+          true, so it discloses nothing about invitations belonging to anybody else.
         content:
           application/json:
             schema:
               type: object
-              required: [token]
-              properties: { token: { type: string } }
+              properties:
+                token: { type: string }
+                id: { type: string, format: uuid }
       responses:
         "200":
           description: Joined
@@ -860,12 +871,15 @@ paths:
         "never" are different answers and nothing here can tell which was meant.
       requestBody:
         required: true
+        description: |
+          Name the invitation by `token` or by `id`, exactly as accepting does.
         content:
           application/json:
             schema:
               type: object
-              required: [token]
-              properties: { token: { type: string } }
+              properties:
+                token: { type: string }
+                id: { type: string, format: uuid }
       responses:
         "204": { description: Declined }
         "403": { description: This invitation was sent to a different address }

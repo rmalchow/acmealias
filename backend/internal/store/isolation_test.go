@@ -65,10 +65,11 @@ var crossAccountReaders = map[string]string{
 	// What confines each of them is stated per function rather than in one
 	// sentence, because they are confined by different things and only one of
 	// them is confined by anything the caller supplies.
-	"ResolveInvitation":     "the invitee is not a member yet; confined by a 256-bit token whose hash is the only stored form",
-	"InvitationsForAddress": "spans every account by construction — 'what is outstanding for this address' cannot be asked from inside one; confined by the caller's own VERIFIED address, never by a parameter",
-	"AcceptInvitation":      "builds its scope from the account the resolved invitation names, which is the account the caller is about to become a member of and is not one of yet",
-	"DeclineInvitation":     "the same, and it must work for the same person in the same state — declining is only meaningful before joining",
+	"ResolveInvitation":           "the invitee is not a member yet; confined by a 256-bit token whose hash is the only stored form",
+	"ResolveInvitationForAddress": "the same, reached without a token; confined by the caller's own VERIFIED address, which is IN the where clause rather than compared afterwards",
+	"InvitationsForAddress":       "spans every account by construction — 'what is outstanding for this address' cannot be asked from inside one; confined by the caller's own VERIFIED address, never by a parameter",
+	"AcceptInvitation":            "builds its scope from the account the resolved invitation names, which is the account the caller is about to become a member of and is not one of yet",
+	"DeclineInvitation":           "the same, and it must work for the same person in the same state — declining is only meaningful before joining",
 }
 
 // recordDelegationWhy covers BOTH callers of the two stamping functions, because

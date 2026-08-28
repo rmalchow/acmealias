@@ -520,3 +520,47 @@ func GetInvitation(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) (*mo
 	}
 	return &inv, nil
 }
+
+// ResolveInvitationForAddress finds one outstanding invitation BY IDENTIFIER,
+// requiring that it was issued to the given address.
+//
+// This is the second way in (design V11): a person signed in as the invited
+// address answers an invitation they never opened a message about. There is no
+// token involved, and none is needed — the invitation is bound to the ADDRESS,
+// and this session is authenticated as it. The token only ever addressed the
+// row, and being signed in as the address is strictly stronger evidence than
+// holding a link sent to it.
+//
+// THE ADDRESS IS IN THE WHERE CLAUSE, not checked afterwards. An identifier is
+// guessable in a way a token is not, so a lookup that found the row first and
+// compared second would answer "does this invitation exist" to anybody who
+// tried — and worse, one refactor away from forgetting the comparison
+// altogether. Written this way, an identifier belonging to somebody else's
+// invitation is indistinguishable from one belonging to no invitation.
+//
+// Cross-account for the same reason ResolveInvitation is: the caller is not a
+// member of the account they are about to join.
+func ResolveInvitationForAddress(ctx context.Context, db *gorm.DB, id model.ID, email string, now time.Time) (*model.Invitation, *model.Account, error) {
+	normalized, err := invitation.NormalizeEmail(email)
+	if err != nil {
+		return nil, nil, err
+	}
+	var inv model.Invitation
+	var acc model.Account
+	err = CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		if err := tx.First(&inv, "id = ? AND email = ?", id, normalized).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: no invitation with that identifier for this address", invitation.ErrInvalid)
+			}
+			return fmt.Errorf("store: resolve invitation %s: %w", id, err)
+		}
+		return tx.First(&acc, "id = ?", inv.AccountID).Error
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := usableInvitation(&inv, now); err != nil {
+		return nil, nil, err
+	}
+	return &inv, &acc, nil
+}

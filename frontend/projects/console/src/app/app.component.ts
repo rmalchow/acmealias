@@ -118,6 +118,31 @@ export class AppComponent {
   });
 
   /**
+   * A member of this account who holds no role, and therefore may do nothing in it.
+   *
+   * THE SCREEN HAS TO SAY THIS OR IT LIES. Row-level security empties rather than fails, so what
+   * such a member actually gets from every listing is zero rows and no error — arithmetically
+   * correct, and indistinguishable from an account with nothing in it. Without this strip the
+   * first thing a newly joined colleague sees is a product that appears to be broken, and the
+   * conclusion they draw is about us rather than about a role nobody has assigned yet.
+   *
+   * It sits in the shell rather than on one screen for the same reason the low-balance warning
+   * does: it is a condition of the ACCOUNT, true on every screen in it, and putting it on the
+   * project list would leave the audit page and the settings page still lying.
+   *
+   * A personal account is excluded because it has no roles at all — its owner's authority is the
+   * account (design C9) — and a suspended one because it has exactly one screen of its own.
+   */
+  readonly noRoleHere = computed(() => {
+    const account = this.accounts.current();
+    if (!account || account.kind !== 'team' || account.suspended) return null;
+    if (this.onPicker()) return null;
+    const me = this.session.me();
+    if (!me || me.selectedAccountId !== account.id) return null;
+    return me.roles.length === 0 ? account : null;
+  });
+
+  /**
    * What the routed screen belongs to. The outlet is keyed on it (see the template), so a switch
    * between two accounts re-mounts the screen even when the URL does not change — which is the
    * other half of dropping the reload: every screen fetches for one account, and the one it

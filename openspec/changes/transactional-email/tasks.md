@@ -51,13 +51,19 @@
 - [x] 3.2 Read the sender identity, reply address and footer from configuration, in the layered schema's grouping
 - [x] 3.3 Point it at `mailpit:1025` in development — the compose service name, NOT `mail.localhost`, which is the web interface and is served through the HTTP overlay that SMTP does not traverse
 
-> 4.1 stays open until there is a subject to judge: the grammar is recorded where
-> subjects are built (`mail.Message`), but the first one is written by
-> `account-invitations`.
+> 4.1 was open until there was a subject to judge. `account-invitations` wrote
+> one — `Invitation to <account>` — and a test now asserts it against the grammar,
+> so this is closed.
 
 ## 4. Subjects
 
-- [ ] 4.1 Adopt the grammar of T4: the noun the message concerns comes first
+- [x] 4.1 Adopt the grammar of T4: the noun the message concerns comes first
+
+  > Closed by `account-invitations`, which wrote the first subject this service
+  > has ever sent: `Invitation to <account>`. The noun first, no constant prefix,
+  > and `TestIntegrationInvitationEndToEnd` asserts both against the message it
+  > reads back out of the sender — so the grammar is now enforced by a test rather
+  > than recorded in a comment.
 - [x] 4.2 Add NO constant subject prefix. It spends the most valuable characters in an inbox on what the sender column already says (T4)
 - [ ] 4.3 Review the identity provider's own subjects against the same grammar and override them where they disagree
 

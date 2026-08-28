@@ -71,6 +71,21 @@
   </div>
 
   <div shellBanner>
+    @if (noRoleHere(); as account) {
+      <!--
+        A member with no role. They accepted an invitation and nobody has said what they may do
+        yet, so every listing below is empty — correctly, and in a way that reads as "this account
+        has nothing in it" rather than as "you cannot see into it". This is the only thing on the
+        screen that tells them the difference, and it names the remedy rather than the lack.
+      -->
+      <div class="no-role">
+        <div class="ac-page no-role-inner">
+          <span nz-icon nzType="lock"></span>
+          You are a member of {{ account.name }} and have not been given a role yet, so there is
+          nothing here for you to see. An administrator of this account can assign you one.
+        </div>
+      </div>
+    }
     @if (lowBalance(); as account) {
       <!-- Before zero, not at it (task 6.10). It names the amount and the consequence, because
            "low balance" without either is a colour rather than a warning. It spans the window
