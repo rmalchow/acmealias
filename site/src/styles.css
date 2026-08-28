@@ -985,6 +985,43 @@ h1 {
   vertical-align: top;
 }
 
+/* Placed AFTER the rules above and not in the media block near the top of this
+ * file, which is where it was first written and where it did nothing: same
+ * specificity, and the base `min-inline-size` below is declared later in the
+ * source, so it won. A media query is not a specificity boost. */
+@media (max-width: 34rem) {
+  /* THE COMPARISON STAYS A COMPARISON. The obvious mobile treatment is to stack
+     the table into one card per row — and it destroys the only thing this
+     section does, which is let somebody see both columns at once and notice
+     that the technical rows are identical. A stacked table answers "what does
+     Team have" one row at a time; nobody reads eighteen cells and holds them in
+     their head. So the columns stay side by side and the TABLE gives way
+     instead: no floor, tighter cells, smaller type.
+
+     The 34rem floor is what keeps the columns readable on a desktop where there
+     is room for it. Below this breakpoint there is no room, and a floor that
+     produces a sideways scroll is worse than columns that are merely narrow —
+     the scroll hides the Team column completely, which is the one somebody is
+     reading the table to find out about. */
+  .compare {
+    min-inline-size: 0;
+    font-size: 0.9rem;
+  }
+
+  .compare th,
+  .compare td {
+    padding: 0.6rem 0.4rem;
+  }
+
+  /* The price row's small print is the one thing that genuinely does not fit:
+     two full sentences under a two-column price, in a column a third of a phone
+     wide. It keeps its own line rather than its own column-width. */
+  .compare .sub {
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+}
+
 .compare thead th {
   font-size: 1.05rem;
   letter-spacing: -0.01em;
