@@ -1,356 +1,257 @@
-> **Read this document against its own proposal, which reduced it.**
->
-> Everything below was written for a service that hosted customers' zones and steered DNS answers by
-> health. `dns-records` and `satellite-sync` are archived unimplemented, so there is no fleet, no
-> recordset and nothing to steer — and with them go quorum, hysteresis, the fail-open rule,
-> per-family failover state, correlated-family suppression and the late-report rules. **Every one of
-> those existed because a check result changed what the internet was told.** Nothing here does that
-> any more.
->
-> What survives is the half the proposal called a byproduct: one TLS handshake per node per address
-> family, hours apart, answering the question the challenge history opens and cannot close — a
-> certificate authority validated, but was a certificate ever installed, and does it cover the right
-> names.
->
-> Read the mechanisms below as *how a thing like this was designed when it had to be trusted with
-> steering*, not as work to do. The proposal is the current scope; `tasks.md` is the current plan.
+# Design
+
+Decisions are numbered `H1`, `H2`, … and referred to by number from `tasks.md`, from `proposal.md`,
+and from `metering-and-credits`.
 
 ## Context
 
-`dns-records` makes the service authoritative for customer zones, so what a recordset holds is what
-the internet is told. `satellite-sync` puts a fleet of processes near the resolvers doing the asking,
-each already holding a replica and already talking to the centre in both directions.
+`challenge-history` records that a certificate authority came to a challenge name, looked, and was
+satisfied. Then it stops, because everything after that happens on the customer's machine. The
+system has no way to tell the difference between a customer whose renewal completed and a customer
+whose renewal completed and whose certificate is still sitting in a directory nobody deployed.
 
-Those two together make health-checked DNS a small addition rather than a new subsystem: the
-probes have somewhere to run, the results have a channel home, and the decisions have a way back out.
+This change closes that gap and does nothing else. A TLS handshake against each of a load balancer's
+node addresses tells us what certificate that address actually serves: when it expires, who issued
+it, and which names it covers. Comparing the names it covers against the account's inventory tells us
+the thing a customer most wants told and can least easily see for themselves — that
+`shop.example.com`, added last week, is covered by no certificate anywhere.
+
+Terms used throughout, defined once:
+
+- **Observation** — one completed (or failed) TLS handshake against one node address, and what was
+  read from it.
+- **Node address** — one address of one node of one load balancer. A dual-stack node is two node
+  addresses.
+- **Covered name** — a name appearing in the subject alternative name extension of an observed
+  certificate.
+- **Uncovered domain** — a domain in the account's inventory that appears in no observed certificate.
 
 There is an existing checker that this is deliberately not. `internal/resolvercheck` verifies that a
 customer published the `CNAME` we asked for, and its documentation is emphatic about its status:
 *"Results are advisory only: DNS is somebody else's mutable state, so nothing here is ever persisted
-as fact."* The checks designed here are persisted, metered, and change what is served. Sharing code
-between them would be a mistake; sharing a mental model would be a worse one.
-
-Terms used throughout, defined once:
-
-- **Probe** — one attempt by one satellite to determine one fact about one target: is this address
-  reachable, what certificate does this node serve.
-- **Cycle** — one scheduled round of probes for a target.
-- **Quorum** — the number of satellites that must agree before the centre changes a node's state.
-- **Hysteresis** — requiring several consecutive agreeing cycles before changing state, so that a
-  marginal target does not oscillate.
-- **Health-checked recordset** — a recordset whose served values are its stored values filtered by
-  current node state.
-- **Fail-open** — serving everything when the check system's conclusion is not credible.
+as fact."* That is the right posture for a question about someone else's zone. An observation here is
+the opposite: it is a fact about what a server presented to us at a moment in time, it is persisted,
+and it is what a customer is shown. The two share the shape of an outbound probe and nothing else.
+Sharing code between them would be a mistake; sharing a mental model would be a worse one.
 
 Constraints that shaped everything below:
 
-1. **The check system must never cause a worse outage than the thing it watches.**
-2. **Every nameserver must give the same answer for the same name.**
-3. **A re-delivered report must not change a decision twice** — inherited from `satellite-sync`, and
-   sharper here, because a duplicate report can push a node over a quorum threshold.
-4. **Check results are billable**, so their volume is a cost to the customer and their cardinality is
-   a design constraint.
+1. **Nothing acts on an observation.** It is displayed and it is retained. No answer changes because
+   of it — see H1, which is the constraint that removes most of this document's former contents.
+2. **The service never holds a certificate or a private key.** It looks at what is served.
+3. **The billable unit is what the customer configured**, not how many times we looked, because how
+   often we look is our decision to change.
+
+## What this change used to be, in one paragraph
+
+This was designed as health-checked DNS: a fleet of satellites probing customers' nodes, the centre
+applying quorum, hysteresis and a fail-open rule to their reports, and the resulting recordset pushed
+back out so that a failing node left the answers. `dns-records` and `satellite-sync` are archived
+unimplemented and the service does not host customers' zones, so there is no recordset and nothing to
+steer. Quorum, hysteresis, the never-serve-empty rule, per-family decision state, correlated-family
+suppression and the late-report rules are all gone with it — every one of them existed because a
+check result changed what the internet was told. Reachability probing went too, for a reason that is
+not about the fleet at all: nothing would act on the result, and every operator being monitored
+already has monitoring. That paragraph is the whole of the archaeology; everything below is work to
+do.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Health-checked DNS answers that are consistent across the fleet.
-- A decision path that fails towards serving rather than towards silence.
-- Certificate observation that closes the loop the challenge history cannot.
-- Per-node history that answers "when did this start".
+- Know what certificate each node address actually serves, and when it expires.
+- Know which inventory domains are covered by no certificate at all.
+- Keep enough history that "since when" is answerable.
+- Emit one billable event shaped like what the customer asked for.
 
 **Non-Goals:**
 
-- Alerting, notification, or on-call integration.
-- Application-level assertions, synthetic transactions, or response-body checks.
-- Latency-based or geographic traffic steering.
-- Obtaining, renewing or installing certificates.
+- Reachability or latency monitoring. Cut deliberately — see the proposal.
+- Steering, failover, or any effect on what is served. There is nothing to steer.
+- Alerting and on-call integration. The data supports it; who gets told is a separate question.
+- Application-level assertions, synthetic transactions, response-body checks.
+- Obtaining, renewing, installing or holding certificates or keys.
 
 ## Decisions
 
-### H1. Satellites probe, the centre decides
+### H1. We observe, and nothing acts on what we see
 
-A satellite executes probes and reports results. It never changes what it serves on the basis of its
-own observation.
+An observation changes no answer, gates no request, and suspends nothing. It is written to history
+and it is shown to a human.
 
-The temptation is real and should be named: local reaction gives failover in milliseconds and works
-while the satellite is disconnected. It is rejected for two reasons that both come from constraint 2.
+This is worth stating as a decision rather than leaving as an absence, because the absence is what
+makes the rest of this document short. A check result that changed what the internet was told would
+need to be trusted, and everything that makes a check result trustworthy — several observers agreeing
+before a state changes, several consecutive agreeing cycles before it changes again, a rule that
+serves everything when the conclusion is not credible — is machinery whose entire justification is
+that something downstream believes it. Nothing downstream believes this. One observer is therefore
+enough, disagreement between two runs is just two facts about two moments, and a run that fails
+wholesale costs a gap in a chart.
 
-First, split brain. Two satellites with different network paths reach different conclusions, and the
-same name resolves differently depending on which nameserver a resolver happened to ask:
+The one thing that survives from that machinery is its motivating rule, because it now applies
+trivially: **the observation must not be able to cause a worse problem than the thing it is
+watching.** A system that only reads and never decides satisfies it by construction, which is most of
+why the reduced scope is worth having.
+
+**Rejected: keeping a reachability signal "since we are connecting anyway".** The handshake does
+tell us whether the address answered, and it is nearly free to record. It is still rejected as a
+product surface: a status display that nobody acts on invites a customer to treat it as monitoring,
+and a monitoring signal sampled every few hours is worse than the monitoring they already have. What
+the handshake's failure *is* good for is explaining a missing observation (H3), which is a different
+claim — "we could not look" rather than "your node is down".
+
+### H2. One handshake per node address, and the certificate names itself
+
+Connect to the node address, complete a TLS handshake, and record from the certificate offered: its
+not-before and not-after, its issuer, its serial, and the names in its subject alternative name
+extension.
+
+The alternative is a matrix: for each node, for each domain, connect with that domain as the server
+name. Four nodes and fifty domains is two hundred handshakes to discover what is almost always four
+certificates. It is rejected on cost, which under constraint 3 is a cost we absorb rather than pass
+on, and it is rejected for a second reason that matters more: taking the covered names *from the
+certificate* rather than confirming them one at a time is what makes H4's comparison possible. The
+matrix can tell you that `shop.example.com` was refused; only the union of observed names can tell
+you that it is covered by nothing anywhere.
+
+**Both address families are probed, separately.** A node with an IPv4 and an IPv6 address is two
+node addresses, reached over different transit and through different firewalls. A certificate
+deployed on one and not the other, or an IPv6 listener that was never configured with the renewed
+certificate at all, is a real failure and one that is invisible to a dual-stack visitor and to the
+customer's own browser. Splitting the observation is the only way to see it. The doubled probe volume
+lands on us and not on the invoice (H6).
+
+**Known limitation, accepted:** a server that offers different certificates for different server
+names is observed only for whatever it presents by default. A per-name probe remains available later,
+targeted at exactly the names H4 reports as uncovered, which is precisely where the distinction
+matters. Building it now would be building the matrix for the case that has not yet been shown to
+occur.
+
+### H3. A failed handshake is an observation with an error, not a missing row
+
+If the address refuses the connection, times out, or presents something that is not a certificate we
+can read, that is recorded as an observation carrying the error.
+
+The tempting alternative is to write nothing and let the absence speak. It does not speak clearly
+enough. "We have no certificate for this node" and "we could not reach this node to look" are
+different sentences with different audiences — the first is about the customer's deployment, the
+second is about a network path that may well be ours — and a gap in a table is indistinguishable from
+a scheduler that did not run. Recording the error also means the covered-names comparison in H4 can
+be honest about its own coverage: a domain is *uncovered* only when we successfully read certificates
+and none of them named it.
+
+This is the sense in which the failure is still useful without being monitoring (H1): it qualifies
+our own conclusions rather than making a claim about the customer's availability.
+
+### H4. The interesting output is the comparison, not the row
+
+Per-node expiry and issuer are the obvious output and the less valuable one. Most customers can find
+out what certificate a node is serving. What they cannot easily see is the join:
 
 ```
-dig www.example.com @ns1   →  203.0.113.10, 203.0.113.11
-dig www.example.com @ns2   →  203.0.113.10, 203.0.113.11, 203.0.113.12
+inventory domains          example.com, www.example.com, shop.example.com
+observed SAN union         example.com, www.example.com
+                           ────────────────────────────
+uncovered                  shop.example.com
 ```
 
-That is close to undebuggable from the customer's side, because the answer changes when they retry.
+Two derived answers come out of the observation history and both are reported:
 
-Second, blast radius in the wrong direction. A satellite with a bad transit path to one node would
-remove a perfectly healthy host from the answers it gives — and it gives them to everyone who resolves
-through it.
+- **Domains covered by no observed certificate.** The comparison above, over the account's inventory.
+  This is the failure the challenge history structurally cannot see: validation succeeded, and the
+  certificate was never deployed, or was deployed to two nodes out of four, or covers the names the
+  customer had last month.
+- **Approaching expiry**, reported with the lead time a renewal actually needs rather than at the
+  moment it lapses. An expiry report that arrives on the expiry date is a post-mortem.
 
-Centralising the decision costs one report interval plus one push before an answer changes. H4
-explains why that cost is close to irrelevant.
+Both are computed from stored observations rather than at probe time, so a change to the inventory
+re-answers them without waiting for the next cycle.
 
-### H2. Quorum, and what it protects against
+### H5. The cadence is hours, and history is kept longer than it is dense
 
-A node's state changes only when at least *N* satellites agree, from a probing set of at least *N*
-distinct satellites assigned to that node.
+Nothing depends on an observation inside a renewal window (H1), certificates do not change between
+one hour and the next, and a renewal has about thirty days of slack. So the schedule is measured in
+hours. There is no argument here about failover latency because there is no failover; the only thing
+the interval buys is how stale the console can be, and a few hours of staleness against a thirty-day
+window is not a number worth tuning.
 
-```
-sat-eu   node3 DOWN ┐
-sat-us   node3 DOWN ├──> centre: 2 of 3 agree ──> node3 leaves the recordset
-sat-ap   node3 OK   ┘                             ──> pushed to every satellite
-```
+That cadence makes retention easy in a way the old design's per-second reachability samples never
+were. Observations accumulate at nodes × families × a handful per day, which is small enough to keep
+at full resolution for a long window and downsample rather than drop beyond it. The value of the
+history is a *trend measured in weeks* — this node has been renewing on time for six months; this one
+stopped in March — so the retention rule is stated in weeks and the downsampling keeps one
+observation per node address per day rather than discarding the period.
 
-What quorum buys is protection against the checker being wrong rather than the node being down: a
-transit failure between one satellite and one node, a satellite whose egress is degraded, a satellite
-whose clock or configuration is off. Those produce a minority opinion, and a minority opinion changes
-nothing.
+**Rejected: keeping only the latest observation per node address.** It is what the console screen
+needs and it is one row per address. Rejected because it cannot answer "since when", which is the
+first question asked about every problem this change exists to surface.
 
-Scheduling follows from this: each node must be assigned to enough satellites that quorum is
-reachable, and those satellites should not share a network path if the point is to distinguish node
-failure from path failure.
+### H6. The invoice is a function of what the customer configured
 
-### H3. Never serve an empty answer
+`metering-and-credits` prices the events; this change decides their shape, and the shape is the
+decision.
 
-If every value in a health-checked recordset fails quorum, the recordset is served **in full**, as
-though no checks existed.
+The billable event is **`node.observed`: a count over an interval, one row per account per period per
+configured node**, emitted by the same periodic job that emits every other rate event. It is not one
+row per handshake.
 
-This is the single most important rule here and it will look wrong to a reader who thinks of checks
-as authoritative. The reasoning is about likelihood: "all four of the customer's nodes became
-unreachable simultaneously" is a rare event, while "our probing is broken", "a shared upstream path
-failed", or "a configuration change made every probe fail" are common ones, and they produce exactly
-the same observation.
+The customer chose *"observe this node"*. They did not choose the interval, and they did not choose
+that a dual-stack node is two handshakes rather than one. Both of those are ours, and we will change
+them: halving the interval for our own confidence must not double an invoice, and a node acquiring an
+IPv6 address must not cost more to observe because we decided to look at it twice. Billing per
+configured node per period puts the multiplication on our side of the line, which is the same side as
+the engineering decisions that cause it.
 
-Between serving addresses that may be dead and serving nothing, the first can still work — the
-failure may be in the path from our satellites and not in the path from the user — and the second
-cannot. Constraint 1 in one sentence: the monitoring must not be able to take down something it is
-only supposed to be watching.
-
-A recordset serving all values while all of them fail checks is an alarm-worthy state, and is
-reported as such. It is not, however, a state in which we stop answering.
-
-### H10. Health state is per address family, and so is every rule built on it
-
-A node has an IPv4 address and, increasingly, an IPv6 address. They are reached over different
-transit, through different firewalls, and they fail independently — an IPv6 path breaking while IPv4
-stays healthy is one of the most common partial failures on the internet, and it is invisible to any
-check that treats a node as a single thing.
-
-So the unit of state is **(node, address family)**, not node. `node3` may be up on IPv4 and down on
-IPv6 simultaneously, and that is a normal condition rather than an inconsistency to be resolved.
-Quorum in H2 is counted per family; hysteresis in H5 is counted per family; the recordset filter in
-H9 applies the IPv4 state to the `A` recordset and the IPv6 state to the `AAAA` recordset.
-
-**H3's fail-open rule must be evaluated per family as well, and this is the part that is easy to get
-wrong.** If it were evaluated across both families together, the following happens: our satellites'
-IPv6 transit breaks, all six of a customer's IPv6 addresses fail quorum, the `A` recordset is still
-healthy so "not everything failed" is true, and the `AAAA` recordset is filtered down to nothing.
-The customer's `A` records answer normally, so a dual-stack visitor is fine and nobody notices —
-except IPv6-only clients, who now receive an empty `AAAA` answer for a name that plainly exists, and
-simply cannot reach the site. An empty `AAAA` alongside a healthy `A` is worse than either extreme:
-it is a real outage for a minority, invisible in the aggregate, and caused entirely by our own
-transit.
-
-Evaluated per family, the same event serves the `AAAA` recordset in full, exactly as H3 intends —
-possibly-dead addresses beat certainly-no-addresses — and raises the alarm H3 already describes.
-
-**Correlated failure across accounts is our problem, not theirs.** One family failing for one customer
-is a customer event. The same family failing for *many* customers at once has one overwhelmingly
-likely cause: our own satellites' connectivity for that family. So when a family's failures cross a
-threshold across unrelated accounts within one interval, family-wide withdrawal is suppressed
-globally — every recordset of that family serves in full — and an operator alert is raised naming the
-family and the satellites involved. This is H3's reasoning applied one level up: the shared dependency
-is ours, and monitoring must not take down what it is only watching, at fleet scale as well as at
-recordset scale.
-
-**Cost, stated plainly.** This doubles the probe volume, and `metering-and-credits` bills what the
-customer configured rather than what our quorum multiplies it into, so the doubling lands on us. It is
-the correct place for it: the customer asked for a dual-stack node to be checked, not for one probe
-per family per satellite.
-
-### H4. The time to live dominates, so choose it with the interval
-
-The apparent cost of central decision-making is latency: report interval, then decision, then push.
-It is worth putting next to the number that actually governs failover.
-
-A resolver that cached `www.example.com` with a 300-second TTL will not ask again for up to five
-minutes. Against that, a 60-second decision loop is noise. Conversely, a 10-second decision loop
-behind a 300-second TTL is effort spent on something no client will observe.
-
-So the two are chosen together:
-
-| TTL on health-checked recordsets | Useful check interval | Actual failover time |
-| --- | --- | --- |
-| 300s | 60s | up to ~6 minutes |
-| 60s | 30s | up to ~1.5 minutes |
-| 30s | 15s | up to ~45 seconds |
-
-The lever for fast failover is the TTL, and a low TTL is what makes a fast decision loop worth
-paying for — in query volume to satellites, in probe volume, and in metered check events. Health-checked
-recordsets therefore get their own TTL default, lower than the ordinary one, rather than inheriting
-whatever a zone uses.
-
-### H5. Hysteresis, asymmetric on purpose
-
-A node is marked down after *K* consecutive failing cycles and comes back after *M* consecutive
-passing cycles, with *M* > 1.
-
-Without it a node on a lossy path oscillates, and here oscillation is not merely untidy: each state
-change is a recordset change distributed to every satellite in the fleet, so a flapping node
-generates fleet-wide write amplification.
-
-The asymmetry is deliberate. Removing a node is the safer error — the remaining nodes absorb the
-traffic — while returning a node that is not actually healthy sends real traffic into a failure. So
-recovery is required to be more convincingly demonstrated than failure.
-
-### H6. Certificates are observed per node, per distinct certificate
-
-Connect to the node, complete a TLS handshake, read the certificate offered, and record its expiry,
-its issuer, and the names in its subject alternative name extension.
-
-The matrix alternative — one handshake per (node, domain) pair with the domain as the server name — is
-two hundred probes for four nodes and fifty domains, to observe what is usually four certificates. It
-is rejected on cost, which under constraint 4 is the customer's cost as well as ours.
-
-Taking covered names from the certificate rather than probing per name yields something better than
-the matrix gives directly: comparing the union of observed names against the account's inventory
-identifies **domains covered by no certificate at all**, which is the failure a customer most wants
-told about and cannot easily see themselves.
-
-The issuer is recorded because it closes the loop described in the proposal. The service answers a
-DNS-01 challenge; `challenge-history` records that a certificate authority came and validated; and
-then nothing else in the system can tell whether a certificate was ever installed. Observing the
-served certificate completes the chain, and the failure it catches — validation succeeded, deployment
-did not — is invisible everywhere else.
-
-**Known limitation, accepted:** a server offering different certificates for different server names
-is observed only for the name probed. A per-name probe remains available later, targeted at names that
-no observed certificate covers, which is exactly where the distinction matters.
-
-### H7. Check results are history; the decision state is separate
-
-Two different things with two different lifetimes:
-
-- **Results** are an append-only time series: which satellite probed which target, when, with what
-  outcome and latency. Kept for trend, for "when did this start", and for the status display.
-- **State** is the current conclusion per node — up or down, how many consecutive cycles have agreed —
-  which is small, mutable, and read on every decision.
-
-Keeping them apart means retention on the history can be aggressive without endangering the decision
-path, and the decision path does not scan a growing table.
-
-Retention is a real decision rather than a default: satellites × nodes × cycles accumulates fast. The
-working shape is full resolution for a short window, downsampled beyond it, with certificate
-observations kept longer than reachability samples because their natural cadence is days and their
-value is the trend towards an expiry date.
-
-### H8. Reports are idempotent, and here that is a correctness requirement
-
-`satellite-sync` specifies batch identifiers and discarding re-deliveries. In this change that stops
-being hygiene: a re-delivered batch counted twice can supply the majority that ejects a node, and can
-advance a hysteresis counter past its threshold.
-
-So the centre records results keyed such that re-delivery is a no-op, and quorum counts **distinct
-satellites**, not reports — a satellite reporting the same cycle twice contributes one opinion.
-
-### H11. A report that arrives late is history, not evidence
-
-A satellite that could not reach the centre keeps probing. When it reconnects it has a backlog, and
-what to do with that backlog has three parts, which are decided differently.
-
-**Serving, while disconnected, is frozen.** H1 already settles this: satellites probe and the centre
-decides, so with the centre unreachable there is nobody to change a recordset and every satellite
-continues to serve the last state it was pushed. That is the intended behaviour, not a degradation to
-be worked around.
-
-**Backlogged results are recorded, and excluded from quorum.** A satellite reconnecting after four
-hours delivers 480 cycles' worth of opinions about a node. Feeding those into H2 and H5 means running
-quorum and hysteresis *over the past*: the backlog can supply the majority that ejects a node which
-recovered two hours ago, and it is precisely the hazard H8 identifies — a re-delivered or delayed
-report pushing a counter past its threshold. So late results are written to the history of H7, where
-they answer "when did this start" and populate the status display, and they are marked such that the
-decision path ignores them. Only fresh reports — those within one interval of the cycle they describe
-— count towards quorum.
-
-**Backlogged results are not billed.** `metering-and-credits` bills checks on delivery. A four-hour
-backlog arriving at once would bill four hours of checks in a single moment, which can push an account
-into suspension because of *our* outage. Late results are therefore free. The customer gets four hours
-of unbilled checking; the alternative is a suspension caused by our own downtime, and there is no
-version of that argument we want to have with a customer.
-
-The asymmetry is deliberate and worth stating in one line: **a late result is good enough to look at
-and not good enough to act on or charge for.**
-
-### H9. Health-checked recordsets are filtered at serve time from state, not rewritten
-
-A health-checked recordset stores its full set of values. What is served is those values filtered by
-current node state.
-
-The alternative — rewriting the stored recordset when a node leaves — would lose the information that
-the node belongs to the set, so restoring it would require remembering it somewhere else anyway. It
-would also make a customer's edit and a failover decision write to the same field, with the ordering
-problems that implies.
-
-So the stored recordset is the customer's intent, node state is the fleet's observation, and the
-served answer is a function of both, computed centrally and distributed as the served result.
+The observations themselves are operational data and stay out of the credit ledger entirely — their
+own table, their own retention (H5), no deduction row. `metering-and-credits` M11 states the general
+rule they are an instance of.
 
 ## Risks / Trade-offs
 
-- **The check system causes an outage it was meant to prevent** → fail open when everything fails
-  quorum (H3); the state is alarmed rather than acted upon.
-- **A node flaps and amplifies writes across the fleet** → asymmetric hysteresis (H5).
-- **A duplicate report ejects a node** → quorum counts distinct satellites, and re-delivery is a no-op
-  (H8).
-- **Failover is slower than the customer expects** → TTL is the governing number and is chosen with the
-  interval (H4); documented so the expectation is set correctly rather than tuned in the wrong place.
-- **A satellite with a degraded path reports everything down** → it holds a minority opinion (H2), and
-  a satellite whose reports disagree persistently with its peers is itself an alarm.
-- **Check history grows without bound** → separated from decision state, downsampled, retained by
-  policy (H7).
-- **A per-server-name certificate mismatch is missed** → accepted, with per-name probing available for
-  names no observed certificate covers (H6).
-- **Metered check volume surprises a customer** → the billable unit and its price are
-  `metering-and-credits`; what this change controls is that cardinality is per node and per
-  certificate, not per node-domain pair.
+- **A customer reads the certificate view as uptime monitoring** → the surface says what it is, and
+  reachability is deliberately not reported (H1); the only failure shown is our own inability to look
+  (H3).
+- **A server presenting different certificates per server name is observed wrongly** → accepted, with
+  per-name probing available later and aimed at the names H4 already flags as uncovered (H2).
+- **The uncovered-domain report is wrong because we could not connect** → a failed handshake is a
+  recorded error rather than an absence, and does not contribute to "covered by nothing" (H3).
+- **Observation history grows** → it is hours-cadence data, retained by a stated policy and
+  downsampled beyond a full-resolution window (H5).
+- **Probe volume surprises us on the bill** → it cannot reach the invoice: the billable unit is the
+  configured node, not the handshake (H6).
+- **We are trusted with a private key by implication** → the service connects as a client and reads
+  what is presented. It never obtains, installs or holds a certificate or a key, and that boundary is
+  what keeps this out of the customer's trust chain.
 
 ## Migration Plan
 
-1. Add check definitions, results history, node state, and certificate observations to the model and a
-   migration.
-2. Add `internal/healthcheck` probe execution to the satellite; emit results on the existing report
-   channel.
-3. Add central quorum and hysteresis evaluation over reported results.
-4. Add health-checked recordsets to `dns-records`, served as stored values filtered by node state
-   (H9), with their own lower TTL default.
-5. Implement the fail-open rule and alarm on the all-down state (H3).
-6. Add certificate observation and the uncovered-domain comparison (H6).
-7. Add the console status view and history.
-8. Emit delivered check reports as metering events for `metering-and-credits`.
+1. Add `certificate_observations` to the model and a migration, with the materialized ownership
+   columns and row-level security every tenant table has.
+2. Add the observer: one handshake per node address, on an hours-scale schedule, recording success
+   and failure alike (H2, H3).
+3. Add the derived answers — uncovered domains and approaching expiry — computed from stored
+   observations (H4).
+4. Add retention and downsampling (H5).
+5. Emit `node.observed` from the periodic rate job (H6).
+6. Add the management API listing and the console view.
 
-**Rollback**: recordsets are not health-checked unless configured to be, so the failover path is
-inert until enabled per recordset; disabling it restores unfiltered serving immediately.
+**Rollback**: nothing depends on an observation, so the observer can be disabled and the table left
+in place with no effect on any other path. That is the whole benefit of H1, stated as an operational
+property.
 
 ## Open Questions
 
-- **What are the default quorum size, K and M?** Quorum of 2 from 3 assigned satellites, K=3, M=5 is
-  the working assumption. All three want validation against real probe data rather than argument.
-- **How are satellites assigned to nodes?** Enough for quorum, and ideally not sharing a network path —
-  but expressing "does not share a path" is itself unsolved, and geography is a poor proxy for it.
-- **Does the customer choose the check interval?** It is a cost lever and a failover-speed lever at
-  once, which argues for exposing it; it is also a way to generate metered events, which argues for
-  bounding it.
-- **How long is certificate history kept?** Longer than reachability history, since its value is a
-  trend measured in weeks — but a number is wanted.
-- **What threshold makes a family-wide failure "correlated" (H10)?** Some fraction of unrelated
-  accounts showing the same family failing within one interval. The fraction wants real data; the
-  suppression rule does not depend on the number.
-- **How long may a result be delayed and still count as fresh (H11)?** One interval is the working
-  answer, which is the shortest defensible one. A satellite that is merely slow rather than
-  disconnected should not silently lose its vote.
-- **Should an all-down recordset be reported to the customer as an incident?** It is our strongest
-  signal that something is badly wrong, and it is exactly when a customer most wants to be told; but
-  it is also the signal most likely to be caused by our own checking being broken.
+- **What is the observation interval, in hours?** Six is the working assumption — four observations a
+  day against a thirty-day renewal window. It wants a reason rather than a default, but no decision
+  below it depends on the number.
+- **How long is full-resolution history kept before downsampling, and how long after?** Weeks and
+  months respectively (H5); the numbers want a look at real volume for a real account.
+- **How much lead time does the expiry report use?** Long enough to cover a failed renewal and a
+  retry, which argues for something like two weeks rather than two days.
+- **Is a node with no observation ever reported as a problem?** A node configured for observation
+  that has produced only failed handshakes for a week is either broken or gone, and we cannot tell
+  which. Reporting it risks blaming a customer for our own transit; staying silent risks a customer
+  believing they are covered.
+- **Does the customer choose which nodes are observed, or is it every node in a load balancer?**
+  Per node is the finer control and is also the billable unit (H6), which argues for making it
+  explicit rather than implicit in the inventory.

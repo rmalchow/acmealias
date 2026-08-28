@@ -2,11 +2,11 @@
 
 ## 1. State
 
-- [ ] 1.1 Add exactly TWO nullable columns to `domains`: `last_checked_at` and `last_success_at`. No activation boolean, no failure counter — both would restate `last_success_at` and the first bug is the row where they disagree (A1)
-- [ ] 1.1a Derive everything from them: active is `last_success_at IS NOT NULL`; the cadence is NULL→minutes, set→daily; "broken since" is `now - last_success_at`
-- [ ] 1.2 Put the state on the DOMAIN, not the alias. A wildcard and its apex share one delegation today and both are activated by one observation; putting it on the alias makes them share a fate, which is right now and silently wrong the moment anything gives a domain its own alias (A1)
-- [ ] 1.3 Migration; every existing domain gets `last_success_at` backfilled to now, since they predate the rule and refusing them would be a regression dressed as a feature
-- [ ] 1.4 Regenerate `internal/store/schema.sql` via the golden test
+- [x] 1.1 Add exactly TWO nullable columns to `domains`: `last_checked_at` and `last_success_at`. No activation boolean, no failure counter — both would restate `last_success_at` and the first bug is the row where they disagree (A1)
+- [x] 1.1a Derive everything from them: active is `last_success_at IS NOT NULL`; the cadence is NULL→minutes, set→daily; "broken since" is `now - last_success_at`
+- [x] 1.2 Put the state on the DOMAIN, not the alias. A wildcard and its apex share one delegation today and both are activated by one observation; putting it on the alias makes them share a fate, which is right now and silently wrong the moment anything gives a domain its own alias (A1)
+- [x] 1.3 Migration; every existing domain gets `last_success_at` backfilled to now, since they predate the rule and refusing them would be a regression dressed as a feature
+- [x] 1.4 Regenerate `internal/store/schema.sql` via the golden test
 
 ## 2. The worker
 

@@ -257,8 +257,8 @@ unverifiable notification changes nothing and is recorded as an attempt.
 
 **Rejected: subscriptions.** The original's model — a monthly plan carrying quotas, with
 subscription state driving suspension. Rejected because `metering-and-credits` replaced the
-economic model entirely: charges are per publish, per delivered check, and per zone over time, none
-of which a flat plan expresses. Retaining subscriptions alongside credits would mean two billing
+economic model entirely: charges are per publish and per configured node observed, neither of which
+a flat plan expresses. Retaining subscriptions alongside credits would mean two billing
 concepts, two suspension rules, and an invoice nobody can explain.
 
 **Rejected: charging a card at the moment of consumption.** It removes prepayment and the whole
@@ -354,7 +354,7 @@ That question is independent of payment, so its answer must be too:
 
 - A prepaid account with a large balance is not thereby entitled to publish a million simultaneous
   challenge values. Money buys metered activity, not the right to exhaust a shared structure — the
-  zone view is held in memory and served from by every satellite.
+  challenge zone view is held in memory by every process that answers queries.
 - An internal deployment bills nobody and still wants the protection.
 - The first abusive account will not be a paying one, so a limit that only applies to paying
   accounts protects nothing at the moment it is needed.
@@ -433,10 +433,12 @@ somebody simplifies the ingress, so it belongs in a test rather than only in a r
 must answer 404 through the customer hostname regardless of who is asking.
 
 One dependency this arrangement creates and which should be an operational decision rather than an
-accident: `console`, `www`, `admin` and `auth` all live inside `acmealias.com`, which is also a parent of
-two of the fleet's nameservers. If that zone is served by the fleet itself, then a fleet-wide failure
-takes down the console and the marketing site along with customers' DNS — including the pages a
-customer would visit to find out what is happening.
+accident: `console`, `www`, `admin` and `auth` all live inside `acmealias.com`, which is also the
+domain whose challenge zone the service is authoritative for. If the `acmealias.com` zone is served by
+this service, then an outage here takes down the console and the marketing site along with challenge
+answering — including the pages a customer would visit to find out what is happening. The apex and
+these four names should therefore be served by something that is not this service, so that the status
+page survives the service being down.
 
 ### U11. The site carries the obligations, because several decisions elsewhere say "published"
 
@@ -560,6 +562,9 @@ an internal deployment.
   load balancers the way the internal one does, or a public account gets one default project and
   load balancer it never names and adds domains straight to it. This is a decision about screens; the
   vocabulary half was settled by `rename-lb-pair-to-load-balancer`.
-- **Where does the unhoused billing rule go?** That an unverified domain is not charged for.
-  Probably beside `metering-and-credits`' zone-time requirement, and possibly moot, since the billed
-  unit there is the zone rather than the domain.
+- **Where does the unhoused billing rule go?** That an unverified domain is not charged for. This is
+  now largely answered from the other end: `domain-activation` keeps a domain offline until its
+  delegation has been seen, and an offline domain publishes nothing — so under a per-publish charge
+  there is nothing to bill for and the rule needs no separate statement. What remains open is
+  narrower: whether an *activated* domain that has stopped resolving should keep accruing, which is
+  a question about `metering-and-credits`' unit rather than about this change.

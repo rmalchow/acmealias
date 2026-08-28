@@ -1,12 +1,12 @@
 ## ADDED Requirements
 
-### Requirement: Credits are held per account and are prepaid
+### Requirement: Activity is charged against the account's existing balance
 
-The service SHALL hold a credit balance per account, above projects, so that an account with several
-projects has one balance.
+The service SHALL charge metered activity against the credit balance the account already holds,
+which is kept per account above projects, so that an account with several projects has one balance.
 
-Credits SHALL be added before they are spent. The service SHALL NOT extend credit beyond the
-overdraft this capability defines.
+This capability SHALL NOT introduce a second balance, a second funding rule, or a second definition
+of when an account is usable.
 
 #### Scenario: One balance serves every project
 
@@ -68,7 +68,7 @@ SHALL NOT charge for answering a DNS query.
 
 #### Scenario: A publish is charged
 
-- **WHEN** a challenge value is published
+- **WHEN** a challenge value is published by a funded account
 - **THEN** the balance is reduced
 
 #### Scenario: Queries are not charged
@@ -81,42 +81,20 @@ SHALL NOT charge for answering a DNS query.
 - **WHEN** a published challenge value is withdrawn
 - **THEN** no balance changes
 
-### Requirement: A check is charged when its result is delivered, and overspend is not carried
+### Requirement: Certificate observation is charged over time, per account, without depending on a schedule running on time
 
-The service SHALL charge for a check when its result is delivered, and SHALL NOT charge for a check
-that was scheduled but whose result was not delivered.
+The service SHALL charge for the nodes an account has configured for certificate observation over
+time, recording one charge per account per period identifying the number of such nodes and the rate
+applied.
 
-Where a deduction would reduce a balance below the amount available to it, the excess SHALL be
-discarded rather than recorded as an amount owed.
-
-#### Scenario: An undelivered result is not charged
-
-- **WHEN** a check is scheduled and its result is never delivered
-- **THEN** no balance changes
-
-#### Scenario: A delivered result is charged
-
-- **WHEN** a check result is delivered
-- **THEN** the balance is reduced
-
-#### Scenario: Overspend is discarded
-
-- **WHEN** a delivered result would reduce the balance below what is available
-- **THEN** the excess is discarded and no amount is recorded as owed
-
-### Requirement: Active zones are charged over time, per account, without depending on a schedule running on time
-
-The service SHALL charge for zones held by an account over time, recording one charge per account per
-period identifying the number of zones and the rate applied.
-
-A charge SHALL be recorded at most once for one account and one period. Each run of the accrual SHALL
-record charges for every period since the account's last charged period, not only the period
+A charge SHALL be recorded at most once for one account, kind and period. Each run of the accrual
+SHALL record charges for every period since the account's last charged period, not only the period
 immediately preceding it.
 
-#### Scenario: One charge covers every zone of an account
+#### Scenario: One charge covers every configured node of an account
 
-- **WHEN** an account holds several zones for one period
-- **THEN** one charge is recorded for that account and period, identifying the number of zones
+- **WHEN** an account has four nodes configured for observation for one period
+- **THEN** one charge is recorded for that account and period, identifying the number of nodes
 
 #### Scenario: A missed run catches up
 
@@ -128,28 +106,40 @@ immediately preceding it.
 - **WHEN** the accrual runs twice for the same period
 - **THEN** one charge exists for that account and period
 
-#### Scenario: Zone-time continues while suspended
+#### Scenario: An account that configured nothing accrues nothing
 
-- **WHEN** an account's balance is at or below zero and its zones are still served
-- **THEN** zone charges continue to be recorded
+- **WHEN** an account has no node configured for observation
+- **THEN** the accrual records no charge for it, however many periods pass
 
-### Requirement: An overdraft permits continuation and not new activity
+### Requirement: The balance floors at zero and no charge is carried as debt
 
-The service SHALL permit a balance to fall below zero, to a configured limit, through charges for
-zones held over time only.
+The service SHALL NOT reduce a balance below zero. Where a charge would do so, the excess SHALL be
+discarded rather than recorded as an amount owed or reserved in advance.
 
-Charges for publishing and for checks SHALL NOT be permitted to reduce a balance that is not above
-zero.
+#### Scenario: A charge is clamped at zero
 
-#### Scenario: Zone charges may go negative
+- **WHEN** a periodic charge exceeds the credits remaining
+- **THEN** the balance becomes zero and the excess is discarded
 
-- **WHEN** an account's balance reaches zero and it continues to hold zones
-- **THEN** the balance continues to fall until the overdraft limit
+#### Scenario: No debt is recorded
 
-#### Scenario: New activity is not permitted on the overdraft
+- **WHEN** a charge has been clamped
+- **THEN** no record of an amount owed exists and nothing is charged for it later
 
-- **WHEN** an account's balance is not above zero and a publish is attempted
-- **THEN** the request is refused and the balance does not fall further from it
+### Requirement: Observation stops for an account that is not funded, and resumes when it is
+
+The service SHALL cease scheduling certificate observation for an account whose balance is not above
+zero, and SHALL resume it without further action when credits are added.
+
+#### Scenario: Observation stops
+
+- **WHEN** an account's balance reaches zero
+- **THEN** no further certificate observation is scheduled for it
+
+#### Scenario: Observation resumes
+
+- **WHEN** credits are added to such an account
+- **THEN** certificate observation is scheduled for it again
 
 ### Requirement: The account is warned by projected time remaining, not by balance alone
 
@@ -172,3 +162,18 @@ Warning SHALL be delivered by a means that does not require the service to be us
 
 - **WHEN** an account is suspended
 - **THEN** it can still receive the warning
+
+### Requirement: An operator may grant credits and thereby restore an account
+
+The service SHALL permit an operator holding the credit-granting permission to add credits to an
+account, SHALL record the grant, and SHALL make it visible to that account.
+
+#### Scenario: An operator can restore an account
+
+- **WHEN** an operator holding the credit-granting permission adds credits to a suspended account
+- **THEN** the account's balance rises above zero and it is usable again
+
+#### Scenario: A grant is recorded
+
+- **WHEN** an operator adds credits to an account
+- **THEN** the action is recorded and is visible to that account

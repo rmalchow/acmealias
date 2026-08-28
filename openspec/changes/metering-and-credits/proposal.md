@@ -1,41 +1,34 @@
-> **`zone.active` is gone with the DNS product, and the shape of the economics changed with it.**
->
-> This change opened by observing that three things cost money and none can be charged the same way:
-> publishes (triggered by the customer, countable), checks (triggered by a schedule), and zones
-> (triggered by nothing at all — existence). The third was the interesting one, because it was the
-> only charge that could drain a balance while the customer did nothing, and most of the machinery
-> here was built for it: the tick job, its idempotent period key, the backfill-across-an-outage rule,
-> and much of the urgency behind soft suspension.
->
-> There are no zones. What is left is publishes and certificate observations, and observations are
-> hours apart rather than seconds.
->
-> `node.observed` keeps the rate SHAPE — billed per observed node per period, from the same periodic
-> job — for the reason M11 gives: the customer chose "observe this node", not the interval or the
-> number of address families, and both of those are ours to change. But nothing accrues for an
-> account that has configured nothing, which makes the overdraft rule of M6 much less load-bearing
-> than it was: a lapsed customer with no configured nodes now costs nothing and drifts nowhere.
->
-> Every reference to `zone.active` and zone-time below is superseded. Read them as `node.observed`
-> where the shape carries over, and as removed where the reasoning was about existence-as-a-charge.
-
 ## Why
 
-### Three things now cost money, and none of them can be charged the same way
+### The balance already exists and only ever goes up
 
-`dns-records` makes the service hold zones and answer for them continuously. `health-checks` makes a
-fleet of satellites probe customers' nodes on a schedule. The challenge service publishes values on
-demand. Those are three genuinely different economic shapes:
+`personal-and-team-accounts` gives a team account a credit balance, a checkout that raises it, and a
+rule that says the account works while `credits > 0` and stops at zero. All of that is built before
+this change and all of it is exercised — an account can be funded, can be topped up, and can be
+refused at `/present` when it is not.
 
-| | Publishes | Checks | Zones |
-| --- | --- | --- | --- |
-| Triggered by | The customer, explicitly | A schedule | Nothing — existence |
-| Observed at | The centre | A satellite | Neither; it is a state |
-| Countable as | A count | A count | A count over time |
-| Can drain a balance while idle | No | Yes | **Yes** |
+What is missing is the other direction. Nothing spends. A funded account stays funded forever,
+because no activity costs anything, and the whole apparatus of suspension sits there waiting for a
+number that never falls.
 
-A single billing mechanism that handles all three does not exist, and pretending otherwise produces
-either a meter that cannot express continuous cost or a subscription that cannot express usage.
+This change is that half: the record of what happened, the price of what happened, and the deduction
+that moves the balance. It is deliberately last of the billing work, because credits granted by hand
+to customers we know personally are a perfectly good substitute for a meter, right up until they are
+not — and the trigger for building this is a count of customers, not a date.
+
+### Two things cost money, and they are not the same shape
+
+A **challenge publish** is a discrete authenticated action. It happens at an instant, it is initiated
+by the customer through their own API key, and it is countable.
+
+A **node configured for certificate observation** is a continuing arrangement. Nothing happens at a
+moment; something is true across an interval. `health-checks` observes it a few times a day, and how
+often is our decision.
+
+One mechanism has to express both, or there will be a meter for one and a subscription for the
+other, and then two suspension rules and an invoice nobody can explain. The event shape that covers
+both is a quantity that is either *a count of occurrences* or *a count sustained over an interval* —
+same table, same rating, same ledger.
 
 ### Billing for something a stranger can trigger is a vulnerability, not a pricing mistake
 
@@ -45,14 +38,13 @@ The intuitive way to charge for the challenge service is per DNS query answered 
 of serving most directly. It is unsafe, and the reason is structural rather than a matter of degree.
 
 The challenge name is **public by construction.** The customer publishes, in their own zone, a
-`CNAME` from `_acme-challenge.shop.example.com` to our alias label, say
-`k4m2p9.acme.example.net`. That record has to be world-readable, because a certificate authority has
-to follow it. So anyone can discover where a customer's challenges are answered, and anyone can then
-query that name in a loop.
+`CNAME` from `_acme-challenge.shop.example.com` to our alias label, say `k4m2p9.acmealias.com`. That
+record has to be world-readable, because a certificate authority has to follow it. So anyone can
+discover where a customer's challenges are answered, and anyone can then query that name in a loop.
 
 If queries are billable, that loop spends the customer's credits. When the balance runs out,
-certificate renewal fails, and the next expiry takes the customer's site down. That is a remote
-denial of service executed with `dig` and a shell loop, against a victim who did nothing wrong.
+certificate renewal fails, and the next expiry takes the customer's site down. That is a remote denial
+of service executed with `dig` and a shell loop, against a victim who did nothing wrong.
 
 Rate limiting does not fix it, because the principle is the problem: **you cannot bill for an action
 an attacker can trigger.** Per-query billing is also unpredictable for honest use — a single ACME
@@ -77,14 +69,14 @@ Keeping them apart buys three things that are hard to retrofit:
   decides whether it is ever priceable, and it costs nothing to collect alongside everything else.
 - **Disputes become a query.** "Why was I charged this" is answered by showing the events, rather than
   by reconstructing what the code did three months ago.
-- **Prices change without touching producers.** Satellites emit events forever; the price book moves
-  independently of the fleet.
+- **Prices change without touching producers.** The publish path emits events forever; the price book
+  moves independently of it.
 
 One caution has to come with that separation, because it is the way it usually goes wrong: separating
-the *concerns* must not mean deferring the *timing*. Suspension depends on a current balance, so
-rating stays synchronous — the event is written and rated in the same transaction — while the price
-lives in a price book rather than in code. And every deduction records the price that was applied, or
-a later price change silently rewrites history for anyone who recomputes.
+the *concerns* must not mean deferring the *timing*. The funding check reads a balance on the
+challenge path, so rating stays synchronous — the event is written and rated in the same transaction —
+while the price lives in a price book rather than in code. And every deduction records the price that
+was applied, or a later price change silently rewrites history for anyone who recomputes.
 
 ## What Changes
 
@@ -94,158 +86,97 @@ Everything meterable becomes an event: an account, an event type, a quantity, an
 count over an interval.
 
 ```
-account 42   challenge.publish    N = 1        at 14:02:11
-account 42   check.reported       N = 4        for cycle 14:00–14:01
-account 42   zone.active          N/t = 3 zones × 1h   for 14:00–15:00
-account 42   dns.query            N = 18422    for 14:00–15:00     (metered, not billed)
+account 42   challenge.publish    N = 1                     at 14:02:11
+account 42   node.observed        N/t = 4 nodes × 1h        for 14:00–15:00
+account 42   dns.query            N = 18422                 for 14:00–15:00   (metered, not billed)
 ```
 
-Events are append-only and never edited. Producers are the centre (publishes), satellites (check
-reports, query counts), and a scheduled job (zone-time). Every event carries the identity of the batch
-or period that produced it, so re-delivery is a no-op — `satellite-sync` already requires batch
-identifiers, and here a double count is a wrong invoice.
+Events are append-only and never edited. Producers are the challenge API (publishes), the DNS server
+(query counts, aggregated), and a scheduled tick job (the rate events). Every event carries the
+identity of the period or request that produced it, so re-recording is a no-op — here a double count
+is a wrong invoice.
 
 ### A price book turns events into deductions
 
 A separate table maps event type to credits. Rating happens in the same transaction as the event, and
-the deduction row records the price it used. Changing a price affects future events only.
+the deduction row records the price it used. Changing a price affects future events only. An event
+type absent from the price book, or priced at zero, records the event and writes no deduction at all —
+a deduction row is evidence that money moved, and a zero-credit deduction is evidence of nothing.
 
-### Three units, three mechanics
+### Two units, two mechanics
 
-**Publishes** are deducted synchronously at `POST /present`, centrally, against an accurate balance.
-Nothing about this is eventually consistent.
+**Publishes** are deducted synchronously at `/present`, in the transaction that already carries the
+publish, immediately after the funding check `personal-and-team-accounts` C7 put there. Nothing about
+this is eventually consistent.
 
-**Checks** are deducted when the report is **delivered**. Before delivery a scheduled check is only a
-promise, and a promise is not billable. If a deduction would take the balance below zero, the excess
-is **dropped** rather than carried as debt — no reservations, no collections, and a bounded loss of
-at most one report cycle.
+**Observation** is charged as a rate: one event per account per period per node *configured* for
+observation, emitted by a small scheduled job. Not per handshake. The customer chose "observe this
+node"; they did not choose the interval, and they did not choose that a dual-stack node costs two
+handshakes rather than one. Both are ours to change, and `health-checks` says plainly that we intend
+to. An invoice must not move because we decided to look more often.
 
-That is safe precisely because suspension is soft (below). It has a useful corollary for satellite
-design: an undelivered report has cost the customer nothing, so a satellite may discard a batch it
-cannot deliver rather than spooling it forever, which is what keeps a satellite a replaceable
-stateless process.
+Ticks are idempotent and self-healing: keyed on `(account, type, period)` with a unique constraint,
+and each run charges *every unbilled period since the last one* rather than "the last hour". A
+six-hour outage writes six rows on the next run; a job that runs twice writes one. The precedent is
+already in the schema — `project_daily_stats` has `primary key (project_id, day)` for exactly this
+reason. The point is that **revenue stops depending on cron reliability.**
 
-**Zone-time** accrues continuously. A scheduled job writes real ledger rows so the balance stays a
-plain column, but it ticks **per account, not per zone**: one row per account per period, carrying
-the zone count and the rate that produced it. A thousand zones is one row rather than a thousand, and
-the derivation stays visible on the row.
+### The floor is zero, and the overshoot is forgiven
 
-Ticks are idempotent and self-healing: keyed on `(account_id, period)` with a unique constraint, and
-each run charges *every unbilled period since the last one* rather than "the last hour". A six-hour
-outage writes six rows on the next run; a job that runs twice writes one. The precedent is already in
-the schema — `project_daily_stats` has `primary key (project_id, day)` for exactly this reason. The
-point is that **revenue stops depending on cron reliability**, which matters more once the meter also
-drives suspension.
+`personal-and-team-accounts` C4 decided that an account stops at zero rather than coasting on an
+overdraft, and gave the reasons: an overdraft needs a third state that is hard to explain, and its
+kindness is largely illusory when refusing `/present` stops renewals rather than taking a site down.
+This change inherits that and adds one small rule of its own.
 
-### The lifecycle: soft suspension, then a terminal state
+If a tick's deduction would take a balance below zero, **the excess is discarded** — not carried as
+debt, not chased, not reserved at dispatch. The bounded loss is one period's charge for one account,
+which is less than the reservation bookkeeping that avoids it would cost to build, test and explain.
 
-```
-balance > 0            everything works
+An earlier version of this proposal argued at length for an overdraft. What survives from that
+argument is its conclusion, and it is the part worth keeping: **the mitigation is not a different
+overdraft, it is a different warning.**
 
-balance ≤ 0            SOFT SUSPENSION
-                       DNS keeps resolving          ✓
-                       new publishes refused (402)  ✗
-                       checks paused                ✗
-                       zone-time still accruing → into the overdraft
+### Warn on time to zero, not on balance
 
-balance ≤ -overdraft   TERMINAL
-                       the zone is dropped; satellites answer REFUSED
-```
+"You have 100 credits left" is meaningless: it means fifty days for one customer and five hours for
+another, and neither can tell which from the number. "You have about six hours" is actionable for
+both, requires no per-tier tuning, and is the same arithmetic already being done to know when an
+account will be suspended.
 
-The governing rule, worth stating as a rule because it is what stops the overdraft becoming free
-credit: **the overdraft keeps what you have alive; it does not buy you anything new.** Publishes and
-checks stop at zero. Only zone-time may go negative. You can coast on an overdraft; you cannot run a
-workload on one.
+The warning is delivered by email as well as in the console, because a warning that requires the
+service to be usable arrives too late by definition. What still slips through — a payment in flight,
+a disputed charge, a wrongful accrual — is covered by the staff plane's credit-granting permission.
 
-### Why REFUSED and never NXDOMAIN
+### The levels we sell are not something the system knows about
 
-When the terminal state is reached, the zone is **dropped** — the satellite is no longer authoritative
-for it — rather than kept and answered with `NXDOMAIN`. Same commercial effect, wildly different
-recovery, and the difference is entirely about resolver caching:
-
-- **`NXDOMAIN` is an authoritative denial.** Resolvers cache it per RFC 2308 for the `SOA` minimum,
-  typically 300–3600 seconds. So a customer who pays stays broken for the negative TTL. Worse, RFC
-  8020 permits a resolver to conclude that *nothing exists below* a name that returned `NXDOMAIN`, so
-  a denial at the apex can poison every subdomain in a compliant resolver's cache. It is the one
-  option where recovery is slower than the outage.
-- **`REFUSED` means we are not authoritative for that name.** Resolvers treat it as a server-side
-  condition, try the other nameservers, and do **not** negatively cache the name. Top up, the zone is
-  redistributed over the sync stream, and resolution resumes in seconds because there is nothing
-  cached to expire.
-
-For a prepaid product whose entire commercial model assumes people top up and come back, an hour of
-unnecessary post-payment outage is the difference between a support ticket and a churn event.
-
-### Warn on time-to-zero, not on balance
-
-The overdraft is a flat number per account. That has an honest consequence: the grace *period*
-inversely tracks account size. Two zones might coast for fifty days on a hundred credits; five hundred
-zones burn the same hundred in hours.
-
-The mitigation is not a different overdraft, it is a different **warning**. "You have 100 credits
-left" is meaningless when it means fifty days for one customer and five hours for another. "You have
-about six hours" is actionable for both, requires no per-tier tuning, and is the same arithmetic
-already being done to know when the terminal state arrives. What still slips through is covered by the
-staff plane's credit-granting permission.
-
-### The three levels we sell are not three things the system knows about
-
-The service is sold at three levels: challenge answering on its own; challenge answering plus
-authoritative DNS; both plus reachability checking. That is how the product is described to a buyer,
-and the obvious next step is to make it a field — a `tier` on the account, checks that refuse zone
-creation below the middle level, a monthly fee per level.
+The service is sold at two levels: challenge answering on its own, and challenge answering plus
+certificate observation. That is how the product is described to a buyer, and the obvious next step
+is to make it a field — a `tier` on the account, a gate on enabling observation, a monthly fee per
+level.
 
 This change does not do that, deliberately.
 
 A tier is a **second thing that can stop an account**, next to the one that already exists. It brings
-gates to write and test, upgrade and downgrade paths that each have a half-finished middle (what
-becomes of the six zones belonging to a customer who downgrades to challenge-only — refused, deleted,
-served but uneditable?), a support burden of explaining which level someone is on, and a second answer
-to "why can't I do this" that has to be kept consistent with the first.
+gates to write and test, upgrade and downgrade paths that each have a half-finished middle, a support
+burden of explaining which level someone is on, and a second answer to "why can't I do this" that has
+to be kept consistent with the first.
 
-And it answers nothing the ledger does not. A customer on "LE + DNS" is a customer who created a zone.
-A customer on "LE only" is one who did not. The level is a **description of what someone configured**,
-not a permission they were granted. Configuring more produces more events; more events cost more
-credits; credits are what run out. One mechanism stops an account, and it is the balance.
+And it answers nothing the ledger does not. A customer on the higher level is a customer who
+configured a node for observation. A customer on the lower one is one who did not. The level is a
+**description of what someone configured**, not a permission they were granted. Configuring more
+produces more events; more events cost more credits; credits are what run out. One mechanism stops an
+account, and it is the balance.
 
 The honest cost of this: there is no recurring base charge, so a customer who configures nothing pays
-nothing however long they stay, and there is no way to sell "unlimited DNS for a flat monthly fee".
-Both are fine at this size, and both are reversible in the easy direction — an entitlement can be
-added later, whereas one that customers have already bought cannot be taken away.
-
-### Charging for checks is where the multiplication has to stop
-
-Reachability checking multiplies. To decide that a node is down we need several satellites to agree,
-because one satellite with a bad transit path is not evidence. A node with both an IPv4 and an IPv6
-address is two things to check, not one, because those paths fail independently. So a load balancer
-with four nodes, checked by three satellites, on both families, every thirty seconds, produces about
-**69,000 probe results a day** — a couple of million rows a month, for one small customer.
-
-Every one of those is recorded. None of them is what the customer is billed for.
-
-The reason is that the customer chose *"check this node"*. They did not choose the quorum size, the
-probe interval, or the fact that we check two address families — those are our decisions, made for our
-confidence, and we change them. If the bill were per probe, adding a fourth satellite next year would
-raise every customer's invoice by a third for a benefit they never asked for, and a node acquiring an
-IPv6 address would double its checking cost.
-
-So the ledger charges **per checked node per hour**, emitted by the same small job that already counts
-zone-time, and the probes themselves are metered at zero and kept in their own table for ninety days
-as operational data. The invoice is a function of what the customer configured. The multiplication
-stays on our side of the line, where the engineering decisions that cause it are also made.
-
-A related rule falls out of the same principle. When our centre is unreachable, satellites keep
-probing and queue their results; when it comes back, hours of results arrive at once. Billing those on
-delivery would charge a customer four hours of checks in a single instant — possibly suspending them —
-because *we* were down. Late results are therefore recorded and not billed. Conversely, zone-time
-*is* backfilled across the same outage, because the zones existed and the satellites were answering
-for them the whole time: the customer had the service, and our counting job's absence is not a
-discount.
+nothing however long they stay, and there is no way to sell "unlimited observation for a flat monthly
+fee". Both are fine at this size, and both are reversible in the easy direction — an entitlement can
+be added later, whereas one that customers have already bought cannot be taken away.
 
 ### Not in scope
 
-- **Payment.** Taking money and turning it into credits is a separate integration. This change is the
-  ledger those credits land in.
+- **The balance, the checkout and the behaviour at zero.** All three arrive with
+  `personal-and-team-accounts` (C3, C4, C8). This change spends against them.
+- **Payment.** Turning real money into credits is a separate integration behind that checkout.
 - **Invoicing, tax, currency.** The ledger is in credits.
 - **Setting prices.** The price book exists; what goes in it is commercial.
 - **Committed spend, discounts, negotiated pricing.** A price book per account is where they would
@@ -257,73 +188,74 @@ discount.
 **Per-query billing for the challenge path.** Rejected above at length: the challenge name is public,
 so the billable action is attacker-triggerable.
 
-**Reserving check credits at dispatch and settling on report.** It keeps the balance from ever being
-optimistic, which matters if a stale balance can trigger a hard stop. Rejected because suspension is
-soft, so a stale balance costs at most one report cycle of unbilled checks — which is cheaper than
-reservation bookkeeping, and is written off rather than chased.
+**Billing per certificate observation.** The most direct relationship between what we do and what we
+charge. Rejected because the observation count is a function of decisions the customer did not make —
+the interval, and the number of address families — and an invoice that moves when we change our minds
+is not one anybody can budget against.
 
-**Ticking zone-time per zone.** One row per zone per period is the most granular and most obviously
-auditable. Rejected on volume: a thousand zones ticked hourly is twenty-four thousand rows a day for
-information fully captured by one row per account carrying the count.
+**Reserving credits in advance and settling later.** It keeps the balance from ever being optimistic.
+Rejected because the exposure it protects is one tick period for one account, which is cheaper to
+write off than to account for.
 
-**Lazily computed balances** — balance as a function of purchases minus elapsed zone-time. No ticks,
-no rollups, exact at any instant. Rejected because the balance stops being a column and becomes a
-computation that every reader must perform identically, including the suspension check on the hot
+**Carrying the overshoot below zero as a debt.** Exact, and it turns fractions of a credit owed by
+people who are by definition not paying into a collections problem. Rejected on the same arithmetic.
+
+**Lazily computed balances** — balance as a function of purchases minus elapsed usage. No ticks, no
+rollups, exact at any instant. Rejected because the balance stops being a column and becomes a
+computation that every reader must perform identically, including the funding check on the publish
 path.
 
-**A hard stop at zero.** Unambiguous and impossible to freeload. Rejected because it takes a paying
-customer's site down over a lapsed card, and because the support cost exceeds the revenue recovered.
-
-**Freezing the meter during suspension.** Generous and simple. Rejected because it makes "suspended"
-strictly cheaper than "active" while DNS still resolves, which rewards lapsing.
+**A per-account tier column.** Rejected above: it is a second mechanism that can stop an account, and
+it answers nothing the balance does not.
 
 ## Capabilities
 
 ### New Capabilities
 
 - `usage-metering`: the immutable event ledger — its normalized shape as a count or a count over an
-  interval, its producers, its idempotency, and metering that is deliberately not billed.
-- `credit-ledger`: the price book, synchronous rating, deductions that record the price applied, the
-  balance, per-account zone-time ticks that are idempotent and self-healing, and the overdraft.
-- `account-suspension`: the lifecycle from full service through soft suspension to the terminal state,
-  what each permits, and how service is restored.
+  interval, its producers, its idempotency, metering that is deliberately not billed, and the rule
+  that the billable observation quantity is derived from configuration rather than from handshakes.
+- `credit-ledger`: the price book, synchronous rating, deductions that record the price applied,
+  per-account rate ticks that are idempotent and self-healing, the floor at zero, and warning on
+  projected time remaining.
+
+`credit-ledger` also carries the one behavioural rule this change adds to an unfunded account:
+certificate observation stops being scheduled for it, and resumes when it is funded again. Every
+other refusal at zero belongs to `personal-and-team-accounts` and is unchanged here.
 
 ### Modified Capabilities
 
-- `challenge-dns-server`: a zone that has been withdrawn is answered as a name outside the served
-  zones — `REFUSED` — rather than being retained and denied with `NXDOMAIN`.
+None. The account, its balance, its funding check and its suspension already exist; this change adds
+tables and a deduction rather than altering an existing capability's behaviour.
 
 ## Impact
 
-- **New schema.** An append-only event ledger, a price book, a credit ledger of purchases and
-  deductions, per-account balance, and the zone-time tick keyed on `(account_id, period)`.
-- **`POST /present`.** Gains a synchronous deduction in the same transaction as the publish, and a
-  `402` when the balance is not positive. This is the only change on the challenge critical path and
-  it must not add a query beyond the balance read.
-- **`satellite-sync`'s report intake.** Check reports become metering events on delivery; batch
-  identifiers, already required there, become financially load-bearing.
-- **`health-checks`.** Scheduled checks are paused for a suspended account.
-- **`dns-records`.** A zone is withdrawn from distribution at the terminal state and redistributed on
-  restoration.
-- **`staff-plane`.** The credit-granting permission is exercised here; suspension state is visible and
-  adjustable on the staff surface.
-- **The console.** Balance, projected time to zero, recent events and their prices.
+- **New schema.** An append-only event ledger, a price book, and a deduction ledger. The balance
+  column already exists; this change writes against it.
+- **`/present`.** Gains a synchronous deduction in the same transaction as the publish, immediately
+  after the funding check that is already there. This is the only change on the challenge critical
+  path and it must not add a query beyond the balance read.
+- **`health-checks`.** Observation scheduling stops for an account that is not funded, and a node
+  configured for observation becomes a rate event.
+- **`personal-and-team-accounts`.** Its balance now falls as well as rises; its suspension is now
+  reachable by usage rather than only by time.
+- **`staff-plane`.** The credit-granting permission is exercised here.
+- **The console.** Balance history, projected time to zero, recent events and their prices.
 - **`usage-reporting`.** Unchanged. Its per-project attempt aggregates answer an operational question
   and remain useful alongside the billing ledger; they are not the same data and neither replaces the
   other.
 
 ## Dependencies
 
-This change depends on `tenancy-and-permissions`, `staff-plane`, `satellite-sync`, `dns-records` and
+This change depends on `tenancy-and-permissions`, `personal-and-team-accounts`, `staff-plane` and
 `health-checks`, and assumes from them:
 
-- **The `account`** as the entity a balance belongs to — credits are held above projects, so a
-  customer with staging and production has one balance and one overdraft.
+- **The `account`** as the entity a balance belongs to, and the balance itself — credits are held
+  above projects, so a customer with staging and production has one balance.
+- **The funding check and its `402`**, already on the challenge path, so this change adds a deduction
+  rather than a gate.
 - **Permission grants that take an object**, so reading a balance can be granted separately from
   spending against it.
 - **The staff plane's credit-granting permission**, which is the escape hatch for a wrongful or
-  premature suspension and is what makes a flat overdraft tolerable.
-- **Batched, idempotent reports**, since a re-delivered batch would otherwise be double-charged.
-- **Zones and recordsets**, since zone-time is metered per active zone and the terminal state
-  withdraws one from distribution.
-- **Delivered check reports** as the billable moment for checks.
+  premature suspension.
+- **Nodes configured for certificate observation** as the thing a rate event counts.

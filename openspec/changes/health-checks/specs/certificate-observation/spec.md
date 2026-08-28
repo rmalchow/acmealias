@@ -5,8 +5,8 @@
 The service SHALL observe the certificate presented by a node by completing a secure transport
 handshake against it, and SHALL record the certificate's expiry, its issuer, and the names it covers.
 
-Observation SHALL be performed once per node per distinct certificate, and SHALL NOT require one
-observation per configured domain.
+Observation SHALL be performed once per node address rather than once per configured domain, and
+SHALL be performed separately for each address family a node exposes.
 
 #### Scenario: A certificate is observed once for many names
 
@@ -18,10 +18,20 @@ observation per configured domain.
 - **WHEN** a certificate is observed
 - **THEN** the recorded observation includes when it expires and who issued it
 
-#### Scenario: An unreachable node records no certificate
+#### Scenario: Address families are observed separately
 
-- **WHEN** a handshake with a node cannot be completed
-- **THEN** no certificate observation is recorded and the failure is recorded instead
+- **WHEN** a node exposes an IPv4 and an IPv6 address
+- **THEN** each address is observed and recorded independently
+
+#### Scenario: A failed handshake is recorded as an observation
+
+- **WHEN** a handshake with a node address cannot be completed
+- **THEN** an observation is recorded carrying the failure, rather than nothing being recorded
+
+#### Scenario: A failed handshake does not make a domain uncovered
+
+- **WHEN** every handshake against the addresses serving a domain failed
+- **THEN** the domain is not reported as covered by no certificate
 
 ### Requirement: Domains covered by no observed certificate are identified
 

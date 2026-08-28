@@ -1,22 +1,33 @@
 ## ADDED Requirements
 
-### Requirement: The console shows a status view per node
+### Requirement: The console shows the observed certificate per node address
 
-The console SHALL present, for each node, its current reachability, the certificate observed on it
-with its expiry and issuer, and a history of both.
+The console SHALL present, for each address of each node, the certificate observed on it with its
+expiry and issuer, the names it covers, and a history of those observations.
 
 The view SHALL identify domains of the load balancer that no observed certificate covers, and
 certificates whose expiry is approaching.
 
-#### Scenario: Current state is shown per node
+#### Scenario: The current observation is shown per node address
 
-- **WHEN** a user opens a load balancer's status view
-- **THEN** each node shows its current reachability and its observed certificate
+- **WHEN** a user opens a load balancer's certificate view
+- **THEN** each node address shows the certificate most recently observed on it
+
+#### Scenario: Address families are distinguished
+
+- **WHEN** a node serves one certificate over IPv4 and a different one over IPv6
+- **THEN** the view shows both, attributed to their address families
 
 #### Scenario: History is shown
 
-- **WHEN** a user opens a node's status
-- **THEN** a history of reachability and of certificate observations is shown
+- **WHEN** a user opens a node address's certificate history
+- **THEN** the observations recorded for it are shown, most recent first
+
+#### Scenario: A failed handshake is distinguishable from an absent certificate
+
+- **WHEN** the most recent observation for a node address records a failed handshake
+- **THEN** the view says the address could not be examined, and does not report the node as having no
+  certificate
 
 #### Scenario: Uncovered domains are surfaced
 
@@ -28,23 +39,7 @@ certificates whose expiry is approaching.
 - **WHEN** an observed certificate's expiry falls within the configured threshold
 - **THEN** the view identifies it
 
-#### Scenario: Status requires permission to read it
+#### Scenario: Observations require permission to read them
 
-- **WHEN** a user holding no grant permitting status to be read opens the view
-- **THEN** no status is shown
-
-### Requirement: The console shows when a recordset is being filtered by health
-
-The console SHALL indicate, for a health-checked recordset, which of its stored values are currently
-served and which are excluded, and SHALL indicate when every value is excluded and all are therefore
-being served.
-
-#### Scenario: Excluded values are distinguishable
-
-- **WHEN** a health-checked recordset has an unavailable node
-- **THEN** the view shows that value as stored and not served
-
-#### Scenario: The all-unavailable state is visible
-
-- **WHEN** every node of a health-checked recordset is unavailable
-- **THEN** the view shows that all values are being served despite failing checks
+- **WHEN** a user holding no grant permitting certificate observations to be read opens the view
+- **THEN** no observation is shown
