@@ -42,4 +42,4 @@
 - [x] 5.2 Test the precedence order in both directions: a file value beats a default, an environment variable beats a file value
 - [x] 5.3 Test that an absent overlay changes nothing and an absent-but-configured base file fails to start (G4)
 - [x] 5.4 Test placeholder typing: an integer placeholder resolves to an integer, a boolean to a boolean, a list to a list (G2)
-- [ ] 5.5 Run the acceptance suite. It exercises the real start-up path, which is the only place the loader's failure modes actually matter
+- [x] 5.5 Run the acceptance suite. It exercises the real start-up path, which is the only place the loader's failure modes actually matter

@@ -52,7 +52,7 @@
 ## 5. Self-registration and branding — blocked on 11.4
 
 - [ ] 5.1 Add an enrolment flow to the blueprint, reachable from the console sign-in page, collecting a username, an email and a password (design K6)
-- [ ] 5.2 Place enrolled users in **no group**, and add an acceptance test asserting that a self-registered user authenticates successfully at the identity provider and is then refused by our service — the P18 property, demonstrated rather than assumed
+- [ ] 5.2 Place enrolled users in **no group**, and add an acceptance test asserting that a self-registered user authenticates successfully at the identity provider and then holds their personal account and NOTHING ELSE — the P18 property, demonstrated rather than assumed. This task used to say "and is then refused by our service", which `personal-and-team-accounts` made false (design K6)
 - [ ] 5.3 Assert that a self-registered person is NOT refused: they hold their personal account and reach the product (design K6). This task previously asked for the refusal wording to be reviewed, on the premise that every self-registered person would see it — `personal-and-team-accounts` deleted that state by materializing a personal account on first sign-in. What is now user-facing is an empty personal account, and its wording belongs to `public-edition` task 1.6
 - [ ] 5.3a Assert the property that DID survive: such a user holds membership of no other account, and no change of group at the identity provider gives them one (`tenancy-and-permissions` P18)
 - [ ] 5.4 Add a brand bound to the console hostname carrying the title and logo, written so that a second brand for a staff hostname is an addition rather than a restructuring (design K7)

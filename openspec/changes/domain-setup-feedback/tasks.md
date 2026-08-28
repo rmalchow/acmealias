@@ -28,4 +28,4 @@
 - [x] 3.1 Test the per-domain mapping where a wildcard and its apex share one alias: both rows read from the one delegation result rather than one of them reading "absent"
 - [x] 3.2 Test each CAA outcome renders its own sentence, and that `not-published` is NOT presented as a problem (D2)
 - [x] 3.3 Test that an unconfigured resolver yields `not checked` on every row and no error banner (D4)
-- [ ] 3.4 Acceptance: a domain whose delegation is published reads as published, and one whose delegation is absent says so — against the fake internet, which already serves exactly this
+- [x] 3.4 Acceptance: a domain whose delegation is published reads as published, and one whose delegation is absent says so — against the fake internet, which already serves exactly this
