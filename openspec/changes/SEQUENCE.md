@@ -79,7 +79,19 @@ the bottom.
    build against us, which is why it is styled like the product rather than left stock, and why the
    assets are vendored rather than fetched from a CDN that would blank the page on an air-gapped
    deployment.
-11. **`acme-dns-protocol`** — speak the protocol the ecosystem already speaks. The challenge API
+11. **`api-key-kinds`** — two named kinds where there is one expert kind. A key is a subject holding
+    grants, which is the right general model and leaves the COMMON case — a load balancer publishing
+    for one project — to be assembled by hand out of the grant grammar. So: a PROJECT key, made on
+    the project's page, bound by a real foreign key so it dies with the project; and a SYSTEM key,
+    made in a team account's settings, holding a role like a member who is not a person.
+
+    The project key can optionally be limited to the union of its project's node addresses, resolved
+    when a request arrives rather than copied — today those CIDRs are typed in by hand from numbers
+    we already store, and the copy is right until a node is added, at which point the symptom is a
+    renewal that silently does not happen and surfaces weeks later as an expired certificate. It sits
+    before the change below because that one hands out a credentials file, and a project key is what
+    belongs in it.
+12. **`acme-dns-protocol`** — speak the protocol the ecosystem already speaks. The challenge API
     implements lego's `httpreq`, which covers lego and Traefik and leaves every other client needing
     an adapter written by us, one at a time. But acme-dns is a server with THE SAME DESIGN as this
     product — a permanent `CNAME` into a zone somebody else runs, updated over HTTP — and its API has
@@ -92,16 +104,16 @@ the bottom.
     cert-manager, lego, Posh-ACME, Sewer, Traefik and WACS all work the day it ships; cert-manager's
     support is built in, needing only a `host:` line. It sits immediately before the first customers
     because which clients work is what decides whether somebody can adopt this at all.
-12. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
+13. **First customers, on challenge answering alone.** Worth pausing at rather than passing through:
    a renewal has about thirty days of slack, so a service interruption of a few hours costs nobody
    anything. Nothing else in this list is that forgiving.
-13. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
+14. **`health-checks`** — certificate observation. One TLS handshake per node per address family,
    hours apart, answering the question the challenge history opens and cannot close: validation
    succeeded, but was a certificate ever installed, and does it cover the right names.
-14. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
+15. **`metering-and-credits`** — needs something to meter, and the billable shapes only settle once
    observation exists. Deferred this far because credits are granted by hand while the customers
    are people we know.
-15. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
+16. **`public-edition`** — what stops being avoidable when the next customer is somebody we have
     never spoken to: a self-service enrolment flow at the identity provider, a real payment provider
     behind the checkout that currently takes no money, protective limits that hold whether or not
     anybody has paid, the production identity provider and the rest of the staff/customer separation,
