@@ -100,6 +100,27 @@ func TestSelfEnrolmentWaitsForApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("following the confirmation link: %v", err)
 	}
+	// A CONSENT STAGE STANDS IN FRONT OF THE LINK, AND IT IS NOT OURS.
+	//
+	// authentik injects one at the head of any flow plan restored from an
+	// emailed token ("Continue to confirm this email address."), because mail
+	// security scanners open links in a real browser and would otherwise consume
+	// a one-time token before the recipient ever saw it. The token is deleted
+	// when this stage is submitted, not when the link is fetched, so a scanner
+	// costs nothing and the human still gets a working link.
+	//
+	// It is asserted rather than tolerated: this is the step that makes the
+	// confirmation link survive a corporate mail gateway, and a future version
+	// that dropped it would be a regression nothing else here would notice.
+	if step.Component != "ak-stage-consent" {
+		t.Fatalf("after following the confirmation link the flow is at %q, expected "+
+			"authentik's email-token consent stage — the interstitial that stops a mail "+
+			"scanner consuming a one-time link", step.Component)
+	}
+	step, err = enrolStep(confirm, "flow_token="+tok, map[string]string{"component": "ak-stage-consent"})
+	if err != nil {
+		t.Fatalf("confirming the email-token consent: %v", err)
+	}
 	if step.Component != "ak-stage-prompt" {
 		t.Fatalf("after confirming the address the flow is at %q, expected the "+
 			"notice telling the person their registration is under review — the "+

@@ -564,3 +564,49 @@ func ResolveInvitationForAddress(ctx context.Context, db *gorm.DB, id model.ID, 
 	}
 	return &inv, &acc, nil
 }
+
+// DueExpiredInvitations returns invitations that have lapsed and whose expiry
+// has not yet been written to the audit trail.
+//
+// The predicate is deliberately "expired AND unrecorded" rather than "expired":
+// the second is every invitation that ever lapsed, forever, and a sweep over it
+// would rewrite the same entries on every pass. See
+// model.Invitation.ExpiryRecordedAt for why the mark exists and why it is not a
+// status.
+//
+// Rows that were revoked, declined or accepted before lapsing are excluded.
+// Their outcome is already recorded and is the one that actually happened: an
+// invitation somebody declined on Tuesday did not "expire" on Friday, and
+// saying both in the audit trail would make the history of one invitation read
+// as two events that contradict each other.
+func DueExpiredInvitations(ctx context.Context, db *gorm.DB, now time.Time, limit int) ([]model.Invitation, error) {
+	var out []model.Invitation
+	err := CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		return tx.Where(
+			"expires_at <= ? AND expiry_recorded_at IS NULL"+
+				" AND revoked_at IS NULL AND declined_at IS NULL AND accepted_at IS NULL",
+			now,
+		).Order("expires_at").Limit(limit).Find(&out).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: due expired invitations: %w", err)
+	}
+	return out, nil
+}
+
+// MarkInvitationExpiryRecorded stamps the bookkeeping mark, and reports whether
+// THIS caller was the one that set it.
+//
+// The guard is re-applied in the UPDATE rather than trusted from the SELECT, so
+// two processes sweeping at once record the expiry exactly once between them —
+// the loser sees RowsAffected 0 and writes no audit entry. Same shape as the
+// disabled_at guard in sweeper.ExpireKeys, for the same reason.
+func MarkInvitationExpiryRecorded(ctx context.Context, tx *gorm.DB, id model.ID, at time.Time) (bool, error) {
+	res := tx.WithContext(ctx).Model(&model.Invitation{}).
+		Where("id = ? AND expiry_recorded_at IS NULL", id).
+		Update("expiry_recorded_at", at)
+	if res.Error != nil {
+		return false, fmt.Errorf("store: mark invitation expiry recorded %q: %w", id, res.Error)
+	}
+	return res.RowsAffected == 1, nil
+}

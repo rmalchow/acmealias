@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -102,4 +103,42 @@ func SelectAccount(ctx context.Context, db *gorm.DB, sessionID string, accountID
 		return fmt.Errorf("store: select account for session: %w", gorm.ErrRecordNotFound)
 	}
 	return nil
+}
+
+// TakeLogoutHint returns a session's stored ID token and clears it, so the
+// value is readable once.
+//
+// Single-use is the point. The token exists to satisfy `id_token_hint` on one
+// RP-initiated logout (model.Session.LogoutHint); once that request is built
+// there is no reason to keep it, and the session row is about to be revoked
+// anyway.
+//
+// Read-then-clear in two statements rather than one UPDATE ... RETURNING,
+// because Postgres RETURNING yields the NEW row — which is the NULL we just
+// wrote, not the token we wanted. A CTE can be made to give the old value and
+// is not worth the cleverness on a path one browser walks once.
+//
+// An empty return is normal, not an error: a session created before this column
+// existed, or one already signed out, has no hint, and the caller then builds a
+// logout request without the parameter.
+func TakeLogoutHint(ctx context.Context, db *gorm.DB, id string) (string, error) {
+	var s model.Session
+	err := db.WithContext(ctx).Select("logout_hint").First(&s, "id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: read logout hint %q: %w", id, err)
+	}
+	if s.LogoutHint == nil || *s.LogoutHint == "" {
+		return "", nil
+	}
+	hint := *s.LogoutHint
+	if err := db.WithContext(ctx).Model(&model.Session{}).
+		Where("id = ?", id).Update("logout_hint", nil).Error; err != nil {
+		// The hint is still returned: failing sign-out over a housekeeping
+		// write would report a sign-out that DID happen as one that did not.
+		return hint, nil
+	}
+	return hint, nil
 }

@@ -46,6 +46,11 @@ type Identity struct {
 	Subject     string
 	DisplayName string
 	Groups      []string
+	// RawIDToken is the encoded ID token exactly as the provider issued it,
+	// carried only so the session row can hold it for logout. Nothing else
+	// reads it: every claim this service acts on has already been verified and
+	// extracted into the fields around it.
+	RawIDToken  string
 	// Email is the address the provider says this person controls, and it is
 	// EMPTY unless the provider also said it had verified it.
 	//
@@ -163,6 +168,7 @@ func (s *Service) verifyCallback(r *http.Request) (*Identity, error) {
 	}
 	return &Identity{
 		Subject:     idTok.Subject,
+		RawIDToken:  rawID,
 		DisplayName: displayName(claims, idTok.Subject),
 		Groups:      Groups(claims, s.cfg.OIDCGroupClaim, s.cfg.OIDCGroupPrefix),
 		Email:       verifiedEmail(claims),
@@ -202,6 +208,11 @@ func (s *Service) createSession(ctx context.Context, id *Identity) (*model.Sessi
 		CreatedAt:   now,
 		LastSeenAt:  now,
 		ExpiresAt:   now.Add(s.cfg.SessionMaxLifetime),
+	}
+	// Held for the logout call and nothing else — see model.Session.LogoutHint.
+	if id.RawIDToken != "" {
+		hint := id.RawIDToken
+		sess.LogoutHint = &hint
 	}
 	// A new session selects nothing, and that is the front door rather than an
 	// edge case (design P19, task 2.2).

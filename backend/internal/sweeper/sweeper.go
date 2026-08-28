@@ -107,7 +107,14 @@ func Sweep(ctx context.Context, db *gorm.DB, interactionRetention time.Duration,
 		return
 	}
 
-	log.Debug("sweep completed", "removed", n, "abandoned", abandoned, "interactions purged", purged, "keys expired", expired)
+	lapsed, err := RecordExpiredInvitations(ctx, db, m)
+	if err != nil {
+		log.Error("expired invitations not recorded", "error", err)
+		return
+	}
+
+	log.Debug("sweep completed", "removed", n, "abandoned", abandoned, "interactions purged", purged,
+		"keys expired", expired, "invitations lapsed", lapsed)
 }
 
 // ExpireKeys disables API keys whose expiry has passed and records one
@@ -186,4 +193,64 @@ func grantSummary(k model.APIKey) []string {
 		out = append(out, authz.GrantFromRow(g).String())
 	}
 	return out
+}
+
+// invitationBatch bounds one pass. Not configuration: it caps how long a tick
+// may run and how large one transaction burst gets, which is a property of the
+// process rather than behaviour anybody tunes. The query is ordered by expiry,
+// so a batch smaller than a backlog works through it oldest-first across ticks.
+const invitationBatch = 256
+
+// RecordExpiredInvitations writes one invitation.expire audit entry per
+// invitation that has lapsed, attributed to the system actor
+// (account-invitations task 9.3).
+//
+// LIKE ExpireKeys ABOVE, THIS CHANGES NO BEHAVIOUR. An expired invitation
+// already stops working the moment it lapses — store.usableInvitation compares
+// ExpiresAt to now on every read, and always did. What was missing is the
+// RECORD. Every other thing that can happen to an invitation writes one:
+// created, resent, revoked, accepted, declined. Lapsing was the one outcome
+// that left no trace, so an account looking at its own history saw an
+// invitation appear and then nothing, with no way to tell "it expired" from
+// "the audit trail is incomplete".
+//
+// `invitation.expire` has existed in the vocabulary since the change was
+// designed, with a comment saying the system actor writes it. Nothing ever did.
+//
+// Attribution is the system actor because nobody acted: time did. That is the
+// same reason apikey.expire uses it, and it matters for reading the trail —
+// an entry attributed to a person is a decision somebody made and can be asked
+// about, and this is not one.
+func RecordExpiredInvitations(ctx context.Context, db *gorm.DB, m *obs.Metrics) (int, error) {
+	now := time.Now().UTC()
+	due, err := store.DueExpiredInvitations(ctx, db, now, invitationBatch)
+	if err != nil {
+		return 0, err
+	}
+
+	recorded := 0
+	for _, inv := range due {
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// The mark is claimed first and the entry written only if this
+			// caller was the one that set it, so two processes sweeping
+			// together record the expiry once between them.
+			won, err := store.MarkInvitationExpiryRecorded(ctx, tx, inv.ID, now)
+			if err != nil || !won {
+				return err
+			}
+			recorded++
+			return authz.Record(ctx, tx, m, authz.SystemActor().InAccount(inv.AccountID), authz.Event{
+				Action: authz.ActionInvitationExpire, ObjectType: authz.ObjectInvitation,
+				ObjectID: &inv.ID, ObjectLabel: inv.Email,
+				// The address and when it lapsed, and nothing else. Never the
+				// token or its hash: an audit entry is read by more people than
+				// the row it describes, and this one outlives the invitation.
+				Before: map[string]any{"email": inv.Email, "expiresAt": inv.ExpiresAt},
+			})
+		})
+		if err != nil {
+			return recorded, err
+		}
+	}
+	return recorded, nil
 }

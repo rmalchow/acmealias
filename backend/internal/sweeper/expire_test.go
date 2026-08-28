@@ -130,3 +130,94 @@ func counterValue(t *testing.T, c prometheus.Counter) float64 {
 	}
 	return m.GetCounter().GetValue()
 }
+
+// TestIntegrationExpiredInvitationIsRecordedOnceWithASystemActor is the
+// invitation half of the test above, and covers account-invitations task 9.3.
+//
+// The gap it closes is a silent one. Every other outcome an invitation can have
+// writes an audit entry — created, resent, revoked, accepted, declined — and
+// lapsing wrote nothing, so an account reading its own history saw an
+// invitation appear and then stop, with no way to distinguish "it expired" from
+// "the trail is incomplete". `invitation.expire` had existed in the vocabulary
+// since the change was designed, with a comment saying the system actor writes
+// it, and nothing ever did.
+//
+// Three properties, and the second is the one worth the test: the entry exists,
+// running the sweep again does not write a second one, and an invitation that
+// was DECLINED before it lapsed is left alone — its outcome already happened
+// and saying it also expired would make one invitation's history read as two
+// contradictory events.
+func TestIntegrationExpiredInvitationIsRecordedOnceWithASystemActor(t *testing.T) {
+	db, sc := scopedDB(t)
+	ctx := t.Context()
+
+	inviter, err := store.FindOrCreateUser(ctx, db, "sweeper-inviter", "Inviter", "inviter@corp.example")
+	if err != nil {
+		t.Fatalf("create inviter: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-time.Hour)
+	lapsed, _, err := store.IssueInvitation(ctx, db, sc, "lapsed@corp.example", inviter.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("issue lapsed invitation: %v", err)
+	}
+	if err := db.Model(&model.Invitation{}).Where("id = ?", lapsed.ID).
+		Update("expires_at", past).Error; err != nil {
+		t.Fatalf("age the invitation: %v", err)
+	}
+
+	// Declined before it lapsed: already answered, and must not also be
+	// reported as having expired.
+	declined, _, err := store.IssueInvitation(ctx, db, sc, "declined@corp.example", inviter.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("issue declined invitation: %v", err)
+	}
+	if err := db.Model(&model.Invitation{}).Where("id = ?", declined.ID).
+		Updates(map[string]any{"expires_at": past, "declined_at": past}).Error; err != nil {
+		t.Fatalf("age and decline: %v", err)
+	}
+
+	// Still live: untouched.
+	if _, _, err := store.IssueInvitation(ctx, db, sc, "live@corp.example", inviter.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("issue live invitation: %v", err)
+	}
+
+	m := obs.New()
+	n, err := RecordExpiredInvitations(ctx, db, m)
+	if err != nil {
+		t.Fatalf("record expired invitations: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("recorded %d invitations, want 1 — only the lapsed one", n)
+	}
+
+	// A SECOND PASS MUST WRITE NOTHING. Without the bookkeeping mark the
+	// predicate is "expired", which is every invitation that ever lapsed,
+	// forever, and every tick would rewrite the same entries.
+	again, err := RecordExpiredInvitations(ctx, db, m)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if again != 0 {
+		t.Errorf("second pass recorded %d, want 0 — the expiry is accounted for once", again)
+	}
+
+	es, err := store.ListAuditEntries(ctx, db, sc, store.AuditFilter{Action: authz.ActionInvitationExpire})
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	if len(es) != 1 {
+		t.Fatalf("%d %s entries, want exactly 1", len(es), authz.ActionInvitationExpire)
+	}
+	e := es[0]
+	if e.ActorSource != authz.SourceSystem || e.ActorSubject != nil {
+		t.Errorf("actor is %q/%v, want the system actor with no subject — nobody did this, time did",
+			e.ActorSource, e.ActorSubject)
+	}
+	if e.ObjectLabel != "lapsed@corp.example" {
+		t.Errorf("objectLabel %q, want the invited address", e.ObjectLabel)
+	}
+	if strings.Contains(strings.ToLower(string(e.Before)), "token") {
+		t.Errorf("the entry mentions a token: %s — an audit entry outlives the row it describes", e.Before)
+	}
+}

@@ -308,6 +308,20 @@ type Invitation struct {
 	DeclinedAt *time.Time `gorm:"column:declined_at"`
 	AcceptedAt *time.Time `gorm:"column:accepted_at"`
 	AcceptedBy *ID        `gorm:"column:accepted_by"`
+
+	// ExpiryRecordedAt is NOT a fourth state, and the paragraph above still
+	// holds: there is no `expired_at`, and expiry is ExpiresAt being in the past
+	// evaluated whenever the row is read. Nothing here decides whether an
+	// invitation is usable — store.usableInvitation compares ExpiresAt to now
+	// and never consults this.
+	//
+	// What it records is whether the `invitation.expire` AUDIT ENTRY has been
+	// written for this row, which is a fact about our bookkeeping rather than
+	// about the invitation. The sweep needs it for the same reason
+	// APIKey.DisabledAt serves apikey.expire: "expired and not yet accounted
+	// for" cannot be derived from ExpiresAt alone, so without a mark every pass
+	// would write the entry again for every invitation that ever lapsed.
+	ExpiryRecordedAt *time.Time `gorm:"column:expiry_recorded_at"`
 }
 
 func (Invitation) TableName() string { return "invitations" }
@@ -575,6 +589,19 @@ type Session struct {
 	LastSeenAt        time.Time
 	ExpiresAt         time.Time
 	RevokedAt         *time.Time
+	// LogoutHint is the ID token, held for one call and no other purpose:
+	// authentik 2026.8 refuses a logout carrying a post_logout_redirect_uri
+	// without an `id_token_hint`, and names OIDC certification as the reason.
+	// `client_id` is not accepted in its place, so a sign-out that lands the
+	// person anywhere we chose cannot be built without this.
+	//
+	// It is deliberately NOT the thing design D10 refuses to store. An ID token
+	// is an audience-restricted assertion that a subject authenticated; it buys
+	// no access at the provider and cannot be exchanged for anything, which an
+	// access or refresh token can. It is cleared on use (store.TakeLogoutHint),
+	// so a session that has signed out holds nothing, and it is never
+	// serialized into any response.
+	LogoutHint *string `gorm:"column:logout_hint"`
 }
 
 func (Session) TableName() string { return "sessions" }

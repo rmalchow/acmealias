@@ -121,7 +121,7 @@ func TestEndSessionURLIsBuiltFromDiscovery(t *testing.T) {
 	idp := newStubIDP(t)
 	s := idp.service()
 
-	raw := s.EndSessionURL(context.Background())
+	raw := s.EndSessionURL(context.Background(), "")
 	if raw == "" {
 		t.Fatal("no end-session URL, want one built from the provider metadata")
 	}
@@ -152,7 +152,7 @@ func TestEndSessionURLIsEmptyWhenTheProviderHasNone(t *testing.T) {
 	idp := newStubIDP(t)
 	idp.noEndSession = true
 
-	if got := idp.service().EndSessionURL(context.Background()); got != "" {
+	if got := idp.service().EndSessionURL(context.Background(), ""); got != "" {
 		t.Errorf("end-session URL = %q, want empty", got)
 	}
 }
@@ -164,7 +164,41 @@ func TestEndSessionURLIsEmptyWithoutALandingPage(t *testing.T) {
 	s := newStubIDP(t).service()
 	s.cfg.PostLogoutRedirectURL = ""
 
-	if got := s.EndSessionURL(context.Background()); got != "" {
+	if got := s.EndSessionURL(context.Background(), ""); got != "" {
 		t.Errorf("end-session URL = %q, want empty", got)
+	}
+}
+
+// TestEndSessionURLCarriesTheIDTokenHint pins the parameter authentik 2026.8
+// makes mandatory.
+//
+// It is worth a test of its own because its absence fails in a way that reads
+// like our bug and is invisible here: the provider answers 400 "bad request" to
+// a logout carrying a post_logout_redirect_uri and no hint, and on the version
+// before it the same request was accepted and the redirect silently dropped.
+// Neither symptom names the missing parameter.
+func TestEndSessionURLCarriesTheIDTokenHint(t *testing.T) {
+	idp := newStubIDP(t)
+	s := idp.service()
+
+	raw := s.EndSessionURL(context.Background(), "an.id.token")
+	if raw == "" {
+		t.Fatal("no end-session URL, want one built from the provider metadata")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parsing %q: %v", raw, err)
+	}
+	q := u.Query()
+	if got := q.Get("id_token_hint"); got != "an.id.token" {
+		t.Errorf("id_token_hint = %q, want the session's stored token", got)
+	}
+	// Both are still required alongside it: client_id resolves which
+	// application's registered post-logout list the URI is validated against.
+	if got := q.Get("client_id"); got != s.cfg.OIDCClientID {
+		t.Errorf("client_id = %q, want %q", got, s.cfg.OIDCClientID)
+	}
+	if got := q.Get("post_logout_redirect_uri"); got != s.cfg.PostLogoutRedirectURL {
+		t.Errorf("post_logout_redirect_uri = %q, want %q", got, s.cfg.PostLogoutRedirectURL)
 	}
 }

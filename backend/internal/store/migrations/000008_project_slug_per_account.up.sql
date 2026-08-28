@@ -1,0 +1,25 @@
+-- A project slug is unique WITHIN AN ACCOUNT, not across the service
+-- (collapse-project-and-loadbalancer task 1.5).
+--
+-- Global uniqueness was inherited rather than chosen: it predates accounts
+-- existing at all, and it means one customer naming a project `prod` stops
+-- every other customer from doing so — a cross-tenant collision on a name the
+-- other tenant cannot see, cannot discover, and cannot work around except by
+-- picking a second-choice name. That is the same class of leak this schema
+-- spends a whole row-level-security policy preventing everywhere else.
+--
+-- Per-account is also what the collapse made obvious. A project used to sit
+-- inside a folder, so `prod` under two folders was a real ambiguity somebody had
+-- to resolve; there are no folders now, one project per name per account, and
+-- the ambiguity went with the level that created it.
+--
+-- The slug stays a DNS LABEL (inventory.CreateProject validates it with
+-- dnsname.ValidateLabel), so it cannot contain a dot. That is what keeps a
+-- dotted composite such as `project.lb` unambiguous: the separator can never
+-- occur inside either half, so it never needs escaping and never needs a
+-- longest-match rule.
+--
+-- Nothing needs rewriting to satisfy this: the old constraint was strictly
+-- stronger, so every existing row already satisfies the new one.
+alter table projects drop constraint projects_slug_key;
+alter table projects add constraint projects_account_id_slug_key unique (account_id, slug);

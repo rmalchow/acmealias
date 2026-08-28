@@ -419,3 +419,68 @@ func TestIntegrationAnotherTenantsDomainIsRefusedWithoutNamingThem(t *testing.T)
 		t.Fatalf("within one account the conflict was reported as %v; it must say which load balancer holds it", err)
 	}
 }
+
+// TestIntegrationAProjectSlugIsUniquePerAccountAndNotGlobally covers
+// collapse-project-and-loadbalancer task 1.5.
+//
+// Global uniqueness was inherited rather than chosen — it predates accounts
+// existing — and it leaks across tenants in exactly the way the rest of this
+// schema spends a row-level-security policy preventing: one customer calling a
+// project `prod` stopped every other customer from doing so, over a name they
+// could not see, could not discover, and could only work around by picking a
+// second choice.
+//
+// Both halves are asserted, because only together do they say "per account":
+// two accounts may each hold `prod`, and one account may not hold it twice.
+func TestIntegrationAProjectSlugIsUniquePerAccountAndNotGlobally(t *testing.T) {
+	db, sc := scopedDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateProject(ctx, db, sc, testSubject(sc), Limits{}, "prod", "Production"); err != nil {
+		t.Fatalf("create the first prod: %v", err)
+	}
+
+	// The same name again, in the SAME account, is still refused: within one
+	// customer's inventory a slug names one thing.
+	if _, err := CreateProject(ctx, db, sc, testSubject(sc), Limits{}, "prod", "Production Again"); err == nil {
+		t.Error("a second `prod` in the same account was accepted, want a refusal — " +
+			"within an account a slug names one project")
+	}
+
+	// The same name in ANOTHER account must be accepted. This is the half that
+	// was broken, and it fails loudly against the old global constraint.
+	other, err := store.FindOrCreateUser(ctx, db, "inventory-second-owner", "Second Owner", "")
+	if err != nil {
+		t.Fatalf("create second owner: %v", err)
+	}
+	acc2, err := store.CreateAccountWithOwner(ctx, db, "inventory-second", "Second", other.ID, 25)
+	if err != nil {
+		t.Fatalf("create second account: %v", err)
+	}
+	sc2, err := store.ScopeForSelection(ctx, db, acc2.ID)
+	if err != nil {
+		t.Fatalf("scope for the second account: %v", err)
+	}
+	if _, err := CreateProject(ctx, db, sc2, testSubject(sc2), Limits{}, "prod", "Production"); err != nil {
+		t.Fatalf("a second account could not call its project `prod`: %v — "+
+			"a slug is unique per account, and one customer must not consume a "+
+			"name out of every other customer's namespace", err)
+	}
+}
+
+// TestAProjectSlugCannotContainADot pins what makes a dotted composite such as
+// `project.lb` parseable: the separator can never occur inside either half, so
+// it needs no escaping and no longest-match rule.
+//
+// It is a property of the slug being validated as a DNS LABEL rather than a
+// rule written for this purpose, which is why it is asserted here — a change to
+// that validation would silently take the guarantee away.
+func TestAProjectSlugCannotContainADot(t *testing.T) {
+	if err := dnsname.ValidateLabel("project.lb"); err == nil {
+		t.Error("`project.lb` was accepted as a slug, want a refusal — a slug is one " +
+			"DNS label, and a dot inside one makes a dotted composite ambiguous")
+	}
+	if err := dnsname.ValidateLabel("prod"); err != nil {
+		t.Errorf("`prod` was refused as a slug: %v", err)
+	}
+}
