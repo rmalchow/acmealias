@@ -69,16 +69,21 @@ there are no strangers — and it makes the path something that can be looked at
 now, rather than written under time pressure later.
 
 It also surfaces one consequence early, and it is a consequence worth staring at. A person who
-registers themselves is placed in **no group**. No group means no role. No role means our service
-refuses them, and by an existing rule (`identity-and-roles`, "Authenticated user with no mapped group
-is told why") the refusal reports the groups it observed, which is an empty list.
+registers themselves is placed in **no group**. No group means no role. No role means our service places them in their own personal account and nothing else.
 
-That is not a bug to be fixed here. It is exactly the property `tenancy-and-permissions` P18 was built
-to guarantee and `public-edition` U12 restates: account membership is rows we write, never something
-derived from a group claim, so even a fully compromised identity provider "can create a user, and that
-user belongs to nothing." Self-registration in this edition produces precisely that user. What turns
-such a person into somebody who can do anything is `account-invitations`, which is the next change in
-the sequence and is deliberately not in this one.
+**This paragraph used to end differently, and the difference is worth stating.** It said such a person
+is REFUSED, reporting the empty list of groups it observed. That was true when it was written and is
+not any more: `personal-and-team-accounts` materializes a personal account on first sign-in, so
+somebody who signs themselves up arrives in a working product rather than at an explanation of why
+they cannot use one. The empty-handed state that paragraph described was deliberately deleted.
+
+What survives is the property that mattered. Account membership is rows we write, never something
+derived from a group claim — `tenancy-and-permissions` P18, which `public-edition` U12 restates when
+it observes that even a fully compromised identity provider "can create a user, and that user belongs
+to nothing." Read precisely, U12 is still exactly right: the provider can create a person and cannot
+place that person inside anybody ELSE'S account. The personal account they land in holds nothing but
+what they put there. What lets somebody into an account with other people's work in it is
+`account-invitations`, which is deliberately not in this change.
 
 ### Branding is only real once there is something to brand
 

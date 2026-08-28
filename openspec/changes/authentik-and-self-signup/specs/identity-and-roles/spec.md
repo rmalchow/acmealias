@@ -1,29 +1,29 @@
 ## ADDED Requirements
 
-### Requirement: A self-registered user belongs to nothing until membership is written
+### Requirement: A self-registered user holds their personal account and nothing else
 
 Where the identity provider permits a person to create their own account, the resulting user SHALL
-hold no group that any role is configured for, and SHALL therefore hold no role and be refused
-access by the service.
+hold their own personal account and SHALL hold membership of no other account.
 
-Access SHALL become possible only when account membership is written through the service's own
-mechanisms, and SHALL NOT become possible through any change of group membership made at the
-identity provider alone.
+They SHALL hold no group that any role is configured for, and membership of any other account SHALL
+become possible only when it is written through the service's own mechanisms — never through a change
+of group membership made at the identity provider alone.
 
 This is the observable form of the rule that tenancy is never derived from a directory: an identity
-provider can create a person, and cannot place that person inside an account.
+provider can create a person, and cannot place that person inside anybody else's account.
 
-#### Scenario: Self-registration produces an authenticated user with no access
+#### Scenario: Self-registration produces a working user with nobody else's data
 
 - **WHEN** a person registers themselves at the identity provider and signs in
-- **THEN** authentication succeeds and the service refuses access, reporting the groups it observed
+- **THEN** authentication succeeds, they hold their personal account, and they hold membership of no
+  other account
 
 #### Scenario: A directory group does not confer membership of an account
 
 - **WHEN** a self-registered user is added to a group at the identity provider that no role is configured for
-- **THEN** they hold no role and remain without access
+- **THEN** they gain membership of no account beyond their own personal one
 
-#### Scenario: The refusal explains itself to someone who has just signed up
+#### Scenario: A person who signs themselves up is not shown a refusal
 
-- **WHEN** a self-registered user is refused for holding no role
-- **THEN** the response distinguishes "your account is not yet associated with anything" from a misconfiguration of the service
+- **WHEN** a self-registered user reaches the product for the first time
+- **THEN** they are placed in their personal account rather than told they are associated with nothing

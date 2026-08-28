@@ -193,24 +193,31 @@ changes its flow executor, this breaks, and it breaks with a confusing error. Th
 it breaks *loudly and in one place*, and that place is a file whose doc comment says exactly what it
 is doing and why.
 
-## K6. Self-registration is enabled, and produces a user who belongs to nothing
+## K6. Self-registration is enabled, and produces a user who holds exactly their own account
 
 The blueprint enables an enrolment flow reachable from the console's sign-in page.
 
-What it creates is a user with a username, an email and a password, in **no group**. That user can
-sign in to authentik and is then refused by our service, which reports the groups it observed — an
-empty list — under the existing rule in `identity-and-roles`, "Authenticated user with no mapped
-group is told why".
+What it creates is a user with a username, an email and a password, in **no group**. What the SERVICE
+then does with that user is the part this decision has been rewritten for.
 
-**This is the designed outcome, not an unfinished edge.** `tenancy-and-permissions` P18 makes account
-membership rows we write rather than claims we read, and `public-edition` U12 leans on exactly that
-when it observes that a compromised identity provider "can create a user, and that user belongs to
-nothing". Self-registration is the mechanism that produces such users, and the refusal is the
-property being demonstrated.
+**This decision used to say the user "belongs to nothing" and is refused, and that is now wrong.**
+`personal-and-team-accounts` materializes a personal account on first sign-in — `EnsurePersonalAccount`,
+called from `internal/oidcauth/flow.go` — so a self-registered person lands in a working product
+holding one account, their own, and membership of nothing else. The refusal that decision was built
+around no longer happens, and the empty-handed state it described was deliberately deleted.
 
-It follows that **the refusal message is now user-facing in a way it was not before.** Previously only
-a misconfigured staff member ever saw it. Now it is what every self-registered person sees, and the
-task list treats its wording as part of this change rather than as a detail.
+**What survives, and is the property actually worth demonstrating.** The user holds no group any role
+is configured for, and gains membership of no OTHER account. That is still `tenancy-and-permissions`
+P18 — membership is rows we write, not claims we read — and it is still what `public-edition` U12
+leans on when it observes that a compromised identity provider "can create a user, and that user
+belongs to nothing". U12's sentence stays true in the sense that matters: the provider can create a
+person, and cannot place that person inside somebody else's account. The personal account it lands in
+contains nothing but what its holder puts there.
+
+**The consequence for wording is the reverse of what this decision used to claim.** It said the
+refusal message becomes user-facing and its wording is part of this change. There is no refusal. What
+is user-facing is the first screen of an empty personal account, and that is where the attention
+belongs — see `public-edition` task 1.6.
 
 **Rejected: leaving self-registration off in development and turning it on in `public-edition`.** It
 is the thing this change was asked for, and an enrolment flow that has never run is not "built and
