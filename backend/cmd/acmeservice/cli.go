@@ -49,7 +49,7 @@ func usage() {
   acmeservice adminctl --account SLUG <noun> <verb> ...
 
   acmeservice adminctl account   credit --credits N | transfer --owner SUBJECT | member-add --subject S --role NAME
-  acmeservice adminctl project   create --slug S --name N | list | delete --slug S | dns REF
+  acmeservice adminctl project   create --slug S --name N | list | delete --slug S
   acmeservice adminctl node      add --project REF --label L [--ipv4 A] [--ipv6 A] | delete --id ID
   acmeservice adminctl domain    create --project REF --name N [--include-wildcard] | list --project REF | delete --id ID
   acmeservice adminctl key       create [--project REF] [--grant T:O:A]... --name N [--expires DUR] | list --project REF | revoke --id ID
@@ -265,13 +265,6 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 		slug := fs.String("slug", "", "project slug")
 		fs.Parse(args)
 		return adminctl.ProjectDelete(ctx, db, sc, out, *slug)
-
-	case "project dns":
-		if len(args) != 1 {
-			return fmt.Errorf("usage: acmeservice adminctl project dns REF")
-		}
-		opts := inventory.PlanOptions{Zone: cfg.Zone, CAAIssuers: cfg.CAAIssuers}
-		return adminctl.ProjectDNS(ctx, db, sc, out, opts, args[0])
 
 	case "node add":
 		fs := flag.NewFlagSet("node add", flag.ExitOnError)

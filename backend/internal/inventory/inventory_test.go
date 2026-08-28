@@ -165,18 +165,26 @@ func TestIntegrationWildcardAndApexShareOneAlias(t *testing.T) {
 		t.Fatalf("aliases = %v (err %v), want exactly one", aliases, err)
 	}
 
-	plan, err := Plan(ctx, db, sc, testSubject(sc), projectID, PlanOptions{Zone: "z.example.net.", CAAIssuers: []string{"letsencrypt.org"}})
+	es, err := Expectations(ctx, db, sc, testSubject(sc), projectID, PlanOptions{Zone: "z.example.net.", CAAIssuers: []string{"letsencrypt.org"}})
 	if err != nil {
-		t.Fatalf("plan: %v", err)
+		t.Fatalf("expectations: %v", err)
 	}
-	if got := count(plan, "CNAME"); got != 1 {
-		t.Errorf("CNAMEs = %d, want 1", got)
+	if len(es) != 2 {
+		t.Fatalf("expectations = %d, want one per domain", len(es))
 	}
-	if got := count(plan, "A"); got != 2 {
-		t.Errorf("A records = %d, want 2 (two domains, one node)", got)
+	// One delegation between the two, said twice — which is what lets a caller
+	// deduplicate the lookup and what stops one row calling the other's record
+	// absent.
+	if es[0].ChallengeName != es[1].ChallengeName || es[0].Target != es[1].Target {
+		t.Errorf("apex and wildcard do not share a delegation: %+v / %+v", es[0], es[1])
 	}
-	if got := count(plan, "CAA"); got != 2 {
-		t.Errorf("CAA rows = %d, want 2", got)
+	if es[0].Target != "example-com.z.example.net" {
+		t.Errorf("target = %q", es[0].Target)
+	}
+	for _, e := range es {
+		if len(e.ExpectedCAA) != 2 {
+			t.Errorf("%s: expected CAA = %q, want an issue and an issuewild row", e.Name, e.ExpectedCAA)
+		}
 	}
 
 	// Removing one of the two leaves the shared alias in place.

@@ -182,6 +182,102 @@ func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 	return &DomainCreation{Domain: domains[0], Domains: domains, Alias: alias, AliasCreated: created, Warnings: warnings}, nil
 }
 
+// UpdateDomain changes the one thing about an existing domain a customer may
+// change: whether we observe the TLS certificate its nodes serve, and the
+// hostname we present when we do (change domain-diagnostics, task 2.7).
+//
+// Authorized with ActionInventoryWrite — the same permission that adds and
+// removes a domain. Observation is a property of a domain, not a new object,
+// and a new action would mean a role_grants migration and a default-roles edit
+// for a boolean.
+//
+// testHost is three-valued deliberately: nil leaves whatever is stored alone,
+// which is the whole of "disabling the switch keeps the hostname" (design G8),
+// and a non-nil one replaces it. There is no way to clear it, because an empty
+// hostname beside a switch that is on is the row the database refuses anyway.
+//
+// The audit event is the caller's, as it is for CreateDomain and DeleteDomain:
+// nothing in this package writes the audit trail.
+func UpdateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject,
+	domainID model.ID, observe bool, testHost *string) (*model.Domain, error) {
+
+	// Scoped read before anything is decided, as UpdateNodeAddresses does: the
+	// domain has to be one of this account's, and the validation below reads
+	// its name and its stored hostname.
+	d, err := store.GetDomain(ctx, db, sc, domainID)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorize(subj, authz.ActionInventoryWrite, authz.ObjectOf(d)); err != nil {
+		return nil, err
+	}
+	host, err := observationHost(*d, observe, testHost)
+	if err != nil {
+		return nil, err
+	}
+	return store.UpdateDomainObservation(ctx, db, sc, domainID, observe, host)
+}
+
+// observationHost validates a requested TLS test hostname against the domain it
+// would be stored on and returns it normalized, or nil to leave the stored one
+// alone (design G8, task 2.3).
+//
+// The rules are the wildcard rules the rest of the inventory already enforces —
+// dnsname.ValidateDomain for the name itself and dnsname.Covers for the
+// covering test — and not a second matcher written here. A hostname this
+// accepted and the domain rules rejected would be a row nothing could ever
+// observe.
+//
+// The store refuses the half a database can check (a wildcard with the switch
+// on has *a* hostname) and this refuses the half it cannot, which is the only
+// half a person can act on: it is the message a customer reads, so it names the
+// domain, the hostname and the shape a working one would have.
+//
+// It never DERIVES a hostname (task 2.4). `www.<domain>` is the obvious guess
+// and it is a guess: a customer whose wildcard serves `a.example.com` and not
+// `www` would get a red dot for a name they never deployed, which is the worst
+// possible first impression of a check.
+func observationHost(d model.Domain, observe bool, testHost *string) (*string, error) {
+	base, wildcard := strings.CutPrefix(d.Name, "*.")
+
+	var host *string
+	if testHost != nil {
+		normalized, _, err := dnsname.ValidateDomain(*testHost)
+		if err != nil {
+			return nil, fmt.Errorf("test hostname: %w", err)
+		}
+		h := normalized.String()
+		if !wildcard {
+			return nil, fmt.Errorf("%w: %q is not a wildcard, so it is asked for by its own name; "+
+				"a test hostname belongs only to a domain that is not a name a TLS client can ask for", ErrInvalid, d.Name)
+		}
+		if !dnsname.Covers(d.Name, h) {
+			return nil, fmt.Errorf("%w: %q is not a name %q covers; a wildcard matches exactly one label "+
+				"beneath it, so the test hostname has to be of the form <host>.%s and has to be one you actually serve",
+				ErrInvalid, h, d.Name, base)
+		}
+		host = &h
+	}
+
+	// What the row will hold once this write lands, which is what the switch is
+	// being turned on against — a request that only flips the switch is relying
+	// on a hostname it did not send.
+	stored := ""
+	if d.TLSTestHost != nil {
+		stored = *d.TLSTestHost
+	}
+	if host != nil {
+		stored = *host
+	}
+	if observe && wildcard && stored == "" {
+		return nil, fmt.Errorf("%w: %q is a wildcard, and a wildcard is not a name a TLS client can ask for; "+
+			"observing it needs a test hostname of the form <host>.%s that you actually serve. We will not guess "+
+			"one — a guessed name you never deployed would report a certificate problem you do not have",
+			ErrInvalid, d.Name, base)
+	}
+	return host, nil
+}
+
 // checkDomainName runs every pre-write check for one name — the wildcard
 // rules, the inventory-wide duplicate check, and the coverage warnings against
 // the project's existing domains — and returns the normalized name. It

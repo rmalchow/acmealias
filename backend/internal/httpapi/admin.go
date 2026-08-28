@@ -294,6 +294,20 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	acct.GET("/projects/:id/domains", a.listDomains)
 	acct.POST("/projects/:id/domains", a.createDomain)
 	acct.DELETE("/domains/:id", a.deleteDomain)
+	// The observation switch and its test hostname (domain-diagnostics 2.8). A
+	// PATCH on the domain and not a /observation sub-route: PATCH /projects/:id
+	// and PATCH /nodes/:id are already the house shape for "change a property of
+	// a thing", and a sub-route for one boolean is a route whose only purpose is
+	// to need a second one later.
+	acct.PATCH("/domains/:id", a.updateDomain)
+	// What we saw when we last shook hands with each of this domain's addresses,
+	// and the same thing over time. Both are reads of what the observer already
+	// recorded — neither dials anything (domain-diagnostics 5.2, 5.3).
+	//
+	// The history is refused on a personal account, in the SERVICE rather than
+	// by the console hiding a section it was sent (G15).
+	acct.GET("/domains/:id/certificate", a.getDomainCertificate)
+	acct.GET("/domains/:id/certificate/history", a.getDomainCertificateHistory)
 	// The acme-dns credentials file for one domain (acme-dns-protocol N3).
 	//
 	// A POST because it CREATES a project key — the file carries a secret, and a
@@ -318,8 +332,6 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	acct.POST("/keys/:id/rotate", a.rotateKey)
 	acct.DELETE("/keys/:id", a.revokeKey)
 
-	acct.GET("/projects/:id/plan", a.getPlan)
-	acct.GET("/projects/:id/plan/zone", a.getPlanZone)
 	// Verification is a read: it resolves names and stores nothing, so it is a
 	// GET and needs no CSRF token.
 	acct.GET("/projects/:id/verification", a.verifyPlan)

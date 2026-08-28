@@ -58,6 +58,8 @@ var crossAccountReaders = map[string]string{
 	"DueDelegations":               "the activation worker runs on a ticker with no session, and a delegation is due or not regardless of whose it is",
 	"RecordDelegationSeen":         recordDelegationWhy,
 	"RecordDelegationMissing":      recordDelegationWhy,
+	"DueObservations":              "the observation worker runs on a ticker with no session, and a domain is due a handshake or not regardless of whose it is",
+	"RecordObservation":            "the same worker, appending the row it was just handed; the composite foreign keys are what confine it — an observation naming a domain of one account while claiming another references rows that do not exist",
 	"AccountOwnedBy":               "checkout's producer: it asks 'the account with this id that this person owns' before any scope exists, and answers not-found for every other case so the route is not an existence oracle",
 
 	// The four invitation functions, and they are all here for one reason: an
@@ -479,4 +481,84 @@ func TestIntegrationCrossAccountDoesNotOutliveItsNesting(t *testing.T) {
 			"the policies were still lifted for the rest of the transaction", len(seenAfter))
 	}
 	_ = theirs
+}
+
+// TestIntegrationObservationsAreConfinedToTheirAccount is task 12.11: the new
+// table's version of what every other tenant table already proves.
+//
+// It matters more here than elsewhere, because the worker that writes these rows
+// runs cross-account by necessity — DueObservations and RecordObservation both
+// lift the policies — so the reads are the only place the confinement can be
+// demonstrated, and they are the ones a customer reaches.
+func TestIntegrationObservationsAreConfinedToTheirAccount(t *testing.T) {
+	db, mine, theirs, _, _ := twoAccounts(t)
+	ctx := context.Background()
+
+	// One observation in each account, of that account's own domain.
+	observe := func(sc Scope) model.ID {
+		t.Helper()
+		var d model.Domain
+		var n model.LBNode
+		if err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+			if err := sc.Where(tx).First(&d).Error; err != nil {
+				return err
+			}
+			address := "192.0.2.1"
+			n = model.LBNode{ProjectID: d.ProjectID, Label: "a", IPv4: &address}
+			return nil
+		}); err != nil {
+			t.Fatalf("read domain: %v", err)
+		}
+		if err := CreateLBNode(ctx, db, sc, &n); err != nil {
+			t.Fatalf("create node: %v", err)
+		}
+		err := RecordObservation(ctx, db, model.CertificateObservation{
+			AccountID: d.AccountID, ProjectID: d.ProjectID, DomainID: d.ID, NodeID: n.ID,
+			Family: "A", Address: "192.0.2.1", ServerName: d.Name,
+			ObservedAt: time.Now().UTC(), Outcome: "refused",
+		})
+		if err != nil {
+			t.Fatalf("record observation: %v", err)
+		}
+		return d.ID
+	}
+	myDomain := observe(mine)
+	theirDomain := observe(theirs)
+
+	// The scoped read of my own domain sees my row.
+	got, err := LatestObservations(ctx, db, mine, myDomain)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("latest for my own domain = %d rows, err %v, want 1", len(got), err)
+	}
+
+	// Naming the other account's domain returns nothing rather than their row —
+	// and nothing rather than an error, because an empty answer is what a domain
+	// that has never been observed looks like too, so the route is not an oracle.
+	got, err = LatestObservations(ctx, db, mine, theirDomain)
+	if err != nil {
+		t.Fatalf("latest for their domain: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a scoped read saw %d of another account's observations", len(got))
+	}
+	hist, err := ObservationHistory(ctx, db, mine, theirDomain, 10)
+	if err != nil {
+		t.Fatalf("history for their domain: %v", err)
+	}
+	if len(hist) != 0 {
+		t.Fatalf("a scoped history read saw %d of another account's observations", len(hist))
+	}
+
+	// And with no predicate of its own, which is the half the policy has to
+	// answer for.
+	var leaked []model.CertificateObservation
+	if err := mine.Run(ctx, db, func(tx *gorm.DB) error {
+		return tx.Find(&leaked).Error
+	}); err != nil {
+		t.Fatalf("unfiltered read: %v", err)
+	}
+	if len(leaked) != 1 || leaked[0].DomainID != myDomain {
+		t.Fatalf("an unfiltered read inside one scope returned %d observations, want only my own — "+
+			"check that certificate_observations is both enabled and FORCED", len(leaked))
+	}
 }

@@ -67,9 +67,12 @@ project  acme-shop
 
 3. **Add the nodes and their public addresses**
 
-   These addresses are used for two things: they become the address records in the DNS plan the
-   customer is asked to publish, and they are offered as the default source restriction on API keys. Get
-   them right — a wrong address here produces a certificate on a host nobody reaches.
+   These addresses are used for two things: they are what the customer is asked to point the
+   domain's `A`/`AAAA` records at, and they are offered as the default source restriction on API
+   keys. Once a domain's certificate observation switch is on (see
+   [step 4](#step-4-onboard-a-domain)), they are also the addresses this service connects to on
+   port 443 to read what is actually being served. Get them right — a wrong address here produces
+   a certificate on a host nobody reaches.
 
 The same can be done from the command line on the service host, which is the route to use when
 bootstrapping before anyone has console access. The stack runs under Docker Compose, so each command
@@ -186,23 +189,27 @@ services:
    On the load balancer page, **Domains → Add domain**. Enter the exact name the certificate
    will cover: `shop.example.com`, `example.com`, or `*.example.com`.
    The service assigns the alias label itself — there is nothing to fill in and nothing to choose —
-   and the label it assigned appears in the DNS plan below.
+   and the label it assigned appears on the domain's `CNAME` dot below.
 
-2. **Read off the DNS plan**
+2. **Read off the `CNAME` to publish**
 
-   The **DNS plan** panel now lists every record that must exist in the customer's zone —
-   address records pointing at this load balancer's nodes, plus one `_acme-challenge` CNAME per
-   challenge name. Copy it, or download the zone-file snippet.
+   The domain's own row shows the one `_acme-challenge` CNAME it needs. Click the `CNAME` dot and
+   copy it — it names this domain's alias exactly, and prints the same record in every state,
+   including once it is already correct.
 
    ```
-   shop.example.com.                  300  IN  A      203.0.113.10
-   shop.example.com.                  300  IN  A      203.0.113.11
    _acme-challenge.shop.example.com.  300  IN  CNAME  k7m3q9x2r4tv8w1p.acmeservice.cloudpowered.services.
    ```
 
+   The address records the customer needs (`shop.example.com. IN A 203.0.113.10`, and so on for
+   every node) are not generated for you: the customer already told *us* those addresses when the
+   load balancer's nodes were registered, so there is nothing this service can check about them
+   that the customer does not already know — send those the way you would send any other DNS
+   change request.
+
    The label in the CNAME is generated and unguessable, which is what stops anyone outside from
-   computing it and asking our nameservers whether a given domain is a customer. Copy it from the plan
-   rather than typing it. (A deployment run with `ACME_ALIAS_USE_DOMAIN=true` shows a
+   computing it and asking our nameservers whether a given domain is a customer. Copy it from the
+   dot rather than typing it. (A deployment run with `ACME_ALIAS_USE_DOMAIN=true` shows a
    readable `shop-example-com` here instead; see
    [Installation](installation.md).)
 
@@ -221,24 +228,24 @@ services:
 
 4. **Verify, rather than believe**
 
-   The domain's row checks itself whenever you open the load balancer, and reports the
-   delegation as *configured correctly*, *not configured*, *configured incorrectly* (with what
-   was found instead), *could not check*, or *not checked*. Do not proceed until it reads
-   configured correctly — everything downstream depends on it, and a wrong CNAME is far commoner
-   than a missing one. **What does this mean?** beside the chip shows the exact record for this
-   domain.
+   The domain's `CNAME` dot checks itself whenever you open the load balancer, and turns green
+   once it resolves to this domain's alias — red means something resolves but not the alias we
+   need (with what was found instead), grey means it could not be checked or has not been checked
+   yet. Do not proceed until it is green — everything downstream depends on it, and a wrong CNAME
+   is far commoner than a missing one. Click the dot for the exact record this domain needs.
 
-   Watch the CAA chip too: **blocks us** means a CAA record set names some other authority, and
-   issuance is refused however right the delegation is. **no restriction** is the normal state
-   and needs nothing.
+   Watch the CAA dot too: red means a CAA record set names some other authority, and issuance is
+   refused however right the delegation is. Green with no dot's tooltip naming an issuer is the
+   normal "no restriction" state and needs nothing.
 
-   **Run verification** on the DNS plan panel answers the whole plan, addresses included.
+   **Check now**, beside the domain, re-runs the same lookup immediately rather than waiting for
+   the poller.
 
    The same check from a shell:
 
    ```
    dig +short _acme-challenge.shop.example.com CNAME
-   # expected: the label from the DNS plan, e.g.
+   # expected: the target shown on the CNAME dot, e.g.
    #           k7m3q9x2r4tv8w1p.acmeservice.cloudpowered.services.
    ```
 
@@ -303,12 +310,13 @@ Two limits to state when proposing a wildcard to a customer, because both surpri
 - `*.example.com` does **not** cover `a.b.example.com`. A
   wildcard matches exactly one label.
 
-Adding the pair makes the DNS plan you send the customer longer, and deliberately so: a wildcard
+Adding the pair means telling the customer for one more name, and deliberately so: a wildcard
 needs its own address records — one A and one AAAA per node, for `*.example.com` as well as for
 `example.com` — because a DNS wildcard is a record in the customer's zone, not an inheritance
 rule. Without them the certificate is issued and `shop.example.com` still resolves nowhere. The
 `_acme-challenge` CNAME does *not* double: both names validate at the same challenge name, so the
-plan still carries exactly one, and the customer publishes one delegation.
+`CNAME` dot on either row prints the same one record, and the customer publishes one delegation
+for both.
 
 Tell the customer what the wildcard address record does before they publish it: it answers for
 every unregistered name in the zone, so it can shadow a mail host or a subdomain served by
@@ -330,7 +338,7 @@ future retry needs no further contact with them.
 - [ ] Traefik static config on every node: `httpreq` provider, public resolvers
 - [ ] `HTTPREQ_MODE` unset, CNAME support not disabled
 - [ ] Challenge API reachable from every node (`curl -u` returns 400, not 401 — see below)
-- [ ] First domain added, DNS plan sent, verification green
+- [ ] First domain added, `CNAME` sent, verification green
 - [ ] One router switched over and a full present → issue → cleanup cycle observed
 
 > **Quick credential test**

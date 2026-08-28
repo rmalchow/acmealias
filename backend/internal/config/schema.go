@@ -27,15 +27,16 @@ import (
 )
 
 type fileConfig struct {
-	Zone      zoneBlock      `koanf:"zone"`
-	Listeners listenersBlock `koanf:"listeners"`
-	Database  databaseBlock  `koanf:"database"`
-	OIDC      oidcBlock      `koanf:"oidc"`
-	Staff     staffBlock     `koanf:"staff"`
-	Challenge challengeBlock `koanf:"challenge"`
-	Limits    limitsBlock    `koanf:"limits"`
-	Mail      mailBlock      `koanf:"mail"`
-	Log       logBlock       `koanf:"log"`
+	Zone        zoneBlock        `koanf:"zone"`
+	Listeners   listenersBlock   `koanf:"listeners"`
+	Database    databaseBlock    `koanf:"database"`
+	OIDC        oidcBlock        `koanf:"oidc"`
+	Staff       staffBlock       `koanf:"staff"`
+	Challenge   challengeBlock   `koanf:"challenge"`
+	Observation observationBlock `koanf:"observation"`
+	Limits      limitsBlock      `koanf:"limits"`
+	Mail        mailBlock        `koanf:"mail"`
+	Log         logBlock         `koanf:"log"`
 }
 
 // zoneBlock is everything about the zone this service is authoritative for:
@@ -197,6 +198,33 @@ func (challengeBlock) Defaults() map[string]any {
 		// load balancer's client_ip and nobody has signed off on a retention
 		// period for it, so nothing is deleted until an operator says so.
 		"interaction_retention": time.Duration(0),
+	}
+}
+
+// observationBlock is certificate observation (domain-diagnostics G13, G14,
+// G17): a periodic TLS handshake against an enabled domain's node addresses.
+// It is its own top-level block and not nested under challengeBlock, which
+// gates whether a challenge is published at all — this gates nothing.
+type observationBlock struct {
+	Enabled              bool          `koanf:"enabled"`
+	Interval             time.Duration `koanf:"interval"`
+	HandshakeTimeout     time.Duration `koanf:"handshake_timeout"`
+	FullResolutionWindow time.Duration `koanf:"full_resolution_window"`
+	Retention            time.Duration `koanf:"retention"`
+}
+
+func (observationBlock) Defaults() map[string]any {
+	return map[string]any{
+		"enabled": true,
+		// Four checks a day against thirty days of renewal slack (G13); see
+		// config.yaml for why the configured value takes a floor of one hour.
+		"interval":          6 * time.Hour,
+		"handshake_timeout": 5 * time.Second,
+		// Unmeasured, and configuration rather than constants for exactly
+		// that reason — see config.yaml, and the precedent
+		// challenge.interaction_retention already set (G16).
+		"full_resolution_window": 336 * time.Hour,
+		"retention":              4320 * time.Hour,
 	}
 }
 
@@ -378,6 +406,12 @@ func (f fileConfig) toConfig() Config {
 		ActivationFreshInterval:   f.Challenge.ActivationFreshInterval,
 		ActivationSettledInterval: f.Challenge.ActivationSettledInterval,
 
+		ObservationEnabled:              f.Observation.Enabled,
+		ObservationInterval:             f.Observation.Interval,
+		ObservationHandshakeTimeout:     f.Observation.HandshakeTimeout,
+		ObservationFullResolutionWindow: f.Observation.FullResolutionWindow,
+		ObservationRetention:            f.Observation.Retention,
+
 		OIDCIssuer:       f.OIDC.Issuer,
 		OIDCClientID:     f.OIDC.ClientID,
 		OIDCClientSecret: f.OIDC.ClientSecret,
@@ -487,6 +521,12 @@ var envBindings = []envBinding{
 	{"ACME_ALIAS_USE_DOMAIN", "challenge.alias_use_domain", kindBool},
 	{"ACME_ACTIVATION_FRESH_INTERVAL", "challenge.activation_fresh_interval", kindDuration},
 	{"ACME_ACTIVATION_SETTLED_INTERVAL", "challenge.activation_settled_interval", kindDuration},
+
+	{"ACME_OBSERVATION_ENABLED", "observation.enabled", kindBool},
+	{"ACME_OBSERVATION_INTERVAL", "observation.interval", kindDuration},
+	{"ACME_OBSERVATION_HANDSHAKE_TIMEOUT", "observation.handshake_timeout", kindDuration},
+	{"ACME_OBSERVATION_FULL_RESOLUTION_WINDOW", "observation.full_resolution_window", kindDuration},
+	{"ACME_OBSERVATION_RETENTION", "observation.retention", kindDuration},
 
 	{"ACME_ALLOW_ACCOUNT_CREATION", "limits.allow_account_creation", kindBool},
 	{"ACME_PROJECT_QUOTA", "limits.projects_per_personal_account", kindInt},

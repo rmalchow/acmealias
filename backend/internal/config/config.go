@@ -209,6 +209,42 @@ type Config struct {
 	ActivationFreshInterval   time.Duration
 	ActivationSettledInterval time.Duration
 
+	// ObservationEnabled is the whole-deployment off switch for certificate
+	// observation (ACME_OBSERVATION_ENABLED, default true; design G14). Off
+	// costs a stale dialog and nothing else: nothing downstream acts on an
+	// observation, so there is no other path that changes.
+	ObservationEnabled bool
+
+	// ObservationInterval is how often a domain's node addresses are checked,
+	// and also the age at which one becomes due (ACME_OBSERVATION_INTERVAL,
+	// default 6h; design G13).
+	//
+	// IT TAKES A FLOOR OF ONE HOUR, enforced in Validate and refused rather
+	// than clamped. Certificate observation is unmetered (design G17), so
+	// nothing on the customer's side bounds how often this service connects
+	// to their machine — this floor is the only thing that does.
+	ObservationInterval time.Duration
+
+	// ObservationHandshakeTimeout bounds one TLS handshake attempt, dial and
+	// handshake together (ACME_OBSERVATION_HANDSHAKE_TIMEOUT, default 5s). A
+	// node that has started blackholing must cost one bounded pass, not an
+	// unbounded one.
+	ObservationHandshakeTimeout time.Duration
+
+	// ObservationFullResolutionWindow and ObservationRetention are the two
+	// retention windows the sweeper downsamples against
+	// (ACME_OBSERVATION_FULL_RESOLUTION_WINDOW, default 336h;
+	// ACME_OBSERVATION_RETENTION, default 4320h; design G16). Full resolution
+	// is kept for the first window; beyond it, at most one observation per
+	// domain per address per day survives until the second window, past which
+	// even that is dropped.
+	//
+	// BOTH NUMBERS ARE UNMEASURED. They are configuration rather than
+	// constants for exactly that reason — nobody has signed off on a period —
+	// the same shape InteractionRetention above already uses.
+	ObservationFullResolutionWindow time.Duration
+	ObservationRetention            time.Duration
+
 	// OIDC settings (design D10).
 	OIDCIssuer       string // ACME_OIDC_ISSUER
 	OIDCClientID     string // ACME_OIDC_CLIENT_ID

@@ -150,10 +150,29 @@ import { ApiService, Interaction, apiErrorMessage } from '@acme/shared';
   styles: [
     `
       .panel-head {
+        /* THE HEADING LEFT, THE CONTROLS RIGHT — and margin-left:auto on whatever follows the
+           heading rather than justify-content:space-between, because a panel with TWO buttons
+           has three children and space-between would spread all three, parking one button in the
+           middle of the row. The auto margin takes up the slack once, so every control after the
+           heading stays a group at the right edge.
+
+           Why it matters at all: with gap alone the buttons sat against the end of the heading,
+           so their position moved with the length of a word — "Domains" and "Recent interactions"
+           put their buttons in different places on the same page, and a reader looking for the
+           button on the next panel down had to find it again. The right edge does not move. */
         display: flex;
         align-items: center;
         gap: 0.75rem;
-        margin-bottom: 0.5rem;
+        /* A few pixels more, so the heading row reads as a label for the table below rather
+           than as part of its header row. */
+        margin-bottom: 0.75rem;
+      }
+      /* Everything after the heading goes right, as a group: on the Domains panel that is BOTH
+         buttons — Recheck and Add domain — with their gap preserved between them. Targeting the
+         second child rather than the buttons by name means a panel that gains a third control
+         needs no new rule. */
+      .panel-head > :nth-child(2) {
+        margin-inline-start: auto;
       }
       h2 {
         margin: 0;

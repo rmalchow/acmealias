@@ -10,27 +10,41 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/resolvercheck"
 )
 
-// planWithDomains is the shape domainChecks joins against: three domains, two
-// challenge names (the apex and its wildcard share one), one registrable
-// domain — the same worked example the plan's own tests use.
-func planWithDomains() (*inventory.DNSPlan, []model.ID) {
+// expectedDomains is the shape domainChecks joins against: three domains, two
+// challenge names (the apex and its wildcard share one), one registrable domain
+// — the same worked example internal/inventory's own tests use.
+func expectedDomains() []inventory.DomainExpectation {
 	apexAlias, shopAlias := model.NewID(), model.NewID()
-	apex, wild, shop := model.NewID(), model.NewID(), model.NewID()
-	return &inventory.DNSPlan{
-		Records: []inventory.Record{
-			{Name: "_acme-challenge.example.com", Type: "CNAME", Value: "example-com.svc.example.net"},
-			{Name: "_acme-challenge.shop.example.com", Type: "CNAME", Value: "shop-example-com.svc.example.net"},
-			{Name: "example.com", Type: "CAA", Value: `0 issue "letsencrypt.org"`},
-		},
-		Domains: []inventory.DomainPlan{
-			{DomainID: apex, Name: "example.com", ChallengeName: "_acme-challenge.example.com",
-				AliasID: apexAlias, Target: "example-com.svc.example.net", Registrable: "example.com"},
-			{DomainID: wild, Name: "*.example.com", ChallengeName: "_acme-challenge.example.com",
-				AliasID: apexAlias, Target: "example-com.svc.example.net", Registrable: "example.com"},
-			{DomainID: shop, Name: "shop.example.com", ChallengeName: "_acme-challenge.shop.example.com",
-				AliasID: shopAlias, Target: "shop-example-com.svc.example.net", Registrable: "example.com"},
-		},
-	}, []model.ID{apex, wild, shop}
+	caa := []string{`0 issue "letsencrypt.org"`, `0 issuewild "letsencrypt.org"`}
+	return []inventory.DomainExpectation{
+		{DomainID: model.NewID(), Name: "example.com", ChallengeName: "_acme-challenge.example.com",
+			AliasID: apexAlias, Target: "example-com.svc.example.net", Registrable: "example.com", ExpectedCAA: caa},
+		{DomainID: model.NewID(), Name: "*.example.com", ChallengeName: "_acme-challenge.example.com",
+			AliasID: apexAlias, Target: "example-com.svc.example.net", Registrable: "example.com", ExpectedCAA: caa},
+		{DomainID: model.NewID(), Name: "shop.example.com", ChallengeName: "_acme-challenge.shop.example.com",
+			AliasID: shopAlias, Target: "shop-example-com.svc.example.net", Registrable: "example.com", ExpectedCAA: caa},
+	}
+}
+
+// withoutCAA is the same three domains with no issuer configured, which is what
+// leaves ExpectedCAA nil.
+func withoutCAA(exps []inventory.DomainExpectation) []inventory.DomainExpectation {
+	out := append([]inventory.DomainExpectation(nil), exps...)
+	for i := range out {
+		out[i].ExpectedCAA = nil
+	}
+	return out
+}
+
+// answered indexes hand-written answers the way a.ask does, so the join under
+// test is the one the handler uses.
+func answered(kind string, in map[string]recordCheck) map[string]recordCheck {
+	out := map[string]recordCheck{}
+	for name, r := range in {
+		r.Name = name
+		out[kind+"|"+name] = r
+	}
+	return out
 }
 
 func checksByDomain(t *testing.T, in []domainCheck) map[string]domainCheck {
@@ -45,13 +59,14 @@ func checksByDomain(t *testing.T, in []domainCheck) map[string]domainCheck {
 func TestDomainChecksSharedDelegationReachesBothRows(t *testing.T) {
 	// One CNAME result covers the apex and its wildcard. Joining on a domain's
 	// own name would leave the wildcard reporting a published record as absent.
-	p, _ := planWithDomains()
-	results := []checkResult{
-		{Name: "_acme-challenge.example.com", Type: "CNAME", Status: "correct"},
-		{Name: "_acme-challenge.shop.example.com", Type: "CNAME", Status: "missing"},
-		{Name: "example.com", Type: "CAA", Status: "not-published"},
+	answers := answered("CNAME", map[string]recordCheck{
+		"_acme-challenge.example.com":      {Status: "correct"},
+		"_acme-challenge.shop.example.com": {Status: "missing"},
+	})
+	for k, v := range answered("CAA", map[string]recordCheck{"example.com": {Status: "not-published"}}) {
+		answers[k] = v
 	}
-	got := checksByDomain(t, domainChecks(p, []string{"letsencrypt.org"}, results))
+	got := checksByDomain(t, domainChecks(expectedDomains(), answers))
 
 	for _, name := range []string{"example.com", "*.example.com"} {
 		if s := got[name].Delegation.Status; s != "correct" {
@@ -72,12 +87,10 @@ func TestDomainChecksSharedDelegationReachesBothRows(t *testing.T) {
 func TestDomainChecksKeepMissingAndIncorrectApart(t *testing.T) {
 	// The two states whose fixes have nothing in common (design D2), plus the
 	// value the help needs: what was found, beside what was expected.
-	p, _ := planWithDomains()
-	results := []checkResult{
-		{Name: "_acme-challenge.example.com", Type: "CNAME", Status: "incorrect", Found: "old-alias.svc.example.net."},
-		{Name: "_acme-challenge.shop.example.com", Type: "CNAME", Status: "missing"},
-	}
-	got := checksByDomain(t, domainChecks(p, nil, results))
+	got := checksByDomain(t, domainChecks(expectedDomains(), answered("CNAME", map[string]recordCheck{
+		"_acme-challenge.example.com":      {Status: "incorrect", Found: "old-alias.svc.example.net."},
+		"_acme-challenge.shop.example.com": {Status: "missing"},
+	})))
 
 	apex := got["example.com"].Delegation
 	if apex.Status != "incorrect" || apex.Found != "old-alias.svc.example.net." {
@@ -94,8 +107,7 @@ func TestDomainChecksKeepMissingAndIncorrectApart(t *testing.T) {
 func TestDomainChecksWithoutResolverReadNotChecked(t *testing.T) {
 	// No resolver: no results, and every row says we did not look rather than
 	// making a claim about the customer's DNS (design D4).
-	p, _ := planWithDomains()
-	out := domainChecks(p, []string{"letsencrypt.org"}, nil)
+	out := domainChecks(expectedDomains(), nil)
 	if len(out) != 3 {
 		t.Fatalf("domains = %d, want 3", len(out))
 	}
@@ -116,9 +128,7 @@ func TestDomainChecksOmitCAAWhenNoneIsPlanned(t *testing.T) {
 	// ACME_CAA_ISSUER unset: the plan emits no CAA row, so there is nothing to
 	// authorize and nothing to say. Absent, not a status — "not-published"
 	// would be a claim about the customer's zone we never made.
-	p, _ := planWithDomains()
-	p.Records = p.Records[:2] // the two CNAMEs, no CAA
-	for _, d := range domainChecks(p, nil, nil) {
+	for _, d := range domainChecks(withoutCAA(expectedDomains()), nil) {
 		if d.CAA != nil {
 			t.Errorf("%s: caa = %+v, want omitted", d.Name, d.CAA)
 		}
@@ -146,7 +156,7 @@ func TestRunChecksKeepsOrderAndHonoursCancellation(t *testing.T) {
 		})
 	}
 
-	done := make(chan []checkResult, 1)
+	done := make(chan []recordCheck, 1)
 	go func() { done <- runChecks(ctx, checker, checks) }()
 	select {
 	case got := <-done:

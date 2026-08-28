@@ -252,6 +252,11 @@ affect no other path.
 Observation SHALL run as a background pass on a configured interval measured in
 hours, and SHALL NOT be performed while serving a request that answers a challenge.
 
+The service SHALL observe a domain at most once an hour. It SHALL refuse to start
+with an observation interval shorter than an hour, rather than accepting it and
+observing more often, since nothing else bounds how frequently the service
+connects to a customer's machine.
+
 Each pass SHALL select a bounded number of due observations, SHALL bound how many
 handshakes are outstanding at once, and SHALL apply a configured handshake timeout
 per attempt.
@@ -269,6 +274,11 @@ due only for routine re-observation.
 - **WHEN** a node address accepts connections and never completes a handshake
 - **THEN** each attempt ends at the configured timeout and the pass completes
 
+#### Scenario: An interval below the floor is refused
+
+- **WHEN** the deployment is configured to observe every five minutes
+- **THEN** the service refuses to start and names the setting
+
 #### Scenario: Newly enabled work goes first
 
 - **WHEN** more observations are due than one pass may take, and one of them is a domain enabled a moment ago
@@ -284,6 +294,11 @@ The service SHALL make a domain's current certificate state readable on any
 account. The service SHALL make the observation HISTORY readable only on a team
 account, and SHALL refuse a history read on a personal account with a refusal that
 identifies the account kind as the reason rather than the caller's permissions.
+
+That refusal SHALL be distinguishable by a client from every other refusal the
+service makes — an unfunded account, an unauthorised caller, and an account whose
+shape makes a request meaningless — because the remedy differs in each case and
+only this one is answered by changing what the customer pays for.
 
 #### Scenario: Current state is readable everywhere
 
@@ -317,20 +332,21 @@ describes.
 - **WHEN** a caller scoped to one account reads observations
 - **THEN** no observation belonging to another account is returned
 
-### Requirement: An observed domain is a billable rate event
+### Requirement: Certificate observation is not metered
 
-The service SHALL emit, per account and per period, one rate event per domain with
-observation enabled. It SHALL NOT emit an event per handshake, per node, or per
-address family.
+Certificate observation SHALL NOT be metered. The service SHALL NOT emit a usage
+or rate event for an observed domain, for a handshake, for a node, or for an
+address family, and observations SHALL NOT produce ledger entries.
 
-Observations themselves SHALL NOT produce ledger entries.
+Enabling or disabling observation for a domain SHALL NOT change what an account
+is charged.
 
-#### Scenario: The switch is what is counted
+#### Scenario: Switching observation on costs nothing
 
-- **WHEN** one observed domain is probed across four node addresses in a period
-- **THEN** one rate event is emitted for that domain in that period
+- **WHEN** observation is enabled for a domain
+- **THEN** no usage or rate event is emitted for it and the account's charges are unchanged
 
-#### Scenario: The interval does not reach the invoice
+#### Scenario: The volume of observation never reaches an invoice
 
-- **WHEN** the observation interval is halved
-- **THEN** the rate events emitted for a period are unchanged
+- **WHEN** one observed domain is probed across four node addresses, repeatedly, over a period
+- **THEN** nothing is metered for any of those handshakes

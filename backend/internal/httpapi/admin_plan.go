@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -19,93 +18,20 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/store"
 )
 
-// The DNS plan (acme-alias-service D5): structured, rendered, and checked
-// against live DNS.
+// Verification: what a project's domains need published in somebody else's
+// zone, checked against live DNS and answered per domain.
 //
-// Two changes are cited by number below, and both number their decisions from
-// D1: acme-alias-service, which specified the plan, and domain-setup-feedback,
-// which made the check run per domain and answer per record type. Every
-// citation here names its change, because "D5" alone means two things in this
-// file.
-
-type recordView struct {
-	Name  string `json:"name"`
-	TTL   int    `json:"ttl"`
-	Type  string `json:"type"`
-	Value string `json:"value"`
-}
-
-type planView struct {
-	ProjectSlug string       `json:"projectSlug"`
-	ProjectName string       `json:"projectName"`
-	Records     []recordView `json:"records"`
-	Zone        string       `json:"zone"`
-}
-
-func (a *admin) plan(c echo.Context) (*inventory.DNSPlan, error) {
-	id, err := idParam(c, "id")
-	if err != nil {
-		return nil, err
-	}
-	sc, err := a.scope(c)
-	if err != nil {
-		return nil, err
-	}
-	subj, err := a.subject(c)
-	if err != nil {
-		return nil, err
-	}
-	return inventory.Plan(c.Request().Context(), a.db(), sc, subj, id, a.planOptions())
-}
-
-func (a *admin) getPlan(c echo.Context) error {
-	p, err := a.plan(c)
-	if err != nil {
-		return err
-	}
-	v := planView{
-		ProjectSlug: p.ProjectSlug, ProjectName: p.ProjectName,
-		Records: make([]recordView, 0, len(p.Records)),
-		Zone:    a.opts.Config.Zone,
-	}
-	for _, r := range p.Records {
-		v.Records = append(v.Records, recordView{Name: r.Name, TTL: r.TTL, Type: r.Type, Value: r.Value})
-	}
-	return c.JSON(http.StatusOK, v)
-}
-
-// getPlanZone serves the same plan as the zone-file snippet the customer's DNS
-// administrator can paste. text/plain, so a browser shows it and `curl >
-// file` produces something usable.
-func (a *admin) getPlanZone(c echo.Context) error {
-	p, err := a.plan(c)
-	if err != nil {
-		return err
-	}
-	c.Response().Header().Set(echo.HeaderContentDisposition,
-		`attachment; filename="`+p.ProjectSlug+`.zone"`)
-	return c.String(http.StatusOK, inventory.RenderZoneSnippet(p))
-}
-
-// --- live verification -----------------------------------------------------
-
-// checkResult is one verified row of the plan. It is deliberately not
-// one-per-plan-record: a name's four A records are one question to DNS and one
-// answer, and reporting them as four independent "incorrect" rows would say
-// the same thing four times without saying which address was missing.
+// The PLAN is gone — the record table, its zone snippet and the `results` array
+// that answered the same questions a second time, keyed by record instead of by
+// domain (change domain-diagnostics, G2). What a domain needs is now a property
+// of the domain (`cnameTarget`, `expectedCaa` on the domain read), and this file
+// keeps only the half nobody could get anywhere else: what DNS actually says.
 //
-// Status carries resolvercheck's vocabulary unchanged, including CAA's
-// "not-published", which the console must render as information rather than as
-// a failure: an absent CAA record is the default state of the internet and
-// blocks nothing, while a CAA record naming another authority is the single
-// clearest blocker this check can find (domain-setup-feedback D3).
-type checkResult struct {
-	Name     string   `json:"name"`
-	Type     string   `json:"type"`
-	Expected []string `json:"expected"`
-	Status   string   `json:"status"`
-	Found    string   `json:"found,omitempty"`
-}
+// Three changes are cited by number below, and two of them number their
+// decisions from D1: acme-alias-service, which specified the plan, and
+// domain-setup-feedback, which made the check run per domain and answer per
+// record type. Every citation names its change, because "D5" alone means two
+// things in this file.
 
 // statusNotChecked is the one status on the wire resolvercheck cannot produce,
 // because nothing was asked: the deployment configured no resolver. It is not a
@@ -148,87 +74,105 @@ type domainCheck struct {
 	CAA           *recordCheck `json:"caa,omitempty"`
 }
 
-// verifyPlan resolves the plan and answers it twice over: `results`, one row
-// per question asked of DNS, which is what the whole-plan control shows; and
-// `domains`, the same answers redistributed onto the rows a customer actually
-// reads. Both come from the one pass, so the per-domain view costs no extra
-// lookups.
+// expectations resolves what a project's domains need published, authorizing
+// dns.plan on the project as it always did.
+func (a *admin) expectations(c echo.Context) ([]inventory.DomainExpectation, error) {
+	id, err := idParam(c, "id")
+	if err != nil {
+		return nil, err
+	}
+	sc, err := a.scope(c)
+	if err != nil {
+		return nil, err
+	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return nil, err
+	}
+	return inventory.Expectations(c.Request().Context(), a.db(), sc, subj, id, a.planOptions())
+}
+
+// verifyPlan answers what each of a project's domains actually resolves to.
+//
+// It answers ONCE, per domain. The `results` array it used to carry beside
+// `domains` said the same thing keyed by record, and only the per-domain keying
+// ever had a reader (domain-diagnostics G2); a second view of one pass is a
+// second thing that can be read and believed after the first has moved on.
 //
 // It remains a read that stores nothing — a check is an observation, and an
 // observation kept becomes a stale claim (domain-setup-feedback D1). That is
-// why the route is
-// a GET without a CSRF token, and why running it on page load changes only when
-// it happens.
+// why the route is a GET without a CSRF token, and why running it on page load
+// changes only when it happens.
 func (a *admin) verifyPlan(c echo.Context) error {
-	p, err := a.plan(c)
+	exps, err := a.expectations(c)
 	if err != nil {
 		return err
 	}
-
-	// No resolver: answer the same shape with every domain reading "not
-	// checked" (domain-setup-feedback D4). The route used to return 503 here,
-	// which was
-	// tolerable for a button somebody chose to press and is not for a check
-	// that runs whenever a screen opens: a deployment that never set
-	// ACME_VERIFY_RESOLVER has declined the feature, and telling a customer
-	// their setup is broken is the one thing that answer does not mean.
-	out := []checkResult{}
-	if a.resolver != "" {
-		out = runChecks(c.Request().Context(), a.checker,
-			groupForChecks(p.Records, a.opts.Config.CAAIssuers))
-	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"resolver": a.resolver,
-		"results":  out,
-		"domains":  domainChecks(p, a.opts.Config.CAAIssuers, out),
+		"domains":  domainChecks(exps, a.ask(c, exps)),
 	})
 }
 
-// domainChecks redistributes plan-wide results onto the domains that need
-// them.
+// ask puts the questions to the resolver and returns the answers indexed by the
+// question each one answers.
 //
-// Which records a domain needs comes from the plan, never from the results, so
-// a domain whose check did not run still reports itself with statusNotChecked
-// instead of vanishing. The join is by challenge name for the delegation and by
-// registrable domain for CAA, both of which are shared: a wildcard and its apex
-// have one challenge name between them and therefore one delegation, and every
-// host under example.com reads the one CAA set at example.com. Joining on the
-// domain's own name would leave every row but the first reporting a record
-// somebody else's row already covers as absent.
-//
-// Address records are deliberately not here. They are the plan's question, not
-// the delegation's, and `results` still answers them whole.
-func domainChecks(p *inventory.DNSPlan, issuers []string, results []checkResult) []domainCheck {
-	byKey := make(map[string]checkResult, len(results))
-	for _, r := range results {
-		byKey[r.Type+"|"+r.Name] = r
+// No resolver configured: no questions, an empty index, and every domain reads
+// "not checked" (domain-setup-feedback D4). The route used to answer 503 here,
+// which was tolerable for a button somebody chose to press and is not for a
+// check that runs whenever a screen opens — a deployment that never set
+// ACME_VERIFY_RESOLVER has declined the feature, and telling a customer their
+// setup is broken is the one thing that answer does not mean.
+func (a *admin) ask(c echo.Context, exps []inventory.DomainExpectation) map[string]recordCheck {
+	if a.resolver == "" {
+		return nil
 	}
-	caaPlanned := map[string]bool{}
-	for _, r := range p.Records {
-		if r.Type == "CAA" {
-			caaPlanned[r.Name] = true
-		}
+	checks := groupForChecks(exps, a.opts.Config.CAAIssuers)
+	answers := runChecks(c.Request().Context(), a.checker, checks)
+	// Zipped by position rather than by anything in the answer, which is what
+	// makes runChecks free to keep its results in a slice: the question already
+	// carries the key, and re-deriving it from the answer would be a second
+	// place for the two to disagree.
+	out := make(map[string]recordCheck, len(answers))
+	for i, ans := range answers {
+		out[checks[i].kind+"|"+checks[i].name] = ans
 	}
+	return out
+}
 
-	out := make([]domainCheck, 0, len(p.Domains))
-	for _, d := range p.Domains {
+// domainChecks redistributes the answers onto the domains that need them.
+//
+// Which records a domain needs comes from the EXPECTATION, never from the
+// answers, so a domain whose check did not run still reports itself with
+// statusNotChecked instead of vanishing. The join is by challenge name for the
+// delegation and by registrable domain for CAA, both of which are shared: a
+// wildcard and its apex have one challenge name between them and therefore one
+// delegation, and every host under example.com reads the one CAA set at
+// example.com. Joining on the domain's own name would leave every row but the
+// first reporting a record somebody else's row already covers as absent.
+func domainChecks(exps []inventory.DomainExpectation, answers map[string]recordCheck) []domainCheck {
+	out := make([]domainCheck, 0, len(exps))
+	for _, e := range exps {
 		dc := domainCheck{
-			DomainID: d.DomainID, Name: d.Name,
-			ChallengeName: d.ChallengeName, AliasID: d.AliasID,
-			Delegation: recordCheck{Name: d.ChallengeName, Status: statusNotChecked},
+			DomainID: e.DomainID, Name: e.Name,
+			ChallengeName: e.ChallengeName, AliasID: e.AliasID,
+			Delegation: recordCheck{Name: e.ChallengeName, Status: statusNotChecked},
 		}
-		if d.Target != "" {
+		if e.Target != "" {
 			// The customer's own target, carried whatever the status: the help
 			// that explains a missing or wrong record is worth nothing without
 			// the exact value to publish (domain-setup-feedback D5).
-			dc.Delegation.Expected = []string{d.Target}
+			dc.Delegation.Expected = []string{e.Target}
 		}
-		if r, ok := byKey["CNAME|"+d.ChallengeName]; ok {
+		if r, ok := answers["CNAME|"+e.ChallengeName]; ok {
 			dc.Delegation.Status, dc.Delegation.Found = r.Status, r.Found
 		}
-		if d.Registrable != "" && caaPlanned[d.Registrable] {
-			caa := recordCheck{Name: d.Registrable, Status: statusNotChecked, Expected: issuers}
-			if r, ok := byKey["CAA|"+d.Registrable]; ok {
+		// Absent CAA rdata is no issuer configured: nothing to authorize, and so
+		// nothing to say. Not a fifth status — "not-published" would be a claim
+		// about the customer's zone we never went and made.
+		if len(e.ExpectedCAA) > 0 {
+			caa := recordCheck{Name: e.Registrable, Status: statusNotChecked, Expected: e.ExpectedCAA}
+			if r, ok := answers["CAA|"+e.Registrable]; ok {
 				caa.Status, caa.Found = r.Status, r.Found
 			}
 			dc.CAA = &caa
@@ -253,8 +197,8 @@ func domainChecks(p *inventory.DNSPlan, issuers []string, results []checkResult)
 // screen must not open sixty simultaneous queries at somebody's recursor.
 // Rejected: one goroutine per question — cheap for us, and a burst nobody
 // asked for at the far end.
-func runChecks(ctx context.Context, checker *resolvercheck.Checker, checks []planCheck) []checkResult {
-	out := make([]checkResult, len(checks))
+func runChecks(ctx context.Context, checker *resolvercheck.Checker, checks []planCheck) []recordCheck {
+	out := make([]recordCheck, len(checks))
 	sem := make(chan struct{}, checkParallelism)
 	var wg sync.WaitGroup
 	for i, ch := range checks {
@@ -273,25 +217,25 @@ func runChecks(ctx context.Context, checker *resolvercheck.Checker, checks []pla
 // checkParallelism bounds the questions one verification has outstanding.
 const checkParallelism = 8
 
-// planCheck is one question to ask DNS. Exactly one of the three is set.
+// planCheck is one question to ask DNS. Exactly one of the two is set.
+//
+// kind is "CNAME" or "CAA" and is half the key an answer is filed under, the
+// other half being name. Two questions of different kinds can share a name in
+// principle, and a key that could collide is a delegation reported as a CAA.
 type planCheck struct {
 	name     string
 	kind     string
 	expected []string
 
-	cname   *resolvercheck.CNAMECheck
-	address *resolvercheck.AddressCheck
-	caa     *resolvercheck.CAACheck
+	cname *resolvercheck.CNAMECheck
+	caa   *resolvercheck.CAACheck
 }
 
-func (p planCheck) run(ctx context.Context, ch *resolvercheck.Checker) checkResult {
-	res := checkResult{Name: p.name, Type: p.kind, Expected: p.expected}
+func (p planCheck) run(ctx context.Context, ch *resolvercheck.Checker) recordCheck {
+	res := recordCheck{Name: p.name, Expected: p.expected}
 	switch {
 	case p.cname != nil:
 		r := ch.CheckCNAME(ctx, *p.cname)
-		res.Status, res.Found = string(r.Status), r.Found
-	case p.address != nil:
-		r := ch.CheckAddress(ctx, *p.address)
 		res.Status, res.Found = string(r.Status), r.Found
 	case p.caa != nil:
 		r := ch.CheckCAA(ctx, *p.caa)
@@ -300,54 +244,48 @@ func (p planCheck) run(ctx context.Context, ch *resolvercheck.Checker) checkResu
 	return res
 }
 
-// groupForChecks turns plan rows into the checks resolvercheck actually takes.
+// groupForChecks turns per-domain expectations into the questions resolvercheck
+// actually takes, asking each one ONCE.
 //
-// The plan emits one row per address per name (acme-alias-service D5's
-// table), but an
-// AddressCheck compares the *whole* answer set for a name and family at once,
-// so the rows have to be gathered back up. CAA rows are collapsed the same
-// way: the plan emits one row per tag per issuer at a registrable domain, and
-// one CAACheck covers the set.
+// The deduplication is the whole job and it is not an optimisation. Two domains
+// that share an alias carry the identical challenge name, and every domain under
+// one registrable name carries the identical CAA expectation — so a project with
+// eight domains sharing four aliases would put four times the queries on
+// somebody's recursor per screen open if this grouped by domain. Grouping on the
+// VALUE is also what makes a wildcard and its apex share one answer, which is
+// what domainChecks then hands back to both rows.
+//
+// Address records are gone and are not coming back: the customer typed those
+// addresses into the Nodes panel themselves, and grading their DNS against them
+// is a check whose only possible finding is that the customer disagrees with the
+// customer (domain-diagnostics G2).
+//
+// issuers is passed separately from the expectation's rendered rdata because a
+// CAACheck compares issuer identifiers, not zone-file lines; the rdata is what
+// the customer publishes and the identifier is what we recognise in an answer.
 //
 // ponytail: this adapter lives here because the management API is its only
-// caller — there is no CLI verification subcommand in this change. If one is
-// ever added, move it to internal/inventory beside Plan rather than copying it.
-func groupForChecks(records []inventory.Record, issuers []string) []planCheck {
+// caller — there is no CLI verification subcommand. If one is ever added, move
+// it to internal/inventory beside Expectations rather than copying it.
+func groupForChecks(exps []inventory.DomainExpectation, issuers []string) []planCheck {
 	var out []planCheck
-	addrIdx := map[string]int{} // "name|family" -> index into out
-	caaSeen := map[string]bool{}
-
-	for _, r := range records {
-		switch r.Type {
-		case "CNAME":
+	seen := map[string]bool{}
+	for _, e := range exps {
+		// No alias yet: nothing to ask for. The row still appears in the answer,
+		// reading "not checked", because domainChecks builds from the
+		// expectations rather than from these questions.
+		if e.Target != "" && !seen["CNAME|"+e.ChallengeName] {
+			seen["CNAME|"+e.ChallengeName] = true
 			out = append(out, planCheck{
-				name: r.Name, kind: "CNAME", expected: []string{r.Value},
-				cname: &resolvercheck.CNAMECheck{Name: r.Name, Expected: dns.Fqdn(r.Value)},
+				name: e.ChallengeName, kind: "CNAME", expected: []string{e.Target},
+				cname: &resolvercheck.CNAMECheck{Name: e.ChallengeName, Expected: dns.Fqdn(e.Target)},
 			})
-		case "A", "AAAA":
-			key := r.Name + "|" + r.Type
-			ip := net.ParseIP(r.Value)
-			if ip == nil {
-				continue // an unparsable address in the plan is a data bug, not a DNS finding
-			}
-			if i, ok := addrIdx[key]; ok {
-				out[i].expected = append(out[i].expected, r.Value)
-				out[i].address.Want = append(out[i].address.Want, ip)
-				continue
-			}
-			addrIdx[key] = len(out)
+		}
+		if len(e.ExpectedCAA) > 0 && !seen["CAA|"+e.Registrable] {
+			seen["CAA|"+e.Registrable] = true
 			out = append(out, planCheck{
-				name: r.Name, kind: r.Type, expected: []string{r.Value},
-				address: &resolvercheck.AddressCheck{Name: r.Name, Family: r.Type, Want: []net.IP{ip}},
-			})
-		case "CAA":
-			if caaSeen[r.Name] {
-				continue
-			}
-			caaSeen[r.Name] = true
-			out = append(out, planCheck{
-				name: r.Name, kind: "CAA", expected: issuers,
-				caa: &resolvercheck.CAACheck{Domain: r.Name, Issuers: issuers},
+				name: e.Registrable, kind: "CAA", expected: e.ExpectedCAA,
+				caa: &resolvercheck.CAACheck{Domain: e.Registrable, Issuers: issuers},
 			})
 		}
 	}
@@ -402,25 +340,19 @@ func verificationResolver(cfg config.Config, log *slog.Logger) string {
 // while a zone is mid-rebuild must not be a way to take your own domain
 // offline.
 func (a *admin) recheckPlan(c echo.Context) error {
-	p, err := a.plan(c) // authorizes dns.plan on the load balancer, as the GET does
+	exps, err := a.expectations(c) // authorizes dns.plan on the project, as the GET does
 	if err != nil {
 		return err
 	}
-	// No resolver configured: the same 200 the GET answers, with every row
-	// reading "not checked", and nothing recorded. We are the ones who did not
-	// look, and stamping last_checked_at for a question we never asked would
-	// make the queue think this delegation had been attended to
-	// (domain-setup-feedback D4).
-	out := []checkResult{}
-	if a.resolver != "" {
-		out = runChecks(c.Request().Context(), a.checker,
-			groupForChecks(p.Records, a.opts.Config.CAAIssuers))
-	}
-	domains := domainChecks(p, a.opts.Config.CAAIssuers, out)
+	// With no resolver configured a.ask asks nothing, so every row reads "not
+	// checked" and recordDelegations writes nothing: we are the ones who did not
+	// look, and stamping last_checked_at for a question we never asked would make
+	// the queue think this delegation had been attended to (domain-setup-feedback
+	// D4).
+	domains := domainChecks(exps, a.ask(c, exps))
 	a.recordDelegations(c, domains)
 	return c.JSON(http.StatusOK, map[string]any{
 		"resolver": a.resolver,
-		"results":  out,
 		"domains":  domains,
 	})
 }

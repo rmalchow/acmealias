@@ -1,6 +1,7 @@
 // Package inventory is the service layer over internal/store: projects, their
-// nodes, domains and aliases, plus the DNS plan a project implies (design D4
-// and D5).
+// nodes, domains and aliases, plus what each domain expects to be published in
+// somebody else's zone (design D4, and change domain-diagnostics G2, which
+// replaced the project-wide DNS plan with that per-domain expectation).
 //
 // Everything here is a plain function taking the *gorm.DB the caller already
 // holds — the HTTP handlers and the CLI both call these directly, so the
@@ -199,7 +200,7 @@ func DeleteProject(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.
 }
 
 // AddNode adds a node to a project. ipv4 and ipv6 are optional strings, but
-// a node with neither would contribute nothing to the DNS plan and is
+// a node with neither would answer for nothing and is
 // refused. Addresses are stored canonicalized.
 func AddNode(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.Subject, projectID model.ID, label, ipv4, ipv6 string) (*model.LBNode, error) {
 	if err := dnsname.ValidateLabel(label); err != nil {

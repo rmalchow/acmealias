@@ -141,3 +141,40 @@ func TestCounterpartMayBeInvalid(t *testing.T) {
 		t.Errorf("the %d-octet counterpart should be refused as over-length, got %v", len(long)+2, err)
 	}
 }
+
+// TestCovers is design G8's rule, over the cases ValidateDomain's own table
+// already establishes: exactly one label beneath the wildcard, no more, and the
+// apex is not one of them.
+func TestCovers(t *testing.T) {
+	tests := []struct {
+		pattern, host string
+		want          bool
+	}{
+		{"*.example.com", "www.example.com", true},
+		{"*.example.com", "a.b.example.com", false}, // two labels down; a TLS client agrees
+		{"*.example.com", "example.com", false},     // the apex is a separate row with its own switch
+		{"*.example.com", "www.example.org", false},
+		{"*.example.com", "notexample.com", false}, // suffix match without the dot
+		{"*.example.com", "", false},
+		{"*.example.com", "*.example.com", false}, // a wildcard is not a TLS server name
+
+		// Not a wildcard at all: it covers nothing, including itself. Enabling
+		// observation on a plain name needs no test hostname, so nothing should
+		// ever reach here with one.
+		{"example.com", "www.example.com", false},
+		{"example.com", "example.com", false},
+
+		// Normalization, matching the rest of the package: case-insensitive and
+		// root-dot tolerant on both sides.
+		{"*.Example.COM.", "WWW.example.com", true},
+
+		// One level down is still one label down.
+		{"*.eu.example.com", "www.eu.example.com", true},
+		{"*.eu.example.com", "www.example.com", false},
+	}
+	for _, tc := range tests {
+		if got := Covers(tc.pattern, tc.host); got != tc.want {
+			t.Errorf("Covers(%q, %q) = %v, want %v", tc.pattern, tc.host, got, tc.want)
+		}
+	}
+}

@@ -139,6 +139,55 @@ func DeleteDomain(ctx context.Context, db *gorm.DB, sc Scope, id model.ID) error
 	})
 }
 
+// UpdateDomainObservation turns TLS observation on or off for one domain and,
+// when testHost is non-nil, sets the hostname presented as the TLS server name
+// (change domain-diagnostics, design G6, G8). It returns the row as stored.
+//
+// A NIL testHost LEAVES THE COLUMN ALONE, and that is the whole of "disabling
+// the switch keeps the hostname" (G8): somebody who turns observation off and
+// later turns it back on gets their hostname back rather than being asked for it
+// again. A caller wanting to clear the hostname cannot do it through here, which
+// is deliberate — clearing it while the switch is on would produce exactly the
+// row the check constraint refuses.
+//
+// SCOPED, and not wrapped in CrossAccount. This is a tenant write on a request
+// path, so row-level security is the thing protecting it and lifting the
+// policies would be widening a write a customer triggers. CrossAccount belongs
+// to the tickerless background readers — DueDelegations, DueObservations,
+// reporting.Snapshot — which have no session for a policy to read.
+//
+// The covering test (is this hostname one the wildcard actually matches) is
+// dnsname.Covers and is enforced by the inventory service, not here. The
+// database holds the half it can — a wildcard with the switch on has *a*
+// hostname, the domains_wildcard_observation_needs_a_test_host constraint — and
+// a violation of it surfaces from the update below rather than being restated as
+// a second matcher that can disagree with the first (G8).
+func UpdateDomainObservation(ctx context.Context, db *gorm.DB, sc Scope,
+	domainID model.ID, observe bool, testHost *string) (*model.Domain, error) {
+
+	var d model.Domain
+	err := sc.Run(ctx, db, func(tx *gorm.DB) error {
+		updates := map[string]any{"observe_tls": observe}
+		if testHost != nil {
+			updates["tls_test_host"] = *testHost
+		}
+		res := sc.Where(tx).Model(&model.Domain{}).Where("id = ?", domainID).Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// Not found, or in another account — the same error either way, so
+			// the route is not an oracle for what other tenants hold (design P1).
+			return gorm.ErrRecordNotFound
+		}
+		return sc.Where(tx).First(&d, "id = ?", domainID).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: update observation on domain %s: %w", domainID, err)
+	}
+	return &d, nil
+}
+
 // --- activation (domain-activation A1) --------------------------------------
 
 // DueDelegation is one delegation the activation worker should look at: the

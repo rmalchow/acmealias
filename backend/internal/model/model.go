@@ -85,6 +85,10 @@ func (r *Role) BeforeCreate(*gorm.DB) error                 { ensureID(&r.ID); r
 func (m *AccountMember) BeforeCreate(*gorm.DB) error        { ensureID(&m.ID); return nil }
 func (g *RoleGrant) BeforeCreate(*gorm.DB) error            { ensureID(&g.ID); return nil }
 func (g *APIKeyGrant) BeforeCreate(*gorm.DB) error          { ensureID(&g.ID); return nil }
+func (o *CertificateObservation) BeforeCreate(*gorm.DB) error {
+	ensureID(&o.ID)
+	return nil
+}
 
 // StringArray maps a PostgreSQL text[] column onto []string.
 //
@@ -126,6 +130,7 @@ func Models() []any {
 		&Project{}, &LBNode{}, &Alias{}, &Domain{},
 		&APIKey{}, &APIKeyGrant{}, &APIKeyNetwork{}, &Challenge{}, &Session{},
 		&AuditEntry{}, &ChallengeInteraction{}, &ProjectDailyStat{},
+		&CertificateObservation{},
 	}
 }
 
@@ -443,10 +448,81 @@ type Domain struct {
 	LastCheckedAt *time.Time `gorm:"column:last_checked_at"`
 	LastSuccessAt *time.Time `gorm:"column:last_success_at"`
 
+	// Whether this service performs periodic TLS observations of this domain
+	// (change domain-diagnostics, design G6). Opt-in, defaulted false in the
+	// database: nothing is connected to until somebody switches it on.
+	ObserveTLS bool `gorm:"column:observe_tls"`
+	// The concrete hostname presented as the TLS server name for a WILDCARD
+	// domain, which is not itself a name a TLS client can ask for (G8).
+	//
+	// A pointer rather than a string, deliberately: "no hostname was ever set"
+	// and "the hostname is the empty string" are different states, and only the
+	// first is one anything should be able to write. Turning the switch off
+	// leaves it alone, so somebody who turns it back on gets their hostname back
+	// rather than being asked again.
+	TLSTestHost *string `gorm:"column:tls_test_host"`
+
 	Alias *Alias `gorm:"foreignKey:AliasID"`
 }
 
 func (Domain) TableName() string { return "domains" }
+
+// CertificateObservation is one TLS handshake this service attempted against one
+// node address of one domain, successful or not (change domain-diagnostics,
+// design G6, G11).
+//
+// A FAILED HANDSHAKE IS A ROW. "There is no certificate here" and "we could not
+// look" are different sentences with different audiences, and a gap in the table
+// is indistinguishable from a scheduler that did not run — so Outcome is always
+// set and everything read off a certificate is a pointer.
+//
+// The grain is (domain, node, family) and not (domain): a node reached over v4
+// and over v6 goes through different transit and different firewalls, and a
+// certificate renewed on one listener and not the other is invisible to a
+// dual-stack visitor.
+type CertificateObservation struct {
+	ID        ID `gorm:"primaryKey"`
+	AccountID ID `gorm:"column:account_id"`
+	ProjectID ID `gorm:"column:project_id"`
+	DomainID  ID `gorm:"column:domain_id"`
+	NodeID    ID `gorm:"column:node_id"`
+
+	// Family is "A" or "AAAA"; Address is what was dialled and ServerName is
+	// what was sent as SNI. Two fields and not one, because dialling the name
+	// would observe whatever the customer's DNS points at today, which is
+	// precisely what this check is not asking (G6).
+	Family     string `gorm:"column:family"`
+	Address    string `gorm:"column:address;type:inet"`
+	ServerName string `gorm:"column:server_name"`
+
+	ObservedAt time.Time `gorm:"column:observed_at"`
+
+	// Outcome is certobserve's classification of what happened — one of
+	// "observed", "refused", "timed-out", "rejected", "unreadable". The
+	// vocabulary is defined in internal/certobserve beside the code that
+	// produces it, and constrained by a check on the column, so a sixth value
+	// cannot be written without both halves being changed together.
+	Outcome string `gorm:"column:outcome"`
+	// FailureDetail is the underlying error text, kept for the log and not for
+	// the customer.
+	FailureDetail *string `gorm:"column:failure_detail"`
+
+	// Everything below is read off the certificate and is nil unless Outcome is
+	// "observed".
+	NotBefore *time.Time  `gorm:"column:not_before"`
+	NotAfter  *time.Time  `gorm:"column:not_after"`
+	Issuer    *string     `gorm:"column:issuer"`
+	Serial    *string     `gorm:"column:serial"`
+	SANs      StringArray `gorm:"column:sans;type:text[]"`
+	// Recorded rather than derived at read time: both are facts about the
+	// exchange — the chain that was presented, judged against the pool we held
+	// then. Recomputing later would need the certificate, which is not stored,
+	// and would silently rewrite history when a root is added or removed.
+	CoversServerName *bool `gorm:"column:covers_server_name"`
+	ChainTrusted     *bool `gorm:"column:chain_trusted"`
+}
+
+func (CertificateObservation) TableName() string { return "certificate_observations" }
 
 // The two kinds of API key (design K1). They are a SHAPE over the grant model
 // and never a second way of deciding what a caller may do: both resolve to

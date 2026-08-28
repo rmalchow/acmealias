@@ -199,6 +199,54 @@ challenge:
   # only aliases created afterwards; an existing one is never re-labelled.
   alias_use_domain: '${ACME_ALIAS_USE_DOMAIN:false}'
 
+# Certificate observation (domain-diagnostics G13, G14, G17): a periodic TLS
+# handshake against each enabled domain's node addresses, so a certificate that
+# failed to renew shows as a dot rather than as a surprise. It is its own block
+# and not nested under `challenge`, because what `challenge` gates is whether a
+# challenge is published AT ALL, and this gates nothing — nothing here changes
+# an answer, suspends a domain, or is reachable from /present (G14).
+observation:
+  # Whole-deployment off switch. Off costs a stale dialog and nothing else,
+  # because nothing downstream acts on an observation (G14) — there is no
+  # other path to change and no answer that depends on this ever having run.
+  enabled: '${ACME_OBSERVATION_ENABLED:true}'
+
+  # How often a domain's addresses are checked, and also the age at which one
+  # becomes due — one setting rather than two, so a deployment cannot configure
+  # a worker that wakes up hourly and never finds anything to do. Four checks a
+  # day against thirty days of renewal slack is ample and not worth tuning
+  # (G13).
+  #
+  # THIS TAKES A FLOOR OF ONE HOUR, refused at startup by
+  # backend/internal/config/validate.go and not by this comment. Certificate
+  # observation is unmetered (G17) — nothing on the customer's side bounds how
+  # often we connect to their machine — so this floor is the only thing that
+  # does, and a deployment that asks for less than an hour is told so rather
+  # than silently given one.
+  interval: '${ACME_OBSERVATION_INTERVAL:6h}'
+
+  # Bounds ONE handshake attempt, dial and TLS together. A node that has
+  # started blackholing must cost one bounded pass, not an unbounded one.
+  handshake_timeout: '${ACME_OBSERVATION_HANDSHAKE_TIMEOUT:5s}'
+
+  # Retention, in two windows rather than one deletion age, because the value
+  # of this history is a trend measured in weeks and truncating the period
+  # outright destroys the shape of it (G16). Full resolution is kept for the
+  # first window; beyond it, downsampling keeps at most one observation per
+  # domain per address per day and the rest are dropped, rather than deleted
+  # outright.
+  #
+  # BOTH NUMBERS BELOW ARE UNMEASURED. They are configuration rather than
+  # constants for exactly that reason — nobody has signed off on a period, and
+  # a placeholder that looked like a considered value would be worse than one
+  # that admits what it is. This is the same shape `challenge.interaction_retention`
+  # already uses, and for the identical reason.
+  #
+  # full_resolution_window: two weeks. retention: six months (four Let's
+  # Encrypt renewal cycles), after which even the downsampled row is dropped.
+  full_resolution_window: '${ACME_OBSERVATION_FULL_RESOLUTION_WINDOW:336h}'
+  retention: '${ACME_OBSERVATION_RETENTION:4320h}'
+
 limits:
   # A personal account may hold this many projects — and a project is now the
   # whole of somebody's setup: its nodes, its domains, its keys. It used to be a

@@ -157,6 +157,38 @@ table audit_entries
   rls enabled=false forced=false
   trigger audit_entries_no_rewrite CREATE TRIGGER audit_entries_no_rewrite BEFORE DELETE OR UPDATE OR TRUNCATE ON audit_entries FOR EACH STATEMENT EXECUTE FUNCTION audit_entries_append_only()
 
+table certificate_observations
+  check certificate_observations_family_check CHECK ((family = ANY (ARRAY['A'::text, 'AAAA'::text])))
+  check certificate_observations_outcome_check CHECK ((outcome = ANY (ARRAY['observed'::text, 'refused'::text, 'timed-out'::text, 'rejected'::text, 'unreadable'::text])))
+  column account_id uuid not null
+  column address inet not null
+  column chain_trusted boolean null
+  column covers_server_name boolean null
+  column domain_id uuid not null
+  column failure_detail text null
+  column family text not null
+  column id uuid not null default uuidv7()
+  column issuer text null
+  column node_id uuid not null
+  column not_after timestamp with time zone null
+  column not_before timestamp with time zone null
+  column observed_at timestamp with time zone not null default now()
+  column outcome text not null
+  column project_id uuid not null
+  column sans ARRAY not null default '{}'::text[]
+  column serial text null
+  column server_name text not null
+  constraint certificate_observations_domain_account_fkey foreign key (domain_id,account_id)
+  constraint certificate_observations_domain_project_fkey foreign key (domain_id,project_id)
+  constraint certificate_observations_family_check check ()
+  constraint certificate_observations_node_project_fkey foreign key (node_id,project_id)
+  constraint certificate_observations_outcome_check check ()
+  constraint certificate_observations_pkey primary key (id)
+  index certificate_observations_domain_observed_idx CREATE INDEX certificate_observations_domain_observed_idx ON certificate_observations USING btree (domain_id, observed_at DESC)
+  index certificate_observations_pkey CREATE UNIQUE INDEX certificate_observations_pkey ON certificate_observations USING btree (id)
+  policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
+  rls enabled=true forced=true
+
 table challenge_interactions
   column abandoned boolean not null default false
   column alias_id uuid null
@@ -201,6 +233,7 @@ table challenges
   rls enabled=true forced=true
 
 table domains
+  check domains_wildcard_observation_needs_a_test_host CHECK (((NOT observe_tls) OR (name !~~ '*.%'::text) OR (tls_test_host IS NOT NULL)))
   column account_id uuid not null
   column alias_id uuid not null
   column created_at timestamp with time zone not null default now()
@@ -208,16 +241,23 @@ table domains
   column last_checked_at timestamp with time zone null
   column last_success_at timestamp with time zone null
   column name text not null
+  column observe_tls boolean not null default false
   column project_id uuid not null
+  column tls_test_host text null
   constraint domains_account_id_name_key unique (account_id,name)
   constraint domains_alias_account_fkey foreign key (alias_id,account_id)
   constraint domains_alias_id_fkey foreign key (alias_id)
+  constraint domains_id_account_id_key unique (id,account_id)
+  constraint domains_id_project_id_key unique (id,project_id)
   constraint domains_pkey primary key (id)
   constraint domains_project_account_fkey foreign key (project_id,account_id)
+  constraint domains_wildcard_observation_needs_a_test_host check ()
   index domains_account_id_idx CREATE INDEX domains_account_id_idx ON domains USING btree (account_id)
   index domains_account_id_name_key CREATE UNIQUE INDEX domains_account_id_name_key ON domains USING btree (account_id, name)
   index domains_activation_due_idx CREATE INDEX domains_activation_due_idx ON domains USING btree (last_checked_at NULLS FIRST, last_success_at)
   index domains_alias_id_idx CREATE INDEX domains_alias_id_idx ON domains USING btree (alias_id)
+  index domains_id_account_id_key CREATE UNIQUE INDEX domains_id_account_id_key ON domains USING btree (id, account_id)
+  index domains_id_project_id_key CREATE UNIQUE INDEX domains_id_project_id_key ON domains USING btree (id, project_id)
   index domains_pkey CREATE UNIQUE INDEX domains_pkey ON domains USING btree (id)
   index domains_project_id_idx CREATE INDEX domains_project_id_idx ON domains USING btree (project_id)
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
@@ -232,6 +272,7 @@ table invitations
   column declined_at timestamp with time zone null
   column email text not null
   column expires_at timestamp with time zone not null
+  column expiry_recorded_at timestamp with time zone null
   column id uuid not null default uuidv7()
   column invited_by uuid not null
   column last_sent_at timestamp with time zone not null default now()
@@ -243,6 +284,7 @@ table invitations
   constraint invitations_invited_by_fkey foreign key (invited_by)
   constraint invitations_pkey primary key (id)
   index invitations_by_email_idx CREATE INDEX invitations_by_email_idx ON invitations USING btree (email) WHERE ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (declined_at IS NULL))
+  index invitations_expiry_unrecorded_idx CREATE INDEX invitations_expiry_unrecorded_idx ON invitations USING btree (expires_at) WHERE (expiry_recorded_at IS NULL)
   index invitations_pending_idx CREATE UNIQUE INDEX invitations_pending_idx ON invitations USING btree (account_id, email) WHERE ((accepted_at IS NULL) AND (revoked_at IS NULL) AND (declined_at IS NULL))
   index invitations_pkey CREATE UNIQUE INDEX invitations_pkey ON invitations USING btree (id)
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
@@ -255,10 +297,12 @@ table lb_nodes
   column ipv6 inet null
   column label text not null
   column project_id uuid not null
+  constraint lb_nodes_id_project_id_key unique (id,project_id)
   constraint lb_nodes_pkey primary key (id)
   constraint lb_nodes_project_account_fkey foreign key (project_id,account_id)
   constraint lb_nodes_project_id_label_key unique (project_id,label)
   index lb_nodes_account_id_idx CREATE INDEX lb_nodes_account_id_idx ON lb_nodes USING btree (account_id)
+  index lb_nodes_id_project_id_key CREATE UNIQUE INDEX lb_nodes_id_project_id_key ON lb_nodes USING btree (id, project_id)
   index lb_nodes_pkey CREATE UNIQUE INDEX lb_nodes_pkey ON lb_nodes USING btree (id)
   index lb_nodes_project_id_idx CREATE INDEX lb_nodes_project_id_idx ON lb_nodes USING btree (project_id)
   index lb_nodes_project_id_label_key CREATE UNIQUE INDEX lb_nodes_project_id_label_key ON lb_nodes USING btree (project_id, label)
@@ -283,13 +327,13 @@ table projects
   column name text not null
   column slug text not null
   constraint projects_account_id_fkey foreign key (account_id)
+  constraint projects_account_id_slug_key unique (account_id,slug)
   constraint projects_id_account_id_key unique (id,account_id)
   constraint projects_pkey primary key (id)
-  constraint projects_slug_key unique (slug)
   index projects_account_id_idx CREATE INDEX projects_account_id_idx ON projects USING btree (account_id)
+  index projects_account_id_slug_key CREATE UNIQUE INDEX projects_account_id_slug_key ON projects USING btree (account_id, slug)
   index projects_id_account_id_key CREATE UNIQUE INDEX projects_id_account_id_key ON projects USING btree (id, account_id)
   index projects_pkey CREATE UNIQUE INDEX projects_pkey ON projects USING btree (id)
-  index projects_slug_key CREATE UNIQUE INDEX projects_slug_key ON projects USING btree (slug)
   policy tenant_isolation for all using ((cross_account_read() OR (account_id = current_account()))) with check ((cross_account_read() OR (account_id = current_account())))
   rls enabled=true forced=true
 
@@ -337,6 +381,7 @@ table sessions
   column groups ARRAY not null default '{}'::text[]
   column id text not null
   column last_seen_at timestamp with time zone not null default now()
+  column logout_hint text null
   column revoked_at timestamp with time zone null
   column selected_account_id uuid null
   column subject text not null

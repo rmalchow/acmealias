@@ -96,49 +96,6 @@ func TestCheckCNAMEUndetermined(t *testing.T) {
 	}
 }
 
-func TestCheckAddress(t *testing.T) {
-	handler := func(w dns.ResponseWriter, r *dns.Msg) {
-		m := new(dns.Msg)
-		m.SetReply(r)
-		q := r.Question[0]
-		switch {
-		case q.Name == "correct.example.com." && q.Qtype == dns.TypeA:
-			m.Answer = append(m.Answer,
-				rr(t, q.Name+" 300 IN A 203.0.113.10"),
-				rr(t, q.Name+" 300 IN A 203.0.113.11"))
-		case q.Name == "correct.example.com." && q.Qtype == dns.TypeAAAA:
-			m.Answer = append(m.Answer, rr(t, q.Name+" 300 IN AAAA 2001:db8:1::10"))
-		case q.Name == "wrong.example.com." && q.Qtype == dns.TypeA:
-			m.Answer = append(m.Answer, rr(t, q.Name+" 300 IN A 198.51.100.5"))
-		case q.Name == "missing.example.com.":
-			m.Rcode = dns.RcodeNameError
-		default:
-			m.Rcode = dns.RcodeNameError
-		}
-		_ = w.WriteMsg(m)
-	}
-	resolver := startTestServer(t, handler)
-	c := &Checker{Resolver: resolver, Timeout: 2 * time.Second}
-
-	tests := []struct {
-		name       string
-		family     string
-		want       []net.IP
-		wantStatus Status
-	}{
-		{"correct.example.com", "A", []net.IP{net.ParseIP("203.0.113.10"), net.ParseIP("203.0.113.11")}, StatusCorrect},
-		{"correct.example.com", "AAAA", []net.IP{net.ParseIP("2001:db8:1::10")}, StatusCorrect},
-		{"wrong.example.com", "A", []net.IP{net.ParseIP("203.0.113.10")}, StatusIncorrect},
-		{"missing.example.com", "A", []net.IP{net.ParseIP("203.0.113.10")}, StatusMissing},
-	}
-	for _, tc := range tests {
-		got := c.CheckAddress(context.Background(), AddressCheck{Name: tc.name, Family: tc.family, Want: tc.want})
-		if got.Status != tc.wantStatus {
-			t.Errorf("CheckAddress(%q,%s) status = %q, want %q (found %q)", tc.name, tc.family, got.Status, tc.wantStatus, got.Found)
-		}
-	}
-}
-
 func TestCheckCAA(t *testing.T) {
 	handler := func(w dns.ResponseWriter, r *dns.Msg) {
 		m := new(dns.Msg)

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -588,8 +589,6 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj + "/domains", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", proj + "/keys", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", proj + "/plan", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
-		{"GET", proj + "/plan/zone", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/challenges", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/audit", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
 		{"GET", "/api/v1/accounts/" + v.sc.AccountID().String() + "/config", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, nil},
@@ -617,6 +616,18 @@ func TestEveryRouteEnforcesItsRole(t *testing.T) {
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedNode},
 		{"POST", proj + "/domains", `{"name":"shop.example.com"}`, []string{"ADMIN", "CONFIG_ADMIN"}, nil},
 		{"DELETE", "", "", []string{"ADMIN", "CONFIG_ADMIN"}, seedDomain},
+		// Observation is a PROPERTY of a domain, so it is governed by the
+		// permission that already writes one and not by a new action.
+		{"PATCH", "", `{"observeTls":true}`, []string{"ADMIN", "CONFIG_ADMIN"}, seedDomain},
+		// Reading back what was observed is reading the inventory: every role,
+		// like the domain listing itself. It is what colours a dot, and a dot
+		// nobody but an administrator can see is a dot nobody looks at.
+		{"GET", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, seedDomainPath("/certificate")},
+		// The history is the same read gated the same way. What keeps it off a
+		// personal account is the account's KIND and not a role, so it is not a
+		// distinction this table can express — 418 is asserted where the account
+		// kind is (personal_account_test.go).
+		{"GET", "", "", []string{"ADMIN", "CONFIG_ADMIN", "KEY_ROTATION", "READ_ONLY"}, seedDomainPath("/certificate/history")},
 		// The acme-dns credentials file. It MINTS A KEY, so it is governed like
 		// key creation and not like a domain read: KEY_ROTATION reaches it and
 		// READ_ONLY does not. A row that let every member produce one would be a
@@ -1539,7 +1550,12 @@ func TestFailedAuditWriteRollsBackTheChange(t *testing.T) {
 	}
 }
 
-func TestPlanIsServedStructuredAndAsAZoneSnippet(t *testing.T) {
+// The plan endpoints are gone; what they carried is a property of the domain
+// now (change domain-diagnostics, G2). The value worth defending is the same one
+// the plan test defended: a customer is told to publish a CNAME to the name this
+// service actually answers for, once per delegation however many domains share
+// it.
+func TestDomainReadCarriesTheRecordsToPublish(t *testing.T) {
 	v := newAdminEnv(t)
 	cl := v.session("reader", roleRead)
 	proj := "/api/v1/accounts/" + v.sc.AccountID().String() + "/projects/" + itoa(v.projID)
@@ -1551,63 +1567,91 @@ func TestPlanIsServedStructuredAndAsAZoneSnippet(t *testing.T) {
 		}
 	}
 
-	rec := cl.do(http.MethodGet, proj+"/plan", "")
+	var got []domainView
+	rec := cl.do(http.MethodGet, proj+"/domains", "")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("plan: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("domains: %d %s", rec.Code, rec.Body.String())
 	}
-	var plan planView
-	decode(t, rec, &plan)
-	cnames := 0
-	for _, r := range plan.Records {
-		if r.Type == "CNAME" {
-			cnames++
-		}
-	}
-	// The apex and its wildcard share one challenge name, so one CNAME.
-	if cnames != 1 {
-		t.Errorf("%d CNAME rows, want 1: %+v", cnames, plan.Records)
+	decode(t, rec, &got)
+	if len(got) != 2 {
+		t.Fatalf("%d domains, want 2", len(got))
 	}
 
-	rec = cl.do(http.MethodGet, proj+"/plan/zone", "")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "IN  CNAME") {
-		t.Fatalf("zone snippet: %d %s", rec.Code, rec.Body.String())
+	zone := strings.TrimSuffix(v.opts.Config.Zone, ".")
+	targets := map[string]bool{}
+	for _, d := range got {
+		if d.CNAMETarget == "" {
+			t.Errorf("%s: cnameTarget is empty, so the console has nothing to tell the customer to publish", d.Name)
+		}
+		if !strings.HasSuffix(d.CNAMETarget, "."+zone) {
+			t.Errorf("%s: cnameTarget %q is not in the zone this service serves (%s)", d.Name, d.CNAMETarget, zone)
+		}
+		targets[d.CNAMETarget] = true
+	}
+	// The apex and its wildcard share one alias, so one target between them.
+	if len(targets) != 1 {
+		t.Errorf("%d distinct targets, want 1 shared by the apex and its wildcard: %v", len(targets), targets)
+	}
+	// One issuer configured, so both tags at the registrable name — rendered
+	// rdata, which is what a dialog prints. With no issuer it would be null
+	// rather than empty, which is what lets a console hide the CAA dot instead
+	// of showing a grey one for a question nobody asked.
+	want := []string{`0 issue "letsencrypt.org"`, `0 issuewild "letsencrypt.org"`}
+	for _, d := range got {
+		if !slices.Equal(d.ExpectedCAA, want) {
+			t.Errorf("%s: expectedCaa = %v, want %v at the registrable name", d.Name, d.ExpectedCAA, want)
+		}
 	}
 }
 
-// --- the plan-to-checks adapter (no database) ------------------------------
+// --- the expectation-to-checks adapter (no database) -----------------------
 
-// The plan emits one row per address; resolvercheck compares a name's whole
-// answer set at once. Getting that regrouping wrong reports a correct
-// dual-stack load balancer as four mismatches, so it is checked directly.
-func TestGroupForChecksCollapsesRowsPerNameAndFamily(t *testing.T) {
-	records := []inventory.Record{
-		{Name: "shop.example.com", Type: "A", Value: "203.0.113.10"},
-		{Name: "shop.example.com", Type: "A", Value: "203.0.113.11"},
-		{Name: "shop.example.com", Type: "AAAA", Value: "2001:db8:1::10"},
-		{Name: "_acme-challenge.example.com", Type: "CNAME", Value: "example-com.acmeservice.example"},
-		{Name: "example.com", Type: "CAA", Value: `0 issue "letsencrypt.org"`},
-		{Name: "example.com", Type: "CAA", Value: `0 issuewild "letsencrypt.org"`},
+// A wildcard and its apex share one challenge name and every domain under one
+// registrable name shares one CAA set, so both are asked once. Getting this
+// wrong quadruples the queries one screen open puts on somebody's recursor, and
+// it is the only thing standing between "answer per domain" and doing so.
+func TestGroupForChecksAsksEachDistinctNameOnce(t *testing.T) {
+	checks := groupForChecks(expectedDomains(), []string{"letsencrypt.org"})
+	if len(checks) != 3 {
+		t.Fatalf("%d checks, want 3 (two challenge names, one registrable): %+v", len(checks), checks)
 	}
-	checks := groupForChecks(records, []string{"letsencrypt.org"})
-	if len(checks) != 4 {
-		t.Fatalf("%d checks, want 4 (A, AAAA, CNAME, CAA): %+v", len(checks), checks)
-	}
-
-	byKind := map[string]planCheck{}
+	kinds := map[string]int{}
 	for _, c := range checks {
-		byKind[c.kind] = c
+		kinds[c.kind]++
 	}
-	if a := byKind["A"]; a.address == nil || len(a.address.Want) != 2 {
-		t.Errorf("the two A rows did not become one check with two addresses: %+v", a.address)
+	if kinds["CNAME"] != 2 || kinds["CAA"] != 1 {
+		t.Errorf("checks by kind = %v, want two CNAME and one CAA", kinds)
 	}
-	if aaaa := byKind["AAAA"]; aaaa.address == nil || len(aaaa.address.Want) != 1 {
-		t.Errorf("AAAA check: %+v", aaaa.address)
+	for _, c := range checks {
+		if c.kind == "CNAME" && (c.cname == nil || !strings.HasSuffix(c.cname.Expected, ".")) {
+			t.Errorf("the CNAME target must be fully qualified before it is compared: %+v", c.cname)
+		}
+		if c.kind == "CAA" && (c.caa == nil || len(c.caa.Issuers) != 1) {
+			// The check compares issuer IDENTIFIERS; the rendered rdata is what
+			// the customer publishes, and is carried separately.
+			t.Errorf("CAA check: %+v", c.caa)
+		}
 	}
-	if cn := byKind["CNAME"]; cn.cname == nil || !strings.HasSuffix(cn.cname.Expected, ".") {
-		t.Errorf("the CNAME target must be fully qualified before it is compared: %+v", cn.cname)
+}
+
+// A domain whose alias has gone missing is asked nothing — there is no target to
+// compare against — and must still appear in the answer rather than vanishing
+// off the screen.
+func TestGroupForChecksSkipsADomainWithNoAlias(t *testing.T) {
+	exps := expectedDomains()
+	exps[2].Target = ""
+	checks := groupForChecks(exps, nil)
+	for _, c := range checks {
+		if c.name == "_acme-challenge.shop.example.com" {
+			t.Fatalf("a domain with no alias was asked for anyway: %+v", c)
+		}
 	}
-	if caa := byKind["CAA"]; caa.caa == nil || len(caa.caa.Issuers) != 1 {
-		t.Errorf("the two CAA rows did not become one check: %+v", caa.caa)
+	rows := domainChecks(exps, nil)
+	if len(rows) != 3 {
+		t.Fatalf("%d rows, want all three domains present", len(rows))
+	}
+	if rows[2].Delegation.Status != statusNotChecked || len(rows[2].Delegation.Expected) != 0 {
+		t.Errorf("the aliasless row = %+v, want not-checked with nothing to publish", rows[2].Delegation)
 	}
 }
 

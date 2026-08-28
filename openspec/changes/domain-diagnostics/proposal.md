@@ -143,9 +143,10 @@ places and give a customer two screens to reconcile.
 So this change **absorbs `health-checks` and that change is archived
 unimplemented.** Everything load-bearing in it survives — both address families
 probed separately, a failed handshake recorded as an observation rather than
-omitted, history kept so "since when" is answerable, an hours-scale cadence, and
-a billable unit shaped like what the customer configured. What is dropped is its
-presentation, and one of its central cost decisions (see the next section).
+omitted, history kept so "since when" is answerable, and an hours-scale cadence.
+What is dropped is its presentation, one of its central cost decisions (see the
+next section), and its billing — observation is free here, and only challenges
+cost.
 
 ### The check is per domain, opt-in, and that inverts one of `health-checks`'s decisions
 
@@ -169,7 +170,7 @@ somebody else's name entirely. `health-checks` listed that as a known accepted
 limitation. Under a per-domain opt-in it stops being a limitation, because the
 domain **is** the server name.
 
-### History is worth keeping and is worth charging for
+### History is worth keeping, and the check itself is free
 
 An observation history answers "since when", which is the first question anybody
 asks about every problem this change surfaces. It is also, unlike the current
@@ -184,12 +185,24 @@ history is part of a team account.
 
 This is the first feature in the product gated on account kind for commercial
 rather than structural reasons, and it is worth being honest that it is a
-different kind of gate from the ones that exist. `teamAccountGuard` today keeps a
-personal account away from the member roster, and it does so because *an account
-of one cannot have members* — the screen is meaningless there, and the service
-refuses it with a `409` saying so rather than a `403`. Nothing is meaningless
-about history on a personal account. It is withheld, and the dialog says it is
-withheld rather than pretending the data does not exist.
+different kind of gate from the ones that exist. `requireTeamAccount` today keeps
+a personal account away from the member roster, and it does so because *an
+account of one cannot have members* — the screen is meaningless there, and the
+service refuses it with a `409` saying so rather than a `403`. Nothing is
+meaningless about history on a personal account. It is withheld, and the dialog
+says it is withheld rather than pretending the data does not exist.
+
+Because it is a different kind of gate it gets a different refusal: **`418`**. The
+three obvious candidates all already mean something a client would act on wrongly
+— `403` sends somebody to check permissions that are working perfectly, `402` is
+this service's "suspended or unfunded" and drops the console into a funding flow,
+and `409` is the structural refusal whose justification this gate specifically
+does not have. A status nobody else uses is what lets this one carry its own
+meaning without being mistaken for any of them. The cost is that some proxies and
+client libraries treat `418` as unknown, so the meaning lives in the error
+sentinel and the message body, the console keys on those rather than on the
+number, and the response is documented explicitly in `openapi.yaml` because no
+generator will infer it. `design.md` G15 carries the full reasoning.
 
 ## What Changes
 
@@ -319,8 +332,9 @@ rewritten to point here.
 - **A seventh background worker**, alongside `internal/activation`, on the same
   shape: a ticker, a bounded batch, bounded parallelism, cancelled with the
   process.
-- **New configuration** — an observation interval and a handshake timeout, with
-  the check globally disableable.
+- **New configuration** — an observation interval with a one-hour floor refused at
+  startup, a handshake timeout, two retention windows, and the check globally
+  disableable.
 - **`internal/httpapi`** gains the observation read, loses `getPlan` and
   `getPlanZone` with their two routes, and loses the per-record half of the
   verification response.
@@ -343,11 +357,28 @@ rewritten to point here.
 
 ### Billing
 
-- `health-checks` H6's `node.observed` becomes **`domain.observed`**: a count per
-  account per period of domains with the switch on. The customer chose *observe
-  this domain*; they did not choose the interval, and they did not choose that a
-  dual-stack project of four nodes is eight handshakes rather than one. Those are
-  ours, and we will change them.
+- **Nothing.** Certificate observation is unmetered: no usage event, no rate
+  event, no counter, no ledger row, and no change to what an account is charged
+  when somebody turns the switch on. Only challenges cost.
+- `health-checks` H6 defined `node.observed` and an earlier draft of this change
+  carried it forward as `domain.observed`, a count per account per period of
+  domains with the switch on. That is **reversed**, and `design.md` G17 records
+  why rather than dropping it silently. The short version: the reason for billing
+  the switch rather than the handshake was that the customer chose *observe this
+  domain* and did not choose the interval or the node count, so our changing
+  either must not move their invoice — and charging nothing achieves that same
+  end without a rate event, a table, a periodic emitter and a line on a bill
+  somebody has to have explained to them. A diagnostic that tells a customer
+  their certificate did not deploy should also not have a revenue reason to be
+  switched on.
+- **What the price was quietly doing, the interval floor now does explicitly.** A
+  per-domain fee was the only thing on the customer's side bounding how much of
+  this we would ever do. With no fee there is no such brake, so the observation
+  interval takes a **floor of one hour**, enforced in configuration validation
+  and refused at startup rather than clamped in silence. The six-hour default is
+  unchanged.
+- `metering-and-credits` needs no task for this. Its existing one naming
+  `node.observed` should be dropped rather than retitled.
 
 ## What this does not do
 

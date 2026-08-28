@@ -52,8 +52,9 @@ console surfaces do not exist.
    client and reads what is presented.
 3. **We do not connect to a customer's machine without being told to.** Every
    handshake in this change is behind a switch somebody turned on.
-4. **The billable unit is what the customer configured**, never how many times we
-   looked, because how often we look is ours to change.
+4. **Observation is not metered at all.** Only challenges cost. Nothing about
+   turning the switch on changes what an account is charged, so how often we
+   look is bounded by a configured floor rather than by a price (G17).
 
 ## Goals / Non-Goals
 
@@ -65,10 +66,12 @@ console surfaces do not exist.
 - Know whether the certificate actually being served for a domain is valid, on
   every node address, on both families.
 - Keep enough history that "since when" is answerable.
-- One billable event shaped like what the customer switched on.
+- A hard ceiling on how often we connect to somebody else's machine.
 
 **Non-Goals:**
 
+- Charging for any of it. Observation is unmetered and only challenges cost
+  (G17).
 - Reachability or latency monitoring (`health-checks` H1's reasoning, retained
   verbatim in G14).
 - Alerting, notification, on-call integration.
@@ -426,10 +429,14 @@ pass that selects due rows in a bounded batch, bounded parallelism inside the
 pass, an immediate first pass rather than one after the first tick, cancelled with
 the process.
 
-- **Cadence: six hours**, configurable. Nothing depends on an observation inside a
-  renewal window, a certificate does not change between one hour and the next, and
-  a renewal has about thirty days of slack. Four observations a day against a
-  thirty-day window is ample and the number is not worth tuning.
+- **Cadence: six hours**, configurable **with a floor of one hour**. Nothing
+  depends on an observation inside a renewal window, a certificate does not change
+  between one hour and the next, and a renewal has about thirty days of slack.
+  Four observations a day against a thirty-day window is ample and the number is
+  not worth tuning. The floor is refused at startup rather than clamped silently,
+  and since G17 makes observation unmetered it is the only remaining bound on how
+  often this service connects to somebody else's machine — so it is validated
+  rather than trusted to a comment.
 - **Handshake timeout: five seconds**, configurable. A node that has started
   blackholing must cost one bounded pass, not an unbounded one.
 - **Batch and parallelism are constants, not configuration**, for the same reason
@@ -500,6 +507,26 @@ it is simpler to reason about. Rejected because upgrading an account would then
 produce a feature with no data in it for weeks, and because the retention rule
 (G16) already makes the volume negligible.
 
+**The refusal is `418`.** Not `403`, not `409`, and not `402`. The reasoning is
+that this refusal means something no existing status means, and every candidate
+already carries a meaning a client would act on wrongly: `403` sends somebody to
+look at permissions that are working perfectly, `402` is this service's "suspended
+or unfunded" and routes the console into a funding flow that is the wrong flow,
+and `409` is the *structural* refusal — "an account of one cannot have members" —
+whose justification G15 exists to say this gate does not have. A status with no
+semantics anyone else uses is precisely what lets it carry this one meaning
+without being mistaken for any of those three.
+
+**What that costs, stated rather than discovered.** Some proxies and client
+libraries treat `418` as unknown, pass it through without a reason phrase, or
+collapse it into a generic error. So **the number is not where the meaning
+lives**: the sentinel and the message body carry it, the console keys on the
+sentinel rather than on the status, and `openapi.yaml` documents the response
+explicitly, because no generator will infer a `418` and every one of them will
+omit it silently. A client that only sees the number still learns the correct
+thing — that this is not about authority and not about payment — which is more
+than any of the three alternatives would have told it.
+
 ### G16. Retention is stated in weeks, and downsampling keeps a day
 
 Observations arrive at (enabled domains × node addresses × four a day). Full
@@ -511,24 +538,65 @@ renewing on time since March; this one stopped in June — so the retention rule
 stated in the same unit, and downsampling preserves the shape of the trend rather
 than truncating it. Deletion happens in the existing sweeper, not in a new worker.
 
-### G17. The billable unit is the switch, not the handshake
+### G17. Observation is not metered, and an hourly floor replaces the price
 
-`health-checks` H6 defined `node.observed`, a count per account per period of
-configured nodes. The opt-in is per domain now, so the event becomes
-**`domain.observed`: one row per account per period per domain with the switch
-on**, emitted by the same periodic rate job as every other rate event, and never
-one row per handshake.
+**Certificate observation is free. Only challenges cost.** No usage event, no rate
+event, no counter, no ledger row — nothing about turning the switch on changes
+what an account is charged, and the console does not imply that it might.
 
-The customer switched on *observe this domain*. They did not choose six hours, and
-they did not choose that a dual-stack project of four nodes is eight handshakes
-rather than one. Both of those are ours and we will change them: halving the
-interval for our own confidence must not double an invoice, and adding an IPv6
-address to a node must not make a domain cost more to watch. Billing the switch
-puts the multiplication on our side of the line, which is the side the decisions
-causing it are on.
+**This reverses an earlier position in this same document, and the reversal is
+worth recording rather than quietly editing out.** `health-checks` H6 defined
+`node.observed`, a count per account per period of configured nodes. Because the
+opt-in became per domain (G6), the first version of this decision made the event
+`domain.observed` — one row per account per period per domain with the switch on,
+never one per handshake — and the argument for it was sound as far as it went: the
+customer switched on *observe this domain*, they did not choose six hours, and they
+did not choose that a dual-stack project of four nodes is eight handshakes rather
+than one. Both of those are ours and we will change them, so halving the interval
+for our own confidence must not double an invoice.
 
-The observations themselves are operational data, stay in their own table with
-their own retention, and produce no ledger row.
+Not charging at all reaches the same end more simply. Every property that argument
+was protecting — an invoice that does not move when we change the cadence, and a
+domain that does not cost more to watch because somebody added an IPv6 address —
+holds trivially when the price is zero. What the metered version added on top was a
+rate event, a table to hold it, an idempotent periodic job to emit it, and a line
+on an invoice that a customer would have to be told the meaning of. That is a
+significant amount of machinery whose entire output is a number this decision now
+sets to zero.
+
+It also removes a bad incentive that was easy to miss. A metered switch is a switch
+the product wants people to turn on, and this one exists to tell somebody their
+certificate did not deploy. A diagnostic should not have a revenue reason to be
+enabled.
+
+**What the price was silently doing, and what now does it instead.** The
+per-domain fee was the only thing on the customer's side bounding how much of
+this we would ever do; an unmetered check has no such brake, and the honest
+consequence is that the brake has to be explicit. So: **a domain is observed at
+most once an hour.** The six-hour default is unchanged and remains the right
+number for the reasons G13 gives, but the configured interval takes a **floor of
+one hour, enforced in configuration validation rather than by a comment**, so a
+deployment cannot dial it to five minutes. It is a refusal to start and not a
+silent clamp, because a deployment that asked for five minutes and got sixty
+should be told rather than left to discover it in a graph.
+
+That floor is now the entire answer to "what stops this service hammering
+somebody else's load balancer", which is why it is validated rather than trusted.
+The bounded batch, the bounded parallelism and the per-attempt timeout (G13) all
+still hold; they bound one pass, and the floor is what bounds how often a pass
+comes round.
+
+The observations themselves remain operational data, in their own table with their
+own retention (G16), and produce no ledger row — which was true before and is now
+true for the simpler reason that there is no ledger row anywhere in this feature.
+
+**Rejected: metering it but pricing it at zero.** It keeps the pipeline for the day
+somebody wants to charge, and costs nothing today. Rejected because a rate event
+priced at zero is a rate event that has to be maintained, migrated and explained
+for years on the chance of a decision nobody has made, and because the day it does
+get a price is the day it needs to be designed against real usage rather than
+guessed at now. `metering-and-credits` can add it then, and its own task naming
+`node.observed` should simply be dropped rather than retitled.
 
 ### G18. `Check now` moves onto the row and loses its conditions
 
@@ -558,7 +626,13 @@ offline.
   not reported (G14).
 - **We connect to a customer's machine on a schedule** → only behind a switch they
   turned on (constraint 3), only on 443, one handshake per address per cycle, with
-  a bounded timeout and bounded parallelism (G13).
+  a bounded timeout and bounded parallelism (G13), and never more often than once
+  an hour whatever the configuration says (G17). That last bound used to be
+  implicit in the fee; it is explicit now because the fee is gone.
+- **An unmetered check has nothing making anyone careful with it** → real, and the
+  answer is the hourly floor rather than a price (G17). Worth naming as a risk
+  because the pressure it removes was invisible: a metered switch is one somebody
+  counts before enlarging, and a free one is not.
 - **A verification-disabled TLS client is a bad habit that spreads** → it is
   confined to `internal/certobserve`, it is the only way to observe an expired or
   untrusted certificate rather than fail on it (G12), and the package holds no
@@ -603,8 +677,11 @@ offline.
    address records and the per-record half of the verification response — last,
    once nothing reads any of them.
 10. Retention and downsampling in the existing sweeper.
-11. Emit `domain.observed` from the periodic rate job.
-12. `SEQUENCE.md` entry 14 rewritten to point here.
+11. `SEQUENCE.md` entry 14 rewritten to point here.
+
+Nothing here emits a usage or rate event, and there is no step that does: G17
+makes observation unmetered, so the migration has one fewer moving part than an
+earlier draft of this plan had.
 
 Steps 6 through 9 are ordered so that the reader of a value always exists before
 the writer of it goes: the domain carries the target before the console stops
@@ -622,8 +699,14 @@ rename rather than a deprecation.
 ## Open Questions
 
 - **How long is full-resolution history kept before downsampling, and how long
-  after?** Weeks and months respectively (G16). The numbers want a look at real
-  volume for a real account rather than a guess now.
+  after?** ~~Weeks and months respectively (G16). The numbers want a look at real
+  volume for a real account rather than a guess now.~~ **Settled**: 336h
+  (fourteen days) at full resolution, 4320h (six months) thereafter, and both are
+  CONFIGURATION rather than constants precisely because they are unmeasured — the
+  same reasoning, and the same shape, as `challenge.interaction_retention`, which
+  is configurable for the identical reason that nobody has signed off on a
+  period. The comment beside each says so, so the next reader knows the number is
+  a placeholder with a home rather than a considered value.
 - **Does a domain whose every handshake has failed for a week deserve to stop
   being grey?** It is either broken or gone and we cannot tell which. Reporting it
   risks blaming a customer for our own transit; staying grey risks somebody
@@ -633,5 +716,8 @@ rename rather than a deprecation.
   check-now is an outbound connection to a customer's machine on demand, which is
   a different thing to hand an unauthenticated-by-us button, and it is not in this
   change.
-- **Does `domain.observed` price per domain or per domain-address?** G17 says per
-  domain and the reasoning is firm; `metering-and-credits` sets the number.
+- ~~**Does `domain.observed` price per domain or per domain-address?**~~
+  **Closed, and the question no longer exists**: observation is unmetered (G17),
+  so there is nothing to price either way. What replaced the question is the
+  hourly floor on the observation interval, which is what now bounds the volume
+  the price was implicitly bounding.

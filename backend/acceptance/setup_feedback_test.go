@@ -41,7 +41,7 @@ func TestTheSetupScreenSaysWhetherTheDelegationIsPublished(t *testing.T) {
 		http.StatusCreated, &project); err != nil {
 		t.Fatalf("creating a project: %v", err)
 	}
-	t.Cleanup(func() { _, _, _ = s.do(http.MethodDelete, s.acct("/projects/"+project.ID), nil) })
+	t.Cleanup(func() { dropProject(t, s, project.ID) })
 
 	// Both under example.com, the only zone the fake internet answers for. The
 	// difference between them is not the name — it is that one of them has a
@@ -93,12 +93,19 @@ func TestTheSetupScreenSaysWhetherTheDelegationIsPublished(t *testing.T) {
 // domainCheck is the per-domain half of the verification answer
 // (internal/httpapi/admin_plan.go, domainChecks).
 type acceptanceDomainCheck struct {
-	Name       string `json:"name"`
-	Delegation struct {
-		Status   string   `json:"status"`
-		Expected []string `json:"expected"`
-		Found    string   `json:"found"`
-	} `json:"delegation"`
+	Name       string       `json:"name"`
+	Delegation recordAnswer `json:"delegation"`
+	// A POINTER, because absent and empty are different answers: with no issuer
+	// configured there is nothing to authorize and so nothing to say, which is
+	// not the same as a CAA check that found nothing (domain-setup-feedback D3).
+	// expectation_test.go asserts this agrees with the domain read's expectedCaa.
+	CAA *recordAnswer `json:"caa"`
+}
+
+type recordAnswer struct {
+	Status   string   `json:"status"`
+	Expected []string `json:"expected"`
+	Found    string   `json:"found"`
 }
 
 // verification reads the project's setup screen, keyed by domain name.
@@ -139,6 +146,40 @@ func newDomain(t *testing.T, s *session, project, name string) domainRef {
 		t.Fatalf("creating the domain %s: %v", name, err)
 	}
 	return d
+}
+
+// dropProject removes a project the way the service insists on: its domains
+// first, then the project.
+//
+// A PROJECT WITH A DOMAIN IN IT CANNOT BE DELETED — inventory.DeleteProject
+// answers 409 and names the count, because taking a domain away with its parent
+// would silently withdraw a delegation somebody's certificate renewal depends
+// on. A cleanup that only asked for the project therefore left everything
+// behind, and did it quietly, since a cleanup discards its status.
+//
+// That is a leak with a deadline: a personal account holds at most five projects
+// (design C13), so on a stack kept between runs — which is what
+// ACCEPTANCE_KEEP_STACK is for — the sixth run of a test that builds one fails
+// on a quota it never meant to exercise, in a completely different assertion.
+func dropProject(t *testing.T, s *session, project string) {
+	t.Helper()
+	var domains []domainRef
+	if err := s.getJSON(s.acct("/projects/"+project+"/domains"), &domains); err != nil {
+		t.Logf("cleaning up %s: listing its domains: %v", project, err)
+		return
+	}
+	for _, d := range domains {
+		if status, body, err := s.do(http.MethodDelete, s.acct("/domains/"+d.ID), nil); err != nil {
+			t.Logf("cleaning up %s: deleting %s: %v", project, d.Name, err)
+		} else if status != http.StatusNoContent && status != http.StatusOK {
+			t.Logf("cleaning up %s: deleting %s: got %d: %s", project, d.Name, status, body)
+		}
+	}
+	if status, body, err := s.do(http.MethodDelete, s.acct("/projects/"+project), nil); err != nil {
+		t.Logf("cleaning up %s: %v", project, err)
+	} else if status != http.StatusNoContent && status != http.StatusOK {
+		t.Logf("cleaning up %s: got %d: %s", project, status, body)
+	}
 }
 
 func hasSuffixFold(s, suffix string) bool {

@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
@@ -246,4 +249,90 @@ func TestIntegrationDomainJoiningAnActivatedAliasIsActivated(t *testing.T) {
 		t.Errorf("due right after the check = %+v, want nothing — the joining domain must not "+
 			"drag its alias back to the front of the queue", due)
 	}
+}
+
+// TestIntegrationDomainObservationSwitch is design G8 at the store: what the
+// switch does, what it refuses, and what it deliberately leaves alone (change
+// domain-diagnostics, tasks 2.2a, 2.3, 2.5).
+func TestIntegrationDomainObservationSwitch(t *testing.T) {
+	db, sc := scopedDB(t)
+	ctx := context.Background()
+
+	p := &model.Project{Slug: "obs", Name: "Observed"}
+	if err := CreateProject(ctx, db, sc, p); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	alias := &model.Alias{ProjectID: p.ID, ChallengeFQDN: "_acme-challenge.example.com", Label: "example-com"}
+	if err := CreateAlias(ctx, db, sc, alias); err != nil {
+		t.Fatalf("create alias: %v", err)
+	}
+	apex := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "example.com"}
+	wild := &model.Domain{ProjectID: p.ID, AliasID: alias.ID, Name: "*.example.com"}
+	for _, d := range []*model.Domain{apex, wild} {
+		if err := CreateDomain(ctx, db, sc, d); err != nil {
+			t.Fatalf("create %s: %v", d.Name, err)
+		}
+		if d.ObserveTLS || d.TLSTestHost != nil {
+			t.Fatalf("%s arrived with observation on (%v, %v) — nothing may be "+
+				"connected to until somebody switches it on", d.Name, d.ObserveTLS, d.TLSTestHost)
+		}
+	}
+
+	t.Run("the apex needs no test hostname", func(t *testing.T) {
+		got, err := UpdateDomainObservation(ctx, db, sc, apex.ID, true, nil)
+		if err != nil {
+			t.Fatalf("enable on the apex: %v", err)
+		}
+		if !got.ObserveTLS || got.TLSTestHost != nil {
+			t.Errorf("apex = %v/%v, want on with no hostname — example.com IS a TLS server name",
+				got.ObserveTLS, got.TLSTestHost)
+		}
+	})
+
+	t.Run("a wildcard without one is refused by the database", func(t *testing.T) {
+		// The check constraint, not a Go guard: a future write path that does not
+		// go through inventory would otherwise store work nothing can perform,
+		// since "*.example.com" cannot be sent as a TLS server name.
+		if _, err := UpdateDomainObservation(ctx, db, sc, wild.ID, true, nil); err == nil {
+			t.Fatal("a wildcard with observation on and no test hostname was accepted")
+		}
+		got, err := GetDomain(ctx, db, sc, wild.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ObserveTLS {
+			t.Error("the refused update left the switch on")
+		}
+	})
+
+	t.Run("a wildcard with one is accepted, and disabling keeps it", func(t *testing.T) {
+		host := "www.example.com"
+		got, err := UpdateDomainObservation(ctx, db, sc, wild.ID, true, &host)
+		if err != nil {
+			t.Fatalf("enable with a hostname: %v", err)
+		}
+		if !got.ObserveTLS || got.TLSTestHost == nil || *got.TLSTestHost != host {
+			t.Fatalf("wildcard = %v/%v, want on with %q", got.ObserveTLS, got.TLSTestHost, host)
+		}
+
+		// G8: turning the switch off does not clear the hostname. Somebody who
+		// turns it back on gets theirs back rather than being asked again.
+		got, err = UpdateDomainObservation(ctx, db, sc, wild.ID, false, nil)
+		if err != nil {
+			t.Fatalf("disable: %v", err)
+		}
+		if got.ObserveTLS {
+			t.Error("the switch stayed on")
+		}
+		if got.TLSTestHost == nil || *got.TLSTestHost != host {
+			t.Errorf("hostname after disabling = %v, want it kept as %q", got.TLSTestHost, host)
+		}
+	})
+
+	t.Run("another account's domain is not found", func(t *testing.T) {
+		other := seedAccount(t, db, "elsewhere")
+		if _, err := UpdateDomainObservation(ctx, db, other, apex.ID, false, nil); !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("err = %v, want ErrRecordNotFound", err)
+		}
+	})
 }

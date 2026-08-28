@@ -25,8 +25,8 @@ func TestEveryOperationAuthorizes(t *testing.T) {
 	// they touch no object, or they delegate to something here that does.
 	// Adding to this list should be a decision somebody makes on purpose.
 	exempt := map[string]string{
-		"RenderZoneSnippet": "pure formatting of a plan the caller was already authorized to have",
-		"ListProjects":      "delegates wholesale to ListProjectsPage, which compiles the caller's grants into the query",
+		"DelegationTarget": "pure formatting of an alias the caller was already authorized to have",
+		"ListProjects":     "delegates wholesale to ListProjectsPage, which compiles the caller's grants into the query",
 	}
 
 	fset := token.NewFileSet()

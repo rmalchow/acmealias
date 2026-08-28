@@ -12,8 +12,6 @@ package resolvercheck
 import (
 	"context"
 	"fmt"
-	"net"
-	"sort"
 	"strings"
 	"time"
 
@@ -49,16 +47,6 @@ type Result struct {
 type CNAMECheck struct {
 	Name     string // e.g. "_acme-challenge.shop.example.com"
 	Expected string // e.g. "shop-example-com.acmeservice.cloudpowered.services."
-}
-
-// AddressCheck is one address row of a DNS plan: Name must resolve, for the
-// given Family, to exactly the Want set (a load balancer's node
-// addresses for that family). Family is "A" or "AAAA" — the plan emits one
-// row per family per name, mirroring the zone-file example in design D5.
-type AddressCheck struct {
-	Name   string
-	Family string // "A" or "AAAA"
-	Want   []net.IP
 }
 
 // Checker resolves plan rows against one configured resolver and caches raw
@@ -154,54 +142,4 @@ func (c *Checker) CheckCNAME(ctx context.Context, check CNAMECheck) Result {
 		found = append(found, cname.Target)
 	}
 	return Result{Status: StatusIncorrect, Found: strings.Join(found, ", ")}
-}
-
-// CheckAddress verifies one A or AAAA row against the load balancer's node addresses.
-func (c *Checker) CheckAddress(ctx context.Context, check AddressCheck) Result {
-	qtype := dns.TypeA
-	if check.Family == "AAAA" {
-		qtype = dns.TypeAAAA
-	}
-	resp, err := c.lookup(ctx, check.Name, qtype)
-	if err != nil {
-		return Result{Status: StatusUndetermined, Found: err.Error()}
-	}
-	if resp.Rcode == dns.RcodeNameError || len(resp.Answer) == 0 {
-		return Result{Status: StatusMissing}
-	}
-
-	var found []string
-	for _, rr := range resp.Answer {
-		switch v := rr.(type) {
-		case *dns.A:
-			found = append(found, v.A.String())
-		case *dns.AAAA:
-			found = append(found, v.AAAA.String())
-		default:
-			found = append(found, rr.String())
-		}
-	}
-	if ipSetsEqual(found, check.Want) {
-		return Result{Status: StatusCorrect}
-	}
-	return Result{Status: StatusIncorrect, Found: strings.Join(found, ", ")}
-}
-
-func ipSetsEqual(found []string, want []net.IP) bool {
-	if len(found) != len(want) {
-		return false
-	}
-	a := append([]string{}, found...)
-	b := make([]string, len(want))
-	for i, ip := range want {
-		b[i] = ip.String()
-	}
-	sort.Strings(a)
-	sort.Strings(b)
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -44,6 +44,29 @@ export function challengeFqdn(name: string): string {
 }
 
 /**
+ * Mirrors `dnsname.Covers` (backend, design G8/2.3): does a TLS client asking for `host` land on
+ * `pattern`'s certificate? Exactly one label beneath the wildcard's base, no more — `*.example.com`
+ * covers `www.example.com` and does NOT cover `a.b.example.com`, which is what the wildcard's own
+ * certificate would also refuse to present a name for.
+ *
+ * `pattern` is expected to be a wildcard (`*.example.com`); a non-wildcard pattern covers nothing,
+ * since there is then no wildcard certificate for a second name to ride on.
+ *
+ * A courtesy only — the service re-runs this rule (2.3) and its message is what the console shows
+ * on refusal, because a client-side "no" here and a server-side "no" for a different reason would
+ * both look right and mean different things.
+ */
+export function coveredByWildcard(pattern: string, host: string): boolean {
+  const base = normalizeDomain(pattern);
+  if (!base.startsWith('*.')) return false;
+  const under = base.slice(2);
+  const h = normalizeDomain(host);
+  if (!h.endsWith('.' + under)) return false;
+  const label = h.slice(0, -('.' + under).length);
+  return label.length > 0 && !label.includes('.');
+}
+
+/**
  * Returns the reason a domain name is unacceptable, or null if it is acceptable.
  *
  * ponytail: the one D4 rule not checked here is "the wildcard sits at a public suffix"

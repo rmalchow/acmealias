@@ -273,3 +273,58 @@ func TestIntegrationEveryUserHasSomewhereToWork(t *testing.T) {
 		t.Fatalf("a personal account is shown as %+v; it is free and always usable", listed[0])
 	}
 }
+
+// TestIntegrationCertificateHistoryIsATeamFeature: the current state colours a
+// dot in every account, and the history under it is part of a team account
+// (design G15).
+//
+// The refusal is the SERVICE's and not the console's — a dialog that merely
+// hid a section it had been sent would be a gate anyone with a browser could
+// open. And it is 418: not 403, because the caller's authority is fine; not
+// 402, because nothing is unpaid; not 409, because the account is not the wrong
+// SHAPE for the question — an account of one could perfectly well have a
+// history, it is simply not sold one. What carries that is the message, since
+// 418 is a status client libraries are entitled to find meaningless.
+func TestIntegrationCertificateHistoryIsATeamFeature(t *testing.T) {
+	v := newAdminEnv(t)
+	cl, accountID := personalSession(t, v, "solitary")
+	acct := "/api/v1/accounts/" + accountID.String()
+
+	rec := cl.do(http.MethodPost, acct+"/projects", `{"slug":"solo","name":"Solo"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rec.Code, rec.Body.String())
+	}
+	var proj projectView
+	decode(t, rec, &proj)
+
+	rec = cl.do(http.MethodPost, acct+"/projects/"+proj.ID.String()+"/domains", `{"name":"shop.example.com"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create domain: %d %s", rec.Code, rec.Body.String())
+	}
+	var dom domainCreated
+	decode(t, rec, &dom)
+	cert := acct + "/domains/" + dom.ID.String() + "/certificate"
+
+	// The state is served. A dot with no colour in a personal account would make
+	// the feature invisible to the people most likely to be running one node.
+	if rec := cl.do(http.MethodGet, cert, ""); rec.Code != http.StatusOK {
+		t.Fatalf("certificate state in a personal account: %d %s, want 200 — the dot is for everybody",
+			rec.Code, rec.Body.String())
+	}
+
+	rec = cl.do(http.MethodGet, cert+"/history", "")
+	if rec.Code != http.StatusTeapot {
+		t.Fatalf("certificate history in a personal account: %d %s, want 418", rec.Code, rec.Body.String())
+	}
+	// The number is not where the meaning lives, so the body has to carry it.
+	var body ErrorBody
+	decode(t, rec, &body)
+	if !strings.Contains(body.Message, "team account") {
+		t.Errorf("the refusal reads %q; it has to say what is withheld and why, because a client "+
+			"library is entitled to make nothing of a 418", body.Message)
+	}
+	if strings.Contains(body.Message, "roles") || strings.Contains(body.Message, "members") {
+		t.Errorf("the refusal borrowed the roster's message: %q — nothing about a certificate "+
+			"history is about people", body.Message)
+	}
+}

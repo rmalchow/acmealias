@@ -68,6 +68,50 @@ func ValidateDomain(name string) (Normalized, []Warning, error) {
 	return Normalized(full), nil, nil
 }
 
+// Covers reports whether host is a name the wildcard pattern matches: exactly
+// one label beneath it, no more.
+//
+//	*.example.com, www.example.com    -> true
+//	*.example.com, a.b.example.com    -> false — two labels down, and a TLS
+//	                                     client would conclude the same
+//	*.example.com, example.com        -> false — the apex is a separate name
+//	                                     with its own row and its own switch
+//	example.com,   www.example.com    -> false — not a wildcard, covers nothing
+//
+// It lives here rather than in the inventory service so that it sits beside the
+// rules it has to agree with (design G8). A hostname accepted by a second
+// matcher and rejected by ValidateDomain is a row nothing can ever observe.
+//
+// One label and not "any depth", which is what a TLS client does: RFC 6125 § 6.4.3
+// matches a wildcard against exactly one label, so `*.example.com` presented for
+// `a.b.example.com` fails verification in every browser. Accepting it here would
+// let somebody store a test hostname whose observation can only ever come back
+// as "does not cover the name asked for".
+//
+// Both arguments are lowercased and de-rooted the way the rest of this package
+// normalizes, but neither is otherwise validated: a caller holding an
+// unvalidated pattern should put it through ValidateDomain first.
+func Covers(pattern, host string) bool {
+	p := strings.ToLower(strings.TrimSuffix(pattern, "."))
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+
+	base, isWildcard := strings.CutPrefix(p, wildcardPrefix)
+	if !isWildcard || base == "" {
+		return false
+	}
+	// A wildcard does not cover another wildcard — including itself. Without
+	// this, `*.example.com` would "cover" `*.example.com`, since `*` is a single
+	// label like any other, and a wildcard would be storable as its own TLS test
+	// hostname: the one name that cannot be one (G8).
+	if strings.Contains(h, "*") {
+		return false
+	}
+	label, found := strings.CutSuffix(h, "."+base)
+	// A label of its own: non-empty, and with no dot left in it — the dot is
+	// what separates "one label beneath" from "several".
+	return found && label != "" && !strings.Contains(label, ".")
+}
+
 // Counterpart returns the other form of a name: the wildcard of a name that is
 // not one, the base name of a name that is.
 //

@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Validate checks Config for internal consistency: required values are
@@ -95,6 +96,27 @@ func (c Config) Validate() error {
 	positive("ACME_SHUTDOWN_GRACE", c.ShutdownGracePeriod)
 	if c.InteractionRetention < 0 {
 		errs.add("ACME_INTERACTION_RETENTION", fmt.Errorf("must not be negative"))
+	}
+
+	positive("ACME_OBSERVATION_HANDSHAKE_TIMEOUT", c.ObservationHandshakeTimeout)
+	if c.ObservationFullResolutionWindow < 0 {
+		errs.add("ACME_OBSERVATION_FULL_RESOLUTION_WINDOW", fmt.Errorf("must not be negative"))
+	}
+	if c.ObservationRetention < 0 {
+		errs.add("ACME_OBSERVATION_RETENTION", fmt.Errorf("must not be negative"))
+	}
+
+	// A domain is observed at most once an hour (design G17). Certificate
+	// observation is unmetered — no fee bounds how often this service dials a
+	// customer's machine the way the per-domain charge used to — so this floor
+	// is the ONLY thing standing between a mistyped configured value and this
+	// service hammering somebody else's production load balancer. It is why
+	// this is refused outright rather than folded into positive(…) above:
+	// positive only catches zero and negative, and a deployment that typed
+	// "5m" needs to be told, not silently corrected to "1h".
+	if c.ObservationInterval < time.Hour {
+		errs.add("ACME_OBSERVATION_INTERVAL",
+			fmt.Errorf("must be at least 1h (observation is unmetered; see design G17), got %s", c.ObservationInterval))
 	}
 
 	for _, cidr := range c.TrustedProxyCIDRs {

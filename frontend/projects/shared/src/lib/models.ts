@@ -76,6 +76,98 @@ export interface Domain {
    */
   lastCheckedAt: string | null;
   lastSuccessAt: string | null;
+  /**
+   * Whether we complete a TLS handshake against this project's node addresses for this domain,
+   * and under what name (design domain-diagnostics G6, G8).
+   *
+   * Off by default and never on by accident: nothing in this product connects to a customer's
+   * machine until somebody says so. `tlsTestHost` is what a wildcard is observed AS — `*.a.com`
+   * is not a name any TLS client can ask for — and it survives the switch being turned off, so
+   * somebody who turns it back on gets their hostname back rather than being asked again.
+   *
+   * Null and the empty string are the same absence here as far as the console is concerned; the
+   * service keeps them apart because only a null leaves a stored hostname alone on a write.
+   */
+  observeTls: boolean;
+  tlsTestHost: string | null;
+  /**
+   * What this domain needs published in somebody else's zone, carried by the domain read.
+   *
+   * It used to come from a project-wide DNS plan with an endpoint of its own, which meant the row
+   * on screen could not say what to publish without a second request that joined back onto it by
+   * name (design G2). Which record a domain needs is knowable without asking DNS anything, and
+   * these two fields are what keep it that way.
+   *
+   * `cnameTarget` is the alias the `_acme-challenge` CNAME must point at. THE EMPTY STRING IS THE
+   * ABSENCE — a domain whose alias has gone missing — and it is never omitted, because an absent
+   * field would be indistinguishable from an older service.
+   *
+   * `expectedCaa` is the rendered rdata for the registrable name, both tags per configured
+   * issuer: `0 issue "letsencrypt.org"`. It is NULL, not empty, when the deployment configures no
+   * issuer — there is then nothing to authorise and nothing to check, which is what lets the row
+   * omit the CAA dot rather than showing a grey one for a question nobody asked (G5).
+   */
+  cnameTarget: string;
+  expectedCaa: string[] | null;
+}
+
+/**
+ * The seven states of a certificate, banded BY THE SERVICE (design G9).
+ *
+ * The thresholds — 28 days and 7 — live in `internal/certobserve` and are put on the wire
+ * verbatim. Nothing in the console compares a `notAfter` to a clock: a console and an `adminctl`
+ * that each applied their own thresholds would disagree about the same certificate the first time
+ * one of them was updated and the other was not.
+ *
+ * `uncovered` is a certificate that was read perfectly and does not cover the name we asked for,
+ * which bands with `expired` however much life it has left. `unexamined` is a handshake we could
+ * not complete and `unobserved` is one we have not attempted yet — both grey, because both mean
+ * *we could not look* and neither is a claim about the customer's machine.
+ */
+export type CertificateBand =
+  | 'healthy'
+  | 'approaching'
+  | 'urgent'
+  | 'expired'
+  | 'uncovered'
+  | 'unexamined'
+  | 'unobserved';
+
+/**
+ * One (node, family) pair's most recent observation — or one row of the history, which is the
+ * same shape.
+ *
+ * Everything from `notAfter` down is null unless `outcome` is `observed`: a handshake we could
+ * not complete has no certificate to describe, and zero values would read as one that expired in
+ * year zero. `nodeLabel` rides along so a dialog needs no join to say which machine this was.
+ */
+export interface AddressObservation {
+  nodeId: string;
+  nodeLabel: string;
+  family: 'A' | 'AAAA';
+  address: string;
+  observedAt: string;
+  outcome: string;
+  band: CertificateBand;
+  notAfter: string | null;
+  issuer: string | null;
+  coversServerName: boolean | null;
+  chainTrusted: boolean | null;
+}
+
+/**
+ * One domain's current TLS position: `GET /accounts/:a/domains/:id/certificate`.
+ *
+ * `band` at the top is the worst of the addresses below, with the one exception that grey never
+ * outranks a colour (G10) — an address we could not reach beside three we could is a line in the
+ * dialog, not a reason to grey out a dot carrying real information. `addresses` is `[]` and never
+ * null, so a domain whose switch was turned on a minute ago is an empty list rather than an
+ * absence to test for.
+ */
+export interface CertificateState {
+  serverName: string;
+  band: CertificateBand;
+  addresses: AddressObservation[];
 }
 
 /** Body of `POST /projects/:id/domains`. */
@@ -216,20 +308,6 @@ export interface ApiKeyCreated {
   notice: string;
 }
 
-export interface PlanRecord {
-  name: string;
-  ttl: number;
-  type: 'A' | 'AAAA' | 'CNAME' | 'CAA';
-  value: string;
-}
-
-export interface DNSPlan {
-  projectSlug: string;
-  projectName: string;
-  records: PlanRecord[];
-  zone: string;
-}
-
 /**
  * `status` is one of four, not two (design D5 / D11): `correct`, `missing`, `incorrect` (with
  * `found` set to what was actually there), or `undetermined`. CAA additionally uses
@@ -237,14 +315,6 @@ export interface DNSPlan {
  * rendered as an error.
  */
 export type CheckStatus = 'correct' | 'missing' | 'incorrect' | 'undetermined' | 'not-published';
-
-export interface CheckResult {
-  name: string;
-  type: string;
-  expected: string[];
-  status: CheckStatus;
-  found?: string;
-}
 
 /**
  * The delegation's five states, on an axis of presence (design D2).
@@ -294,15 +364,16 @@ export interface DomainCheck {
 }
 
 /**
- * `results` is the whole plan, one row per question asked of DNS — what the manual "Run
- * verification" control shows. `domains` is the same answers redistributed onto the rows a
- * customer reads, and the join is done by the server: a wildcard and its apex share one
- * challenge name and therefore one delegation, which no name match in the console could
- * reconstruct without reporting one of the two as absent.
+ * One answer per domain, and no second keying of the same answers.
+ *
+ * There used to be a `results` array beside `domains` — one row per question asked of DNS, which
+ * a plan table rendered by matching names. It answered the same question twice and only the
+ * per-domain keying ever had a reader (design G2), so it is gone. The join stays the server's to
+ * do: a wildcard and its apex share one challenge name and therefore one delegation, which no
+ * name match in the console could reconstruct without reporting one of the two as absent.
  */
 export interface VerificationResult {
   resolver: string;
-  results: CheckResult[];
   domains: DomainCheck[];
 }
 

@@ -9,6 +9,7 @@ package sweeper
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -28,7 +29,14 @@ import (
 // (ACME_INTERACTION_RETENTION): how long a CLOSED interaction row is kept
 // after withdrawal before this sweep deletes it. 0 means keep forever, and
 // is the default until a human signs off on a shorter period.
-func Run(ctx context.Context, db *gorm.DB, interval, interactionRetention time.Duration, m *obs.Metrics, log *slog.Logger) {
+//
+// observationFullResolutionWindow and observationRetention are
+// config.Config.ObservationFullResolutionWindow and .ObservationRetention
+// (domain-diagnostics G16): the certificate-observation history is kept at
+// full resolution for the first, downsampled to one row per domain per
+// address per day beyond it, and dropped entirely past the second.
+func Run(ctx context.Context, db *gorm.DB, interval, interactionRetention,
+	observationFullResolutionWindow, observationRetention time.Duration, m *obs.Metrics, log *slog.Logger) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -36,7 +44,7 @@ func Run(ctx context.Context, db *gorm.DB, interval, interactionRetention time.D
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			Sweep(ctx, db, interactionRetention, m, log)
+			Sweep(ctx, db, interactionRetention, observationFullResolutionWindow, observationRetention, m, log)
 		}
 	}
 }
@@ -52,7 +60,8 @@ const interactionStaleAfter = 24 * time.Hour
 //
 // interactionRetention <= 0 (the default) skips the closed-interaction
 // deletion entirely — see Run's doc comment and config.Config.InteractionRetention.
-func Sweep(ctx context.Context, db *gorm.DB, interactionRetention time.Duration, m *obs.Metrics, log *slog.Logger) {
+func Sweep(ctx context.Context, db *gorm.DB, interactionRetention,
+	observationFullResolutionWindow, observationRetention time.Duration, m *obs.Metrics, log *slog.Logger) {
 	n, err := store.DeleteExpired(ctx, db)
 	if err != nil {
 		log.Error("sweep failed", "error", err)
@@ -113,8 +122,73 @@ func Sweep(ctx context.Context, db *gorm.DB, interactionRetention time.Duration,
 		return
 	}
 
+	// Certificate observation retention (domain-diagnostics G16): downsampling
+	// rather than deletion, because the value of the history is a trend
+	// measured in weeks and truncating the period destroys the shape of it.
+	downsampled, err := downsampleObservations(ctx, db, observationFullResolutionWindow, observationRetention)
+	if err != nil {
+		log.Error("certificate observations not downsampled", "error", err)
+		return
+	}
+
 	log.Debug("sweep completed", "removed", n, "abandoned", abandoned, "interactions purged", purged,
-		"keys expired", expired, "invitations lapsed", lapsed)
+		"keys expired", expired, "invitations lapsed", lapsed, "observations downsampled", downsampled)
+}
+
+// downsampleObservations enforces the two certificate-observation retention
+// windows (domain-diagnostics G16, task 6.1a): full resolution is kept for
+// fullResolutionWindow, then at most one row per (domain, node, family) per
+// calendar day survives until retention, past which even that is dropped.
+//
+// It runs as two single statements rather than a per-row loop, in the order
+// that makes the second one simple: first, anything past retention is deleted
+// outright, unconditionally — the same shape as
+// store.DeleteOldClosedInteractions, and retention <= 0 is a no-op for the
+// identical reason: nobody has signed off on a period, so nothing is deleted
+// until an operator sets one. Second, of what remains — which is now bounded
+// above by retention — everything past fullResolutionWindow is deleted EXCEPT
+// the latest observation of each (domain, node, family, day), which is what
+// keeps the trend's shape instead of truncating it. Downsampling only ever
+// happens on rows already inside the retention window, so a representative
+// row is never protected from the first statement by the second.
+//
+// Wrapped in store.CrossAccount for the reason store.DueObservations already
+// is (design G13/5.1a): this runs on a ticker with no request session, so a
+// bare statement would see an empty view of every tenant's rows through row
+// -level security and delete nothing at all, forever, without ever erroring.
+func downsampleObservations(ctx context.Context, db *gorm.DB, fullResolutionWindow, retention time.Duration) (int64, error) {
+	var removed int64
+	err := store.CrossAccount(ctx, db, func(tx *gorm.DB) error {
+		if retention > 0 {
+			res := tx.Exec(`delete from certificate_observations where observed_at < ?`,
+				time.Now().Add(-retention))
+			if res.Error != nil {
+				return fmt.Errorf("delete observations past retention: %w", res.Error)
+			}
+			removed += res.RowsAffected
+		}
+
+		if fullResolutionWindow <= 0 {
+			// Zero means keep everything at full resolution, forever — same
+			// "unset means don't touch it" rule interactionRetention uses.
+			return nil
+		}
+		cutoff := time.Now().Add(-fullResolutionWindow)
+		res := tx.Exec(`delete from certificate_observations
+			where observed_at < ?
+			and id not in (
+				select distinct on (domain_id, node_id, family, observed_at::date) id
+				from certificate_observations
+				where observed_at < ?
+				order by domain_id, node_id, family, observed_at::date, observed_at desc
+			)`, cutoff, cutoff)
+		if res.Error != nil {
+			return fmt.Errorf("downsample observations: %w", res.Error)
+		}
+		removed += res.RowsAffected
+		return nil
+	})
+	return removed, err
 }
 
 // ExpireKeys disables API keys whose expiry has passed and records one

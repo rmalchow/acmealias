@@ -122,6 +122,12 @@ func (a *admin) scopeFor(c echo.Context, accountID model.ID) (store.Scope, error
 // good practice in an account of one, and the subset rule of P10 applies to it
 // regardless of kind (design C9, task 3.4). Anyone adding a route here should
 // ask whether it is about PEOPLE or about CREDENTIALS; only the first belongs.
+//
+// The sibling for everything else is requireTeamAccountFeature in
+// admin_certificate.go, which refuses what a personal account is not SOLD rather
+// than what it cannot have, answers 418 rather than 409, and says so in its
+// message. Choosing between the two is the question above and nothing else: a
+// roster that cannot exist, or a feature that is withheld (design G15).
 func (a *admin) requireTeamAccount(c echo.Context, sc store.Scope, what string) error {
 	acc, err := store.GetAccount(c.Request().Context(), a.opts.DB, sc)
 	if err != nil {

@@ -41,6 +41,7 @@ type ErrorBody struct {
 //	store.ErrPersonalAccountFixed                  409
 //	store.ErrSecondPersonalAccount                 409
 //	store.ErrPersonalAccountHasNoRoster            409
+//	errTeamAccountFeature                          418
 //	store.ErrRoleHeldBySystemKey                   409
 //	gorm.ErrRecordNotFound                         404
 //	*echo.HTTPError                                its own code
@@ -119,6 +120,27 @@ func (a *admin) mapError(err error, c echo.Context) (int, any) {
 		// status for both produces a message that is wrong for whichever case
 		// it was not written for.
 		return http.StatusConflict, ErrorBody{Message: err.Error()}
+	case errors.Is(err, errTeamAccountFeature):
+		// 418, and that is not a joke (design G15). This refusal means something
+		// no existing status means, and each of the three plausible codes already
+		// carries a meaning a client acts on WRONGLY: 403 sends somebody to check
+		// permissions that are working perfectly, 402 is this service's "suspended
+		// or unfunded" and drops the console into a funding flow that cannot
+		// resolve this, and 409 is the STRUCTURAL refusal — "an account of one
+		// cannot have members" — which is exactly the justification G15 says this
+		// gate does not have and must not borrow. A status nobody else means
+		// anything by is what lets it carry this one meaning unmistakably.
+		//
+		// The cost is real and is stated rather than discovered: some proxies and
+		// client libraries treat 418 as unknown, strip the reason phrase, or
+		// collapse it into a generic error. SO THE NUMBER IS NOT WHERE THE MEANING
+		// LIVES. The sentinel carries it for Go callers, this message body carries
+		// it for everyone else, and openapi.yaml documents the response explicitly
+		// because no generator will infer a teapot. A client that sees only the
+		// number still learns the correct thing — this is not about authority and
+		// not about payment — which is more than any of the three alternatives
+		// would have told it.
+		return http.StatusTeapot, ErrorBody{Message: err.Error()}
 	case errors.Is(err, store.ErrPersonalAccountHasNoRoster):
 		// 409: the account is the wrong SHAPE for the request, which is the same
 		// sentence as the two below and deliberately not a 403. There is nobody

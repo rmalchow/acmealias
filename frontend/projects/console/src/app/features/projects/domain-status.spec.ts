@@ -1,5 +1,5 @@
-import { caaChip, delegationChip, domainCheckFor } from './domain-status';
-import { CAAStatus, DelegationStatus, DomainCheck, VerificationResult } from '@acme/shared';
+import { caaChip, certificateChip, delegationChip, domainCheckFor } from './domain-status';
+import { CAAStatus, CertificateBand, DelegationStatus, DomainCheck, VerificationResult } from '@acme/shared';
 
 const apex = { id: 'd-apex', challengeName: '_acme-challenge.example.com' };
 const wildcard = { id: 'd-star', challengeName: '_acme-challenge.example.com' };
@@ -16,7 +16,7 @@ function check(over: Partial<DomainCheck>): DomainCheck {
 }
 
 function verification(domains: DomainCheck[]): VerificationResult {
-  return { resolver: '10.0.0.1:53', results: [], domains };
+  return { resolver: '10.0.0.1:53', domains };
 }
 
 describe('domainCheckFor', () => {
@@ -47,6 +47,16 @@ describe('delegationChip', () => {
     expect(delegationChip('missing').label).not.toBe(delegationChip('incorrect').label);
     expect(delegationChip('missing').label).toBe('not configured');
     expect(delegationChip('incorrect').label).toBe('configured incorrectly');
+  });
+
+  it('is yellow for an absent record and red for a wrong one', () => {
+    // The inversion of what domain-setup-feedback shipped, and the reason is not severity
+    // (design G4). `missing` is the state every new domain passes through while somebody is
+    // mid-task; `incorrect` is a record that looks finished and will never work.
+    expect(delegationChip('missing').colour).toBe('orange');
+    expect(delegationChip('missing').colour).not.toBe('red');
+    expect(delegationChip('incorrect').colour).toBe('red');
+    expect(delegationChip('correct').colour).toBe('green');
   });
 
   it('renders all five states, none of them as another', () => {
@@ -95,6 +105,16 @@ describe('caaChip', () => {
     expect(chip.label).not.toContain('not configured');
   });
 
+  it('gives the two do-nothing states the same colour and different sentences (G5)', () => {
+    // A chip carries a word and so could not share a colour without lying about one of them,
+    // which is why `not-published` was blue. A dot carries no word: the two are the same
+    // INSTRUCTION, and blue on a three-colour scale reads as "unclear".
+    expect(caaChip('not-published').colour).toBe('green');
+    expect(caaChip('correct').colour).toBe('green');
+    expect(caaChip('not-published').tooltip).not.toBe(caaChip('correct').tooltip);
+    expect(caaChip('undetermined').colour).toBe('default');
+  });
+
   it('presents a CAA set that excludes us as blocking', () => {
     const chip = caaChip('blocking');
     expect(chip.colour).toBe('red');
@@ -125,7 +145,6 @@ describe('an unconfigured resolver', () => {
     // (design D4). The chips say we did not look; they do not say the customer is broken.
     const v: VerificationResult = {
       resolver: '',
-      results: [],
       domains: [
         check({ domainId: apex.id, delegation: { name: apex.challengeName, status: 'not-checked' } }),
         check({
@@ -141,5 +160,51 @@ describe('an unconfigured resolver', () => {
       expect(chip.colour).toBe('default');
     }
     expect(caaChip(domainCheckFor(wildcard.id, v)!.caa!.status).colour).toBe('default');
+  });
+});
+
+describe('certificateChip', () => {
+  it('takes the band from the service and computes no threshold', () => {
+    // The edges — 28 days and 7 — live in internal/certobserve and reach us banded (design G9).
+    // A console applying its own would disagree with adminctl the first time one was updated.
+    expect(certificateChip('healthy').colour).toBe('green');
+    expect(certificateChip('approaching').colour).toBe('orange');
+    expect(certificateChip('urgent').colour).toBe('red');
+    expect(certificateChip('expired').colour).toBe('red');
+  });
+
+  it('is red for a certificate that does not cover the name asked for', () => {
+    // The most valuable red in the change: "issued and never deployed", "deployed to two nodes
+    // out of four", "covers the names you had last month" — all reported as success everywhere
+    // else in the product.
+    expect(certificateChip('uncovered').colour).toBe('red');
+  });
+
+  it('is GREY for a handshake that failed, never red (task 7.7)', () => {
+    // The one place our own probe's failure meets a colour scale. Red would claim the customer's
+    // node is broken when we cannot tell that apart from our transit or their firewall.
+    const chip = certificateChip('unexamined');
+    expect(chip.colour).toBe('default');
+    expect(chip.colour).not.toBe('red');
+    expect(chip.tooltip).toContain('says nothing about whether your node is working');
+  });
+
+  it('says nothing has been observed yet without implying a fault', () => {
+    const chip = certificateChip('unobserved');
+    expect(chip.colour).toBe('default');
+    expect(chip.tooltip).not.toContain('failed');
+  });
+
+  it('gives every band its own sentence', () => {
+    const all: CertificateBand[] = [
+      'healthy',
+      'approaching',
+      'urgent',
+      'expired',
+      'uncovered',
+      'unexamined',
+      'unobserved',
+    ];
+    expect(new Set(all.map((b) => certificateChip(b).tooltip)).size).toBe(7);
   });
 });

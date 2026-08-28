@@ -146,6 +146,16 @@ type flowStep struct {
 	Component      string                      `json:"component"`
 	To             string                      `json:"to"`
 	ResponseErrors map[string][]flowFieldError `json:"response_errors"`
+	// Token is the nonce a consent challenge hands out and demands back.
+	//
+	// authentik's consent stage generates a fresh uuid per rendered challenge,
+	// stores it in the flow plan, and REQUIRES the submission to echo it
+	// (`token = CharField(required=True)`, validated against the plan context).
+	// A browser does this without anybody thinking about it, because the value
+	// is a hidden field in the form it just received. A test that posts the
+	// component name alone is refused with "token: This field is required",
+	// which reads like a missing feature rather than a missing echo.
+	Token string `json:"token"`
 }
 
 type flowFieldError struct {

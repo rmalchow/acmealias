@@ -13,7 +13,7 @@ for, and the handful of recipes that cover almost everything you will actually d
 - [Domains](#domains)
 - [Wildcards](#wildcards)
 - [What each domain's row says](#what-each-domains-row-says)
-- [The DNS plan and verification](#the-dns-plan-and-verification)
+- [Certificate observation](#certificate-observation)
 - [API keys](#api-keys)
 - [Recent interactions](#recent-interactions)
 - [Live challenges](#live-challenges)
@@ -47,7 +47,7 @@ you and confer exactly what they always did, but they can be edited and you can 
 | load balancers, nodes, domains | yes | yes | no | no |
 | API keys create/revoke | yes | yes | yes | no |
 | see a key secret (once) | yes | yes | yes | no |
-| DNS plan + run verification | yes | yes | yes | yes |
+| check now / verify records | yes | yes | yes | yes |
 | view inventory + audit log | yes | yes | yes | yes |
 
 `ADMIN` is your account's **unrestricted** role: every action on every object, uneditable, and
@@ -77,8 +77,7 @@ Projects
 └── Project
     └── Load balancer              ← where you will spend most of your time
         ├── Nodes                  addresses of its Traefik hosts
-        ├── Domains                what this load balancer answers for
-        ├── DNS plan               what the customer must publish + live status
+        ├── Domains                what this load balancer answers for, checked live
         ├── API keys               credentials, and what each one may reach
         └── Recent interactions    every publish, and whether the CA came to look
 
@@ -97,9 +96,11 @@ organising projects to match teams is no longer only tidiness — it is the shap
 follow.
 
 A **load balancer** is one environment's Traefik nodes. Record every node's public address:
-those addresses become the address records in the DNS plan, and they are offered as the default
-restriction when you create an API key. A wrong address here means a valid certificate on a host
-nobody reaches.
+those addresses are what the customer's own DNS must point at, they are offered as the default
+restriction when you create an API key, and — for any domain whose certificate observation
+switch is on — they are the addresses this service connects to on port 443 to read what
+certificate is actually being served there. A wrong address here means a valid certificate on
+a host nobody reaches, or an observation reading somebody else's machine.
 
 A project or load balancer that still owns children cannot be deleted. Remove the domains first — which is
 deliberate, because deleting a load balancer silently would revoke certificate renewals for everything under
@@ -129,8 +130,8 @@ alias they share, or neither is: if the counterpart breaks a rule the typed name
 nothing has been created.
 
 It is unticked every time the dialog opens and the console never remembers your last choice. The
-counterpart is a real decision, not a formality: it puts a wildcard address record into the plan
-the customer publishes over their whole zone, and it means a stolen key covers every hostname
+counterpart is a real decision, not a formality: it means the customer must publish a wildcard
+address record covering their whole zone, and it means a stolen key covers every hostname
 beneath the domain. Some customers forbid wildcard certificates by policy. Tick it when the
 customer asked for a wildcard; leave it alone otherwise.
 
@@ -221,90 +222,113 @@ for the poller; it runs the lookup immediately and, if the delegation is there, 
 active before the page finishes reloading. It cannot do harm — a check that does not find the
 record only records that we looked.
 
-It is the same lookup as **Run verification** on the plan below, which also records what it saw:
-either control brings a domain online, and both re-check every domain on the load balancer at
-once, because the delegation is one record per alias rather than one per domain.
+It is the same lookup as the **CNAME** dot below and **Check now** beside it: either brings a
+domain online, and both re-check every domain sharing the delegation at once, because the
+delegation is one record per alias rather than one per domain.
 
-### Validation — what a live lookup says about the records
+### The dots — what a live lookup says about the records
 
-This column is a fresh resolver answer, asked when the screen opened, and it can legitimately
-disagree with the column beside it for the few minutes between a customer publishing their record
-and our next check noticing. Each record type gets its own chip, because they answer different
-questions.
+Every domain row carries a line of dots: a filled circle per record type it actually has, the
+type named beside it, and a click that opens what that colour means and, where there is one, the
+record to publish. A record type this domain does not have gets **no dot at all** — CAA with no
+configured issuer, TLS with the switch off — never a grey one, because a grey dot would claim we
+meant to look and did not.
 
-**Delegation** — is the one `CNAME` the customer publishes actually there?
+Each dot is a fresh answer, asked when the screen opened (TLS is the exception — it shows the
+latest scheduled observation, see [Certificate observation](#certificate-observation) below), and
+it can legitimately disagree with the Challenges column beside it for the few minutes between a
+customer publishing a record and our next check noticing.
 
-| Chip | What is true | Who fixes it |
+**`CNAME`** — is the one delegation record the customer publishes actually there?
+
+| Dot | What is true | Who fixes it |
 | --- | --- | --- |
-| **configured correctly** | It resolves to this domain's alias. | Nobody. |
-| **not configured** | Nothing resolves at the challenge name. | The customer publishes the record. |
-| **configured incorrectly** | Something resolves, but not the alias we need. | The customer changes a record they already have — and the commonest cause is a domain deleted and added again, which issues a *new* alias while the old delegation stays published, well-formed, and permanently invalid. |
-| **could not check** | Our lookup failed. | Us, or the resolver. Nothing for the customer to change. |
-| **not checked** | We have not looked — no verification resolver is configured, or the answer has not arrived. | Nobody; it is not a statement about their DNS. |
+| green | It resolves to this domain's alias. | Nobody. |
+| yellow | Nothing resolves at the challenge name. | The customer publishes the record. This is the normal state of a domain added five minutes ago, not a fault. |
+| red | Something resolves, but not the alias we need. | The customer changes a record they already have — and the commonest cause is a domain deleted and added again, which issues a *new* alias while the old delegation stays published, well-formed, and permanently invalid. |
+| grey | Could not be checked, or has not been checked yet — no verification resolver is configured, or the answer has not arrived. | Nobody; it is not a statement about their DNS. |
 
-"not configured" and "configured incorrectly" are deliberately never merged. One sends somebody
-to add a record; the other sends them to a record they published and therefore believe is done.
+Missing and incorrect are deliberately different colours, never both red: missing is
+overwhelmingly somebody mid-onboarding, and every domain passes through it on the way to green;
+incorrect is a record that looks finished to whoever published it and will never work.
 
 **CAA** — who may issue for this name. This is *not* the same vocabulary, and the difference
 matters: a CAA record is optional, and its absence means anyone may issue.
 
-| Chip | What is true | Who fixes it |
+| Dot | What is true | Who fixes it |
 | --- | --- | --- |
-| **authorises us** | A CAA set exists and names our issuer. | Nobody. |
-| **no restriction** | No CAA record is published. This is the commonest state and is entirely correct — not something to add. | Nobody. |
-| **blocks us** | A CAA set exists and does not name our issuer. Issuance is refused however perfect the delegation is. | The customer adds our issuer to their CAA set. |
-| **could not check** | The lookup failed. | Us, or the resolver. |
+| green | Either a CAA set exists and names our issuer, or no CAA record is published at all — the commonest state, and entirely correct. | Nobody. |
+| red | A CAA set exists and does not name our issuer. Issuance is refused however perfect the delegation is. | The customer adds our issuer to their CAA set. |
+| grey | The lookup failed or has not run. | Us, or the resolver. |
 
-**What does this mean?** beside the chips opens the fix, with *that domain's* own challenge name
-and alias in it, ready to paste. For a blocking CAA it offers `issue` and `issuewild` lines —
-`issuewild` governs wildcard issuance instead of `issue` when it is present, and wildcards are
-the case this service exists for.
+The two green states are not the same fact — "authorises us" and "no restriction" read
+differently in the dot's tooltip — but they carry the same instruction, *do nothing*, which is
+what a single colour is for.
 
-## The DNS plan and verification
+Clicking a dot opens its record, with *that domain's* own challenge name and alias in it, ready
+to copy — in every state, including green, where it names the record in effect. For a blocking
+CAA it offers both `issue` and `issuewild` lines: `issuewild` governs wildcard issuance *instead
+of* `issue` when it is present, so adding only the `issue` line adds a line that is already there
+and changes nothing.
 
-The **DNS plan** panel on a load balancer page is the answer to "what exactly do I ask the
-customer for". It is generated from the inventory, so it cannot drift out of date.
+Never printed, in any dialog: the diagnostic text of a lookup that failed. That field holds our
+own resolver's error, addressed to an operator, and showing it to a customer would read as a
+verdict on their zone when it is a verdict on our lookup.
 
-```
-shop.example.com.                  300  IN  A      203.0.113.10
-shop.example.com.                  300  IN  A      203.0.113.11
-shop.example.com.                  300  IN  AAAA   2001:db8::10
-shop.example.com.                  300  IN  AAAA   2001:db8::11
-example.com.                       300  IN  A      203.0.113.10
-example.com.                       300  IN  A      203.0.113.11
-example.com.                       300  IN  AAAA   2001:db8::10
-example.com.                       300  IN  AAAA   2001:db8::11
-*.example.com.                     300  IN  A      203.0.113.10
-*.example.com.                     300  IN  A      203.0.113.11
-*.example.com.                     300  IN  AAAA   2001:db8::10
-*.example.com.                     300  IN  AAAA   2001:db8::11
-_acme-challenge.shop.example.com.  300  IN  CNAME  k7m3q9x2r4tv8w1p.acmeservice.cloudpowered.services.
-_acme-challenge.example.com.       300  IN  CNAME  x4n2vq7btm93kd5r.acmeservice.cloudpowered.services.
-```
+## Certificate observation
 
-Note the counts: three domains, but only two CNAMEs, because the wildcard and the apex share one.
-Address records are included because a domain whose challenge delegation is perfect but whose
-address records point elsewhere produces a valid certificate on a server nobody reaches — the two
-failure modes belong in the same table. A node recorded with an IPv6 address gets an
-`AAAA` row alongside its `A` row, automatically; a node with IPv4 only gets
-just the `A` row.
+The **TLS** dot is not a DNS lookup. It is this service acting as a TLS client against the load
+balancer's own node addresses — the ones recorded on the [load balancer](#projects-and-load-balancers)
+— and reading what certificate is actually presented on port 443, one handshake per node
+address, per address family, for every domain where the switch is on.
 
-**Run verification** resolves every row of the whole plan live and reports what it found —
-addresses included, which the per-domain chips above deliberately leave out. Results are never
-stored: DNS is somebody else's mutable state, and a green tick from yesterday means nothing.
+**It is off until you turn it on, per domain.** Nothing is dialled for a domain until its own
+switch — in the domain editor, beside its delegation — is switched on; the connections this makes
+are to machines the customer told us about, for a check the customer opted into. **It costs
+nothing.** Observation is not metered and is not going to be: only a published challenge is
+billed. The switch says so where you flip it, because a switch on a product that bills for other
+things and says nothing about price reads as a new charge nobody agreed to.
 
-| Status | Meaning | What to do |
-| --- | --- | --- |
-| **Correct** | The record exists and points where it should. | Nothing. |
-| **Missing** | The name does not resolve at all. | The customer has not published it yet, or it has not propagated. Re-check later before escalating. |
-| **Incorrect** | Something is there, but not what we need — shown with what was found. | Usually a typo in the target, or a TXT record created directly instead of a CNAME. Send the observed value back to the customer; it is normally self-explanatory to them. |
-| **Undetermined** | The lookup itself failed or timed out. | Not a customer problem. Retry; if it persists, the service's own resolver is unreachable. |
-| **Not-published** | CAA rows only: no CAA record exists. | Nothing. An absent CAA record lets any authority issue, which is the default state of the internet. |
-| **Blocking** | CAA rows only: a CAA set exists and does not name our issuer. | The customer adds our issuer. This one stops issuance whatever the rest of the table says. |
+We only ever read. No certificate and no private key belonging to the customer, or to anyone
+else, is ever obtained, held or installed by this service — this is the same kind of connection a
+browser visiting the site would make, and nothing about it puts us in anybody's trust chain.
 
-A deployment with no `ACME_VERIFY_RESOLVER` and no readable system resolver leaves every row
-reading **not checked** rather than raising an error: it has declined the feature, not broken
-itself.
+**A wildcard needs a hostname to ask for.** `*.example.com` is not a name a TLS client can
+request — the handshake needs one concrete label to put in the request. So switching TLS on for
+a wildcard domain asks for a **test hostname**: a real name the wildcard covers, exactly one
+label beneath it (`shop.example.com` — not `a.b.example.com`, which a wildcard does not cover
+either), stored on the domain and reused every cycle rather than asked for again. Nothing
+guesses one for you: `www` is the obvious default and it is only a guess, and a customer whose
+wildcard serves `a.example.com` and never `www` would get a red dot for a name they never
+deployed — the worst possible first impression of a check. Turning the switch off keeps the
+stored hostname; turning it back on does not ask again.
+
+Every enabled domain is re-observed on a fixed cadence — six hours by default, configurable by
+whoever runs the service, see [Installation](installation.md#configuration-reference) — against
+every node address of its load balancer, `A` and `AAAA` checked separately wherever a node has
+both, because a certificate renewed on one address family and not the other is invisible to a
+dual-stack visitor, including the customer checking from their own desk.
+
+| Dot | What is true |
+| --- | --- |
+| grey | Never observed yet, or the last attempt did not complete — refused, timed out, or an unreadable response. |
+| green | A certificate was read, covers the name asked for, and has more than 28 days left. |
+| amber | Same, with 7 to 28 days left. |
+| red | Expired, fewer than 7 days left, or a certificate that does not cover the name asked for at all — whatever its remaining lifetime. |
+
+**Grey does not mean the customer's node is down.** It is the one place our own probe's failure
+meets a colour, and it stays grey rather than turning red because a refused connection, a
+timeout and a listener that simply is not answering on 443 all look identical from here, and none
+of them tell us apart from our own transit or a firewall dropping our source address —
+colouring any of that red would be a claim about the customer's infrastructure we are not in a
+position to make. Click the dot: it lists every node address, family within node, so "renewed on
+`v4` and not on `v6`" is one glance rather than a comparison you construct by hand, and a failed
+attempt reads as **could not be examined** rather than as a blank row — the check ran and has
+nothing to report, which is a different fact from the check never having run.
+
+History — every past observation for this domain, not only the latest — is part of a team
+account. Opened on a personal account, the dialog says so plainly instead of showing an empty
+section.
 
 ## API keys
 
@@ -551,10 +575,12 @@ in it.
    hostnames — and if they want one, tick the counterpart checkbox so the apex and the wildcard
    are added in the one action. It is off by default; see **Domains** above for what the customer
    is agreeing to publish.
-2. Copy the DNS plan and send it to whoever administers that zone.
-3. Wait for the domain's **Delegation** chip to read *configured correctly* — the row checks
-   itself each time you open the load balancer. *Configured incorrectly* means they published
-   something, at the wrong target; **What does this mean?** shows both values side by side.
+2. Click the domain's **`CNAME`** dot and copy the record it prints; send it to whoever
+   administers that zone. It names the exact target for this domain, so there is nothing else to
+   gather first.
+3. Wait for the dot to turn green — the row checks itself each time you open the load balancer.
+   Red means they published something, at the wrong target; the dot's own dialog shows both
+   values side by side.
 4. Only then point the Traefik router at the `acmesvc` resolver.
 5. Watch **Live challenges** for one full publish-and-withdraw cycle.
 
@@ -581,9 +607,9 @@ in it.
 
 1. **Live challenges** — is anything being published at all?
 2. **Audit log**, filtered to the project — did somebody change something?
-3. The domain's chips, and **DNS plan → Run verification** for the addresses — did the
-   customer's records change? A **blocks us** on CAA stops issuance no matter how right
-   everything else looks.
+3. The domain's dots — did the `CNAME` or CAA record change? Click **Check now** to re-check
+   immediately rather than waiting for the poller. A red CAA dot stops issuance no matter how
+   right everything else looks.
 4. The key's **last used** — is that load balancer talking to us at all?
 5. Still stuck: [troubleshooting](troubleshooting.md).
 

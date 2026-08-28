@@ -375,7 +375,7 @@ and a verb without one is refused rather than guessing.
 | load balancers, nodes, domains | yes | yes | no | no |
 | API keys create/revoke | yes | yes | yes | no |
 | see a key secret (once) | yes | yes | yes | no |
-| DNS plan + run verification | yes | yes | yes | yes |
+| check now / verify records | yes | yes | yes | yes |
 | view inventory + audit log | yes | yes | yes | yes |
 
 `ADMIN` is the account's **unrestricted** role and is not a list of permissions at all: it confers
@@ -602,6 +602,28 @@ unaffected: the migration activates them.
 A split-horizon resolver fails the same way, quietly: it answers for the internal view of a
 customer's name, sees no `_acme-challenge` `CNAME`, and the domain never activates while the
 public internet has had the record all along. Point this at a public recursor.
+
+### `observation` — reading customers' own certificates
+
+Whether, and how often, this service dials a load balancer's own node addresses and reads what
+certificate they present on port 443 — the operator side of the per-domain switch documented in
+[Certificate observation](console-guide.md#certificate-observation). It is a separate top-level
+block rather than living under `challenge`, because nothing here gates whether a challenge is
+published; it gates a check that runs after a certificate already exists.
+
+| Path | Variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `observation.enabled` | `ACME_OBSERVATION_ENABLED` | `true` | The deployment-wide kill switch. `false` stops every handshake regardless of any domain's own switch, logs once at startup that observation is not running, and starts nothing. Turning it back on loses nothing: domain switches and stored history are untouched. |
+| `observation.interval` | `ACME_OBSERVATION_INTERVAL` | `6h` | How often an enabled domain is re-observed. **Takes a floor of one hour: a shorter value is refused at startup, naming the setting, rather than silently clamped to `1h`.** Meet that sentence here rather than from a graph. The floor exists because observation is not metered — see below — so nothing on the customer's side bounds how often we connect to their machine, and this is the only thing that does. |
+| `observation.handshake_timeout` | `ACME_OBSERVATION_HANDSHAKE_TIMEOUT` | `5s` | Bound on one dial-plus-handshake, as a single deadline covering both. A node that has started blackholing costs one bounded attempt per cycle, never an unbounded one. |
+| `observation.full_resolution_window` | `ACME_OBSERVATION_FULL_RESOLUTION_WINDOW` | `336h` | How long every observation is kept before downsampling to at most one per domain per address per day. **Unmeasured** — nobody has signed off on a period, which is exactly why it is configuration and not a constant, the same honesty `challenge.interaction_retention` already carries above. |
+| `observation.retention` | `ACME_OBSERVATION_RETENTION` | `4320h` | How long a downsampled observation is kept before deletion. Also unmeasured, same reasoning. |
+
+**Observation is free.** No usage event, no charge, nothing on an invoice — only a published
+challenge is billed, and that does not change here. The per-domain fee an earlier design had
+considered would have been the thing bounding how often this connects to somebody else's
+production load balancer; without it, `observation.interval`'s floor is that bound instead, which
+is why it is validated rather than trusted.
 
 ### `mail` — who the deployment is when it sends
 

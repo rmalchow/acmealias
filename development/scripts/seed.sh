@@ -29,6 +29,63 @@ resolve_cname() {
   fi
 }
 
+# zone_name — the zone this service is authoritative for, without its trailing
+# dot. Every challenge alias is a label inside it, so it is the second half of
+# every target published below.
+#
+# ACME_ZONE_NAME wins, exactly as it does for the service; otherwise it is the
+# one line of development/config-development.yaml that names it. That file's own
+# header says seed.sh cannot read YAML, and this is not a reader: it is the one
+# key this script cannot do without, taken with a `die` behind it so a moved
+# key fails here rather than three steps later as an NXDOMAIN.
+zone_name() {
+  local z="${ACME_ZONE_NAME:-}"
+  [ -n "$z" ] || z="$(awk '
+    /^zone:/ { in_zone = 1; next }
+    /^[^[:space:]#]/ { in_zone = 0 }
+    in_zone && $1 == "name:" { print $2; exit }' "$DEV_DIR/config-development.yaml")"
+  z="${z%.}"
+  [ -n "$z" ] || die "no zone name: set ACME_ZONE_NAME, or restore zone.name in development/config-development.yaml"
+  printf '%s\n' "$z"
+}
+
+# delegation_targets — the `_acme-challenge` CNAMEs the demo project's domains
+# need published, one line per distinct alias, in the shape render_zone takes.
+#
+# This used to shell `adminctl project dns demo` and split its output on the
+# literal `Zone snippet:`. That subcommand is gone (domain-diagnostics 11.6):
+# what a domain needs published is a property of the DOMAIN now, served as
+# `cnameTarget` on the domain read. Nothing in a shell script can reach that
+# read — every management route is behind an OIDC console session, and walking
+# authentik's flow executor is what the Go acceptance suite exists for — so the
+# seed takes the same two facts out of the database it is already talking to.
+#
+# ONE CNAME PER ALIAS BY CONSTRUCTION, which is why the select is over aliases
+# and not over domains: demo.example.com and *.demo.example.com share one alias
+# and therefore one row, and a seed that grew a second alias would get a second
+# CNAME for free.
+#
+# ponytail: the target is composed here as `<label>.<zone>` rather than read
+# from the one function that composes it, inventory.DelegationTarget. Ceiling:
+# a change to how a target is spelled has to be made twice, and the second
+# spelling is this one. Upgrade path: teach `adminctl domain list` to print the
+# target — the CLI already prints it once, from cnameLine, when a domain is
+# created — and this helper becomes a parse of that.
+delegation_targets() {
+  local zone challenge label
+  zone="$(zone_name)"
+  compose exec -T postgres psql -qtAX -F' ' -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+    "select distinct a.challenge_fqdn, a.label
+       from aliases a
+       join projects p on p.id = a.project_id
+      where p.slug = 'demo'
+      order by 1" |
+    while read -r challenge label; do
+      [ -n "$label" ] || continue
+      printf '%s.  IN CNAME  %s.%s.\n' "${challenge%.}" "$label" "$zone"
+    done
+}
+
 # Publishes the customer side of the delegation: the _acme-challenge CNAMEs
 # that development/dns/zones/example.com.zone serves, taken from the alias the
 # service ACTUALLY created rather than from a label guessed in advance. With
@@ -36,19 +93,10 @@ resolve_cname() {
 # this is the only way the fake internet can point at it.
 publish_delegation() {
   say "publishing the challenge delegation into the fake internet's example.com"
-  local plan lines deadline name target line
-  plan="$(acmectl adminctl project dns demo)" || die "could not render the DNS plan"
-
-  # ONE CNAME PER ALIAS BY CONSTRUCTION: the plan emits exactly one
-  # _acme-challenge row per distinct alias — demo.example.com and
-  # *.demo.example.com share one — so copying its rows can never double up,
-  # and a seed that grew a second alias would get a second CNAME for free.
-  # Only the zone-snippet half of the output is read; the table above it
-  # prints the same records with the columns in another order.
-  mapfile -t lines < <(printf '%s\n' "$plan" | sed -n '/Zone snippet:/,$p' |
-    awk '$1 ~ /^_acme-challenge\./ && $4 == "CNAME" { print $1 "  IN CNAME  " $5 }')
-  [ "${#lines[@]}" -gt 0 ] || die "the DNS plan contains no _acme-challenge CNAME:
-$plan"
+  local lines deadline name target line
+  mapfile -t lines < <(delegation_targets)
+  [ "${#lines[@]}" -gt 0 ] \
+    || die "the demo project has no alias, so there is nothing to delegate to — is it seeded?"
 
   render_zone "${lines[@]}"
   printf '%s\n' "${lines[@]}" | sed 's/^/    /'
@@ -136,8 +184,8 @@ acmectl adminctl domain create --project demo --name "*.demo.example.com"
 # CNAME, which publish_delegation picks up for free.
 acmectl adminctl domain create --project demo --name "alt.example.com"
 # demo.example.com and *.demo.example.com deliberately share one alias and one
-# CNAME — the wildcard case the whole design turns on. `adminctl project dns`
-# below should therefore show TWO domains but only ONE _acme-challenge record.
+# CNAME — the wildcard case the whole design turns on. publish_delegation below
+# therefore writes TWO records for THREE domains, not three.
 
 publish_delegation
 
@@ -182,12 +230,12 @@ say "wrote $KEY_ENV for traefik-lb ($key_id)"
 #
 # The shape is goacmedns's: an object keyed by DOMAIN. `fulldomain` is the name
 # the customer's CNAME points at and `subdomain` is its first label — both read
-# back out of the DNS plan rather than guessed, because with the shipped default
-# the label is random and only the running system knows it.
+# back off the alias the service created rather than guessed, because with the
+# shipped default the label is random and only the running system knows it.
 say "writing the acme-dns credentials for traefik-lb"
-alt_target="$(acmectl adminctl project dns demo | sed -n '/Zone snippet:/,$p' |
-  awk '$1 == "_acme-challenge.alt.example.com." && $4 == "CNAME" { print $5 }' | tail -n1)"
-[ -n "$alt_target" ] || die "no _acme-challenge CNAME for alt.example.com in the DNS plan"
+alt_target="$(delegation_targets |
+  awk '$1 == "_acme-challenge.alt.example.com." { print $NF }' | tail -n1)"
+[ -n "$alt_target" ] || die "no _acme-challenge CNAME for alt.example.com — did its domain get created?"
 alt_full="${alt_target%.}"          # jxet64y6bngq4j37.dev.acmeservice.internal
 alt_label="${alt_full%%.*}"         # jxet64y6bngq4j37
 
@@ -240,8 +288,8 @@ done
 printf ' ok\n'
 
 echo
-say "generated DNS plan for demo:"
-acmectl adminctl project dns demo || warn "could not render the DNS plan"
+say "the delegation the demo project's domains need published:"
+delegation_targets | sed 's/^/    /' || warn "could not read the delegation back"
 
 echo
 say "seeded — sign in at http://console.localhost as admin@example.com / devpass"

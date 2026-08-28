@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -68,12 +69,10 @@ func TestThePersonalAccountArc(t *testing.T) {
 		http.StatusCreated, &project); err != nil {
 		t.Fatalf("creating a project in %s's personal account: %v", readOnlyUser, err)
 	}
-	t.Cleanup(func() {
-		// Deleting the project takes the domain and the alias with it, which
-		// also keeps the five-project quota clear for a stack that is kept
-		// between runs (design C13).
-		_, _, _ = s.do(http.MethodDelete, s.acct("/projects/"+project.ID), nil)
-	})
+	// The domain goes first and the project after it — a project that still
+	// holds one cannot be deleted at all — which is what keeps the five-project
+	// quota clear on a stack kept between runs (design C13). See dropProject.
+	t.Cleanup(func() { dropProject(t, s, project.ID) })
 
 	// Under example.com because that is the zone the fake internet is
 	// authoritative for, and a domain that resolves nowhere can never activate
@@ -153,6 +152,51 @@ func TestThePersonalAccountArc(t *testing.T) {
 	}
 	if len(vals) != 0 {
 		t.Errorf("%s still answers %v after cleanup", alias, vals)
+	}
+
+	// 6. And the certificate observation, which a personal account gets HALF of
+	// (domain-diagnostics 12.10, G15).
+	//
+	// The state is served to everybody, because the state is what colours the
+	// dot and a feature whose indicator is missing is a feature nobody knows they
+	// have. The HISTORY is a team-account thing, and it is refused HERE rather
+	// than by a console hiding a section it was sent.
+	//
+	// Observations are recorded for this account all the same, which is the part
+	// that is easy to get wrong and expensive to fix: "only record what we show"
+	// is the optimisation somebody will propose, and taking it would mean an
+	// account that upgrades gets a history screen with weeks of nothing in it.
+	// The addresses below are the proof that the rows exist, read through the one
+	// door this account has to them.
+	state := observeDomain(t, s, project.ID, domain.ID)
+	if len(state.Addresses) == 0 {
+		t.Errorf("nothing was observed for %s in a personal account; the recording is not "+
+			"gated on the account kind, only the history read is (G15)", domain.Name)
+	}
+
+	status, body, err := s.do(http.MethodGet, s.acct("/domains/"+domain.ID+"/certificate/history"), nil)
+	if err != nil {
+		t.Fatalf("reading the observation history in a personal account: %v", err)
+	}
+	if status != http.StatusTeapot {
+		t.Fatalf("the observation history in a personal account: got %d, want 418 — a status "+
+			"nobody else attaches a meaning to, so it cannot be mistaken for unfunded (402), "+
+			"unauthorised (403) or the wrong shape (409): %s", status, body)
+	}
+	// The number carries no meaning; the MESSAGE is the load-bearing half, and a
+	// console renders it unedited. It has to say which kind of account this is
+	// and what the other kind gets — not that something structurally cannot
+	// exist, which is what 409 and store.ErrPersonalAccountHasNoRoster mean and
+	// would tell a customer asking about a certificate that they have no roles.
+	text := strings.ToLower(string(body))
+	if !strings.Contains(text, "personal account") || !strings.Contains(text, "team account") {
+		t.Errorf("the refusal does not name both kinds of account: %s — it is withheld for a "+
+			"commercial reason and has to say so, or it reads as a bug", body)
+	}
+	if strings.Contains(text, "permission") {
+		t.Errorf("the refusal talks about permission: %s — there is nobody in a personal "+
+			"account to ask for a grant, so that message points at a remedy that does not "+
+			"exist", body)
 	}
 }
 

@@ -292,4 +292,41 @@ func TestTheTeamAccountArc(t *testing.T) {
 		t.Errorf("the trail holds %d account.checkout entries, want 2 — one for the purchase "+
 			"that created the account and one for the recharge (tasks 5.2, 5.3)", checkouts)
 	}
+
+	// --- 8. the half of certificate observation a team account is sold --------
+	//
+	// The other side of the pair in personal_test.go (domain-diagnostics 12.10,
+	// G15). The state is served to both kinds of account; the HISTORY is served
+	// here and refused there, with 418 and a sentence about account kinds.
+	//
+	// It runs last because it restarts the api to force an observation pass, and
+	// because the account has to be funded for any of it to be readable — which
+	// it is again, two steps up.
+	state := observeDomain(t, owner, project.ID, domain.ID)
+	if len(state.Addresses) == 0 {
+		t.Fatalf("nothing was observed for %s in a team account", domain.Name)
+	}
+	history := historyRows(t, owner, domain.ID)
+	if len(history) == 0 {
+		t.Fatalf("the observation history of %s is empty in a team account, while its state "+
+			"carries %d address(es) — the two read the same rows", domain.Name, len(state.Addresses))
+	}
+	// THE SAME OBJECTS, and that is the assertion rather than a formality: the
+	// console renders one dialog from both reads, so a history row that dropped
+	// a field or keyed an address differently would render as a blank line
+	// underneath a populated one.
+	seen := map[string]bool{}
+	for _, h := range history {
+		seen[h.key()] = true
+	}
+	for _, a := range state.Addresses {
+		if !seen[a.key()] {
+			t.Errorf("the state reports %s/%s on node %s and the history has no row for it: %+v",
+				a.Address, a.Family, a.NodeLabel, history)
+		}
+	}
+	if h := history[0]; h.Outcome == "" || h.Band == "" || h.ObservedAt.IsZero() {
+		t.Errorf("a history row is missing the fields that make it readable: %+v — outcome, "+
+			"band and observedAt are what a row IS", h)
+	}
 }

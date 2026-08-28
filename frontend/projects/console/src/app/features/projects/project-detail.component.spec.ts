@@ -4,9 +4,9 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { provideNzIconsTesting } from 'ng-zorro-antd/icon/testing';
 import { provideRouter } from '@angular/router';
-import { NzModalService } from 'ng-zorro-antd/modal';
-import { NzMessageService } from 'ng-zorro-antd/message';
-import { ApiService, Domain, Project, VerificationResult } from '@acme/shared';
+import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
+import { ApiService, DelegationStatus, Domain, Project, RecordCheck, VerificationResult } from '@acme/shared';
+import { DelegationHelpModalComponent } from './delegation-help.modal';
 import { ProjectDetailComponent } from './project-detail.component';
 
 const ACCOUNT = '00000000-0000-7000-8000-0000000000a1';
@@ -26,11 +26,18 @@ function domain(over: Partial<Domain> = {}): Domain {
     // on every row without meaning to.
     lastCheckedAt: '2026-01-02T00:00:00Z',
     lastSuccessAt: '2026-01-02T00:00:00Z',
+    // What the DNS plan used to carry, on the domain itself (design G2). cnameTarget is what the
+    // delegation dialog prints; expectedCaa is what decides whether there is a CAA dot at all,
+    // and null here would silently test the "no issuer configured" row instead.
+    observeTls: false,
+    tlsTestHost: null,
+    cnameTarget: 'shop-example-com.svc.example.net',
+    expectedCaa: ['0 issue "letsencrypt.org"', '0 issuewild "letsencrypt.org"'],
     ...over,
   };
 }
 
-function project(): Project {
+function project(domains: Domain[] = [domain()]): Project {
   return {
     id: '7',
     slug: 'shop',
@@ -38,14 +45,13 @@ function project(): Project {
     createdAt: '2026-01-01T00:00:00Z',
     permittedActions: [],
     nodes: [],
-    domains: [domain()],
+    domains,
   } as unknown as Project;
 }
 
 function verification(over: Partial<VerificationResult> = {}): VerificationResult {
   return {
     resolver: '10.0.0.1:53',
-    results: [],
     domains: [
       {
         domainId: 'd-1',
@@ -74,10 +80,9 @@ describe('ProjectDetailComponent', () => {
         // The header renders breadcrumb links, so the component needs a router even though this
         // spec never navigates.
         provideRouter([]),
-        // The component holds both for controls this spec never opens; ng-zorro provides them
+        // The component holds it for controls this spec never opens; ng-zorro provides it
         // through modules the test bed does not import.
         NzModalService,
-        NzMessageService,
       ],
     }).compileComponents();
     http = TestBed.inject(HttpTestingController);
@@ -97,12 +102,14 @@ describe('ProjectDetailComponent', () => {
    * ranges as soon as they render, so they are answered here — emptily. They are not what this
    * spec is about, and an unanswered request fails http.verify() in afterEach.
    */
-  function open() {
+  function open(p: Project = project()) {
     const fixture = TestBed.createComponent(ProjectDetailComponent);
     fixture.componentRef.setInput('id', '7');
     fixture.detectChanges();
-    http.expectOne(`${BASE}/projects/7`).flush(project());
-    http.expectOne(`${BASE}/projects/7/plan`).flush({ records: [], zone: 'svc.example.net' });
+    http.expectOne(`${BASE}/projects/7`).flush(p);
+    // NO PLAN READ. The endpoint it used to call no longer exists, and every call site of it was
+    // a 404 that painted an error banner over an operation that had actually succeeded — which
+    // is what "the delete button does not work" turned out to be (task 11.1).
     reporting();
     return fixture;
   }
@@ -166,26 +173,6 @@ describe('ProjectDetailComponent', () => {
     expect(chips.delegation.label).toBe('could not check');
   });
 
-  it('never prints a resolver error into the plan table', () => {
-    // `found` on an undetermined row is our own error text, addressed to an operator. The table
-    // is painted on every screen open now, so it would reach a customer unprompted (design D4).
-    const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush(
-      verification({
-        results: [
-          {
-            name: '_acme-challenge.shop.example.com',
-            type: 'CNAME',
-            expected: ['shop-example-com.svc.example.net'],
-            status: 'undetermined',
-            found: 'query CNAME _acme-challenge.shop.example.com: dial udp 10.0.0.1:53: i/o timeout',
-          },
-        ],
-      }),
-    );
-    expect(fixture.componentInstance.foundFor('_acme-challenge.shop.example.com', 'CNAME')).toBe('—');
-  });
-
   // Check now (design domain-activation task 4.3): the same lookup, against the route that
   // RECORDS what it saw, followed by a reload — because the stamps on screen are what just
   // changed and the person pressing it is watching for exactly that.
@@ -234,8 +221,154 @@ describe('ProjectDetailComponent', () => {
     // Check now is offered in both states a check can change (task 4.3). The second one is the
     // person who has just REPAIRED a delegation: gating on "never seen" alone left exactly them
     // with no way to ask, waiting a full settled interval for the chip to go green.
-    expect(c.canCheckNow(domain({ lastCheckedAt: null, lastSuccessAt: null }))).toBeTrue();
-    expect(c.canCheckNow(broken)).toBeTrue();
-    expect(c.canCheckNow(domain())).toBeFalse();
+  });
+
+  it('offers one Recheck for the whole project, not one per row (reverses G18)', () => {
+    // G18 put a Check now on every row and argued the condition away. The reversal is not a
+    // rollback to the gated version: the control POSTs /projects/:id/verification, which looks up
+    // EVERY domain in the project and records what it saw for all of them. Per row it read as
+    // "check this domain" — a promise the request does not keep — and it spun a spinner on one
+    // row while the others silently changed underneath it.
+    //
+    // What G18 was protecting survives: there is no condition. Recheck is offered whenever the
+    // project has a domain at all, including when every one of them is active, because an active
+    // domain whose certificate expires in nine days is exactly what somebody re-checks.
+    const fixture = open();
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    fixture.detectChanges();
+    // Rendering the rows renders the two panels below them, which ask for their own contents.
+    // They are not what this spec is about, and an unanswered request fails http.verify().
+    http.expectOne((r) => r.url.endsWith('/projects/7/keys')).flush([]);
+    http.expectOne((r) => r.url.startsWith(`${BASE}/projects/7/interactions`)).flush([]);
+
+    expect(fixture.componentInstance.activation(domain()).label).toBe('active');
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Recheck');
+    // And exactly once, beside Add domain, rather than once per row.
+    expect(text.match(/Recheck/g)?.length).toBe(1);
+    expect(text).not.toContain('Check now');
+  });
+
+  it('keeps the timestamp, in the chip tooltip rather than in every row', () => {
+    // The "Last looked" line under the chip cost a line of vertical space in every row for a date
+    // that matters in the few rows where something is wrong — and it made row height depend on
+    // whether a domain had ever been checked, so a table of ten had two row heights for no reason
+    // a reader could name. The wording and the reasoning are unchanged (design A1): since when,
+    // never how many failures, and no deadline because nothing is ever switched off for it (A3).
+    const fixture = open();
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    const c: ProjectDetailComponent = fixture.componentInstance;
+
+    expect(c.lookedAt(domain({ lastCheckedAt: null, lastSuccessAt: null }))).toContain('Not looked at yet');
+    expect(c.lookedAt(domain())).toContain('Last looked');
+    // Checked after it was last seen: the row says since when it stopped, not that we looked.
+    const broken = domain({ lastSuccessAt: '2026-02-01T00:00:00Z', lastCheckedAt: '2026-02-03T00:00:00Z' });
+    expect(c.lookedAt(broken)).toContain('Last seen');
+  });
+
+  it('shows a dot per record type this domain HAS, and none for the ones it does not', () => {
+    // A type this domain does not have gets NO dot rather than a grey one (task 7.3): a grey dot
+    // would claim we meant to look. TLS is off here and no issuer is configured on the second
+    // row, so each is absent for its own reason.
+    const fixture = open(project([domain(), domain({ id: 'd-2', name: 'blog.example.com', expectedCaa: null })]));
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    const c: ProjectDetailComponent = fixture.componentInstance;
+
+    expect(c.checks(domain()).caa).not.toBeNull();
+    expect(c.checks(domain()).tls).toBeNull();
+    expect(c.checks(domain({ expectedCaa: null })).caa).toBeNull();
+  });
+
+  it('gives a wildcard and its apex one CNAME dot and separate TLS dots (task 12.1)', () => {
+    // They share one alias and therefore one delegation, which is why both CNAME dots read the
+    // same state. They are different names very often served by different certificates, so the
+    // switch, the hostname and the TLS dot are each their own.
+    const apex = domain({ id: 'd-1', name: 'example.com' });
+    const wild = domain({ id: 'd-2', name: '*.example.com', observeTls: true, tlsTestHost: 'www.example.com' });
+    const fixture = open(project([apex, wild]));
+    // Only the observed one is asked about, which is what keeps the switch being off free.
+    http.expectOne(`${BASE}/domains/d-2/certificate`).flush({
+      serverName: 'www.example.com',
+      band: 'urgent',
+      addresses: [],
+    });
+    http.expectOne(`${BASE}/projects/7/verification`).flush(
+      verification({
+        domains: [
+          {
+            domainId: 'd-1',
+            name: 'example.com',
+            challengeName: '_acme-challenge.example.com',
+            aliasId: 'a-1',
+            delegation: { name: '_acme-challenge.example.com', status: 'correct' },
+          },
+          {
+            domainId: 'd-2',
+            name: '*.example.com',
+            challengeName: '_acme-challenge.example.com',
+            aliasId: 'a-1',
+            delegation: { name: '_acme-challenge.example.com', status: 'correct' },
+          },
+        ],
+      }),
+    );
+    const c: ProjectDetailComponent = fixture.componentInstance;
+
+    expect(c.checks(apex).delegation.colour).toBe('green');
+    expect(c.checks(wild).delegation.colour).toBe('green');
+    expect(c.checks(apex).tls).toBeNull();
+    expect(c.checks(wild).tls?.colour).toBe('red');
+  });
+
+});
+
+/**
+ * The one rule carried over from the dialog this one was split out of (task 8.9): a lookup that
+ * FAILED never has its `found` printed. That field holds our resolver's error text, addressed to
+ * an operator, and showing it reads as a verdict on the customer's zone when it is a verdict on
+ * our lookup.
+ */
+describe('DelegationHelpModalComponent', () => {
+  function render(delegation: RecordCheck<DelegationStatus>) {
+    // The data differs per case and is an injection token, so the module is rebuilt each time
+    // rather than configured once in a beforeEach.
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [DelegationHelpModalComponent],
+      providers: [
+        provideNoopAnimations(),
+        provideNzIconsTesting(),
+        { provide: NzModalRef, useValue: { close: () => undefined } },
+        { provide: NZ_MODAL_DATA, useValue: { domain: domain(), delegation } },
+      ],
+    });
+    const fixture = TestBed.createComponent(DelegationHelpModalComponent);
+    fixture.detectChanges();
+    return fixture.nativeElement.textContent as string;
+  }
+
+  it('never prints what a failed lookup found', () => {
+    const text = render({
+      name: '_acme-challenge.shop.example.com',
+      status: 'undetermined',
+      found: 'query CNAME _acme-challenge.shop.example.com: dial udp 10.0.0.1:53: i/o timeout',
+    });
+    expect(text).not.toContain('i/o timeout');
+    expect(text).not.toContain('10.0.0.1');
+  });
+
+  it('prints the record in every state, green included, from the domain and not from a check', () => {
+    // Which record a domain needs is knowable without asking DNS anything (G2), so this is the
+    // same sentence on a deployment that never configured a verification resolver.
+    for (const status of ['correct', 'missing', 'not-checked'] as DelegationStatus[]) {
+      const text = render({ name: '_acme-challenge.shop.example.com', status });
+      expect(text).toContain('_acme-challenge.shop.example.com. IN CNAME shop-example-com.svc.example.net.');
+    }
+  });
+
+  it('keeps the deleted-and-re-added explanation for a record that points elsewhere', () => {
+    const text = render({ name: '_acme-challenge.shop.example.com', status: 'incorrect', found: 'old-alias.svc.example.net' });
+    expect(text).toContain('deleted and added again');
+    expect(text).toContain('old-alias.svc.example.net');
   });
 });

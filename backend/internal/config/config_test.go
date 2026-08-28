@@ -104,6 +104,39 @@ func TestNegativeDurationNamesTheSetting(t *testing.T) {
 	}
 }
 
+// TestObservationIntervalFloor is 12.14: certificate observation is unmetered
+// (design G17), so the hourly floor is the only thing bounding how often this
+// service dials a customer's machine, and it must be a refusal rather than a
+// silent clamp. 6h (the default) and 1h (the floor itself) are both accepted;
+// anything below 1h is refused and names ACME_OBSERVATION_INTERVAL.
+func TestObservationIntervalFloor(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"default six hours", "6h", false},
+		{"exactly the floor", "1h", false},
+		{"below the floor", "59m", true},
+		{"the value somebody would mistype for the floor", "5m", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withEnv(t, map[string]string{"ACME_OBSERVATION_INTERVAL": tc.value})
+			err := loadAndValidate(t)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "ACME_OBSERVATION_INTERVAL") {
+					t.Fatalf("expected an ACME_OBSERVATION_INTERVAL error for %s, got: %v", tc.value, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected %s to be accepted, got: %v", tc.value, err)
+			}
+		})
+	}
+}
+
 func TestInvalidCIDRNamesTheSetting(t *testing.T) {
 	withEnv(t, map[string]string{"ACME_TRUSTED_PROXY_CIDRS": "10.0.0.0/8,not-a-cidr"})
 	err := loadAndValidate(t)

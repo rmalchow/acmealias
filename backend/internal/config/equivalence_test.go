@@ -215,6 +215,14 @@ var settingsTheLegacyLoaderNeverHad = map[string]string{
 	"MailSMTPPass":              "added by transactional-email; the frozen loader predates the field",
 	"ActivationSettledInterval": "added by domain-activation task 2.4; the frozen loader predates the field",
 	"PostLogoutRedirectURL":     "added by the provider-logout change; the frozen loader predates the field",
+
+	// domain-diagnostics task 4.5. The frozen loader predates certificate
+	// observation entirely, so it has no opinion about any of these five.
+	"ObservationEnabled":              "added by domain-diagnostics task 4.5; the frozen loader predates the field",
+	"ObservationInterval":             "added by domain-diagnostics task 4.5; the frozen loader predates the field",
+	"ObservationHandshakeTimeout":     "added by domain-diagnostics task 4.5; the frozen loader predates the field",
+	"ObservationFullResolutionWindow": "added by domain-diagnostics task 4.5; the frozen loader predates the field",
+	"ObservationRetention":            "added by domain-diagnostics task 4.5; the frozen loader predates the field",
 }
 
 func diffConfig(want, got Config) []string {

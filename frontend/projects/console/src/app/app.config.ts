@@ -25,11 +25,15 @@ import {
   DownloadOutline,
   FilterOutline,
   KeyOutline,
+  LockOutline,
+  MailOutline,
+  SafetyCertificateOutline,
   LoginOutline,
   LogoutOutline,
   PlusOutline,
   ReloadOutline,
   SearchOutline,
+  SyncOutline,
   ShoppingCartOutline,
   TeamOutline,
   UserOutline,
@@ -75,12 +79,37 @@ export const appConfig: ApplicationConfig = {
       // The domain row's "acme-dns credentials" action, which is the one place a key is minted
       // from a screen that is not the key panel.
       KeyOutline,
+      // THESE THREE WERE MISSING AND TWO OF THEM HAD BEEN FOR A WHILE.
+      //
+      // An unregistered icon does not degrade — ng-zorro falls back to fetching
+      // the SVG at runtime, that fetch fails in a deployment with no route out,
+      // and `nz-icon` THROWS. The throw lands in the middle of change detection,
+      // which takes the rest of the view down with it: the reported symptom was
+      // that every delete button on the projects screen — node, domain and key
+      // revocation alike — stopped reaching the API at all, because the click
+      // handlers were on a view that never finished rendering.
+      //
+      // Nothing in the build catches this. `ng build` compiles the template
+      // happily, the specs render components whose icons never resolve, and the
+      // first thing that notices is a person clicking a button.
+      //
+      // `lock` (the sign-in prompt) and `mail` (an invitation card) had been
+      // unregistered since they were written; `safety-certificate` is the
+      // certificate action added with per-domain observation and is what made it
+      // visible, by putting a broken icon on a screen somebody uses constantly.
+      LockOutline,
+      MailOutline,
+      SafetyCertificateOutline,
       // The signed-out screen's one control.
       LoginOutline,
       LogoutOutline,
       PlusOutline,
       ReloadOutline,
       SearchOutline,
+      // Key rotation. antd publishes no `recycle` glyph; `sync` is the circular one, and it is
+      // deliberately not `reload` — that one is the Recheck button on the domains panel, and two
+      // different actions wearing the same glyph on the same screen is worse than either choice.
+      SyncOutline,
       ShoppingCartOutline,
       // The team account's glyph, in the picker's cards and the switcher (accountIcon in shared).
       TeamOutline,

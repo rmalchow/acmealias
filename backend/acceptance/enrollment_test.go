@@ -240,8 +240,24 @@ func enrolStep(client *http.Client, query string, payload map[string]string) (fl
 	// The GET first, for the same reason executeFlow does it: the executor plans
 	// the flow on the first request, and posting to a flow that has not been
 	// planned answers the plan rather than the submission.
-	if _, err := flowCall(client, http.MethodGet, ex, nil); err != nil {
+	shown, err := flowCall(client, http.MethodGet, ex, nil)
+	if err != nil {
 		return flowStep{}, err
+	}
+	// AND THE NONCE THAT CAME WITH IT GOES BACK.
+	//
+	// A consent challenge carries a `token` and refuses a submission that does
+	// not echo it. It is generated per RENDER, so it has to be taken from the
+	// GET immediately above rather than from whatever the caller last saw — an
+	// earlier one is stale by construction. A browser does this invisibly,
+	// because the value arrives as a hidden field in the form being submitted.
+	//
+	// Injected here rather than at each call site: every stage that grows a
+	// nonce would otherwise need the same three lines, and the failure when it
+	// is forgotten ("token: This field is required") reads like a broken flow
+	// rather than a missing echo — which is exactly how it was read once.
+	if shown.Token != "" && payload["token"] == "" {
+		payload["token"] = shown.Token
 	}
 	step, err := flowCall(client, http.MethodPost, ex, payload)
 	if err != nil {

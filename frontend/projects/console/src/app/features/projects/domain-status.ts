@@ -1,4 +1,4 @@
-import { CAAStatus, DelegationStatus, Domain, DomainCheck, VerificationResult } from '@acme/shared';
+import { CAAStatus, CertificateBand, DelegationStatus, Domain, DomainCheck, VerificationResult } from '@acme/shared';
 
 /**
  * What a domain's row says about its records.
@@ -23,6 +23,19 @@ export interface StatusChip {
 }
 
 /**
+ * What a DOT's tooltip says: the verdict, then the sentence behind it.
+ *
+ * A dot is labelled with the record TYPE and never with the verdict (design G3), so the word the
+ * chip carries has nowhere else to go — and it is worth keeping, because "configured incorrectly"
+ * ahead of the explanation is what makes a tooltip readable at a glance rather than a paragraph
+ * to parse. The activation chip beside the dots still renders its label, which is why this is a
+ * function here rather than a change to what the chips return.
+ */
+export function dotTitle(chip: StatusChip): string {
+  return `${chip.label} — ${chip.tooltip}`;
+}
+
+/**
  * This domain's answer, or null when none has arrived.
  *
  * Keyed by domain id and not by name: a wildcard and its apex share one challenge name, so the
@@ -35,9 +48,21 @@ export function domainCheckFor(domainId: string, v: VerificationResult | null): 
 }
 
 /**
- * The five delegation states (design D2). `not configured` and `configured incorrectly` are both
- * red because both mean no certificate, but they never share a word: one is a record to add, the
- * other a record that exists and points at the wrong place.
+ * The five delegation states (design D2), coloured by WHO IS IN THE MIDDLE OF WHAT (G4).
+ *
+ * `domain-setup-feedback` made `missing` and `incorrect` both red, on the grounds that both mean
+ * no certificate. That is still true, and it is not what the colour is for. `missing` is
+ * overwhelmingly somebody who added the domain five minutes ago and has not published the record
+ * yet — mid-task, doing the right thing, and it is the state every new domain passes through, so
+ * red tells them they have made a mistake they have not made. `incorrect` is a record that
+ * exists, looks finished, and will never work: it does not self-heal, nobody is coming back to
+ * it, and it costs a certificate six weeks later. That one is red.
+ *
+ * THE RISK IS STATED RATHER THAN MITIGATED: a domain sitting at yellow for three weeks is
+ * genuinely broken and yellow understates it. What catches that is the activation chip beside
+ * these dots, which reads "waiting for delegation · Not looked at yet" and does not soften with
+ * time. Ageing yellow into red after some interval is a change to this one function, and is not
+ * made now because the interval would be invented rather than measured.
  */
 export function delegationChip(status: DelegationStatus, hasAlias = true): StatusChip {
   switch (status) {
@@ -50,7 +75,7 @@ export function delegationChip(status: DelegationStatus, hasAlias = true): Statu
     case 'missing':
       return {
         label: 'not configured',
-        colour: 'red',
+        colour: 'orange',
         tooltip: 'Nothing resolves at the challenge name. The CNAME has not been published yet.',
       };
     case 'incorrect':
@@ -87,9 +112,15 @@ export function delegationChip(status: DelegationStatus, hasAlias = true): Statu
  * CAA by what it permits (design D3).
  *
  * `not-published` is the commonest state and is entirely correct — absent CAA means anyone may
- * issue — so it is neutral blue and reads as an absence of restriction, never as an absence of
- * configuration. `blocking` is the only bad one, and it stops issuance no matter how perfect the
- * delegation is.
+ * issue — so it reads as an absence of restriction, never as an absence of configuration.
+ * `blocking` is the only bad one, and it stops issuance no matter how perfect the delegation is.
+ *
+ * It was BLUE, and blue was the best a chip could do: a chip carries a word, and `correct` and
+ * `not-published` are not the same fact, so the two could not share a colour without the label
+ * lying about one of them. A DOT carries no word. The two states keep their own sentences in the
+ * tooltip — "authorises us", "no restriction" — and share the green, because they are the same
+ * INSTRUCTION, which is do nothing, and that is what a dot is for (G5). On a three-colour scale
+ * blue means "unclear" to everybody who has not read the tooltip.
  */
 export function caaChip(status: CAAStatus): StatusChip {
   switch (status) {
@@ -105,7 +136,7 @@ export function caaChip(status: CAAStatus): StatusChip {
     case 'not-published':
       return {
         label: 'no restriction',
-        colour: 'blue',
+        colour: 'green',
         tooltip:
           'No CAA record is published for this name, which is the default state of the internet: any authority may issue. Nothing to do.',
       };
@@ -127,6 +158,80 @@ export function caaChip(status: CAAStatus): StatusChip {
         label: 'not checked',
         colour: 'default',
         tooltip: 'We have not looked yet. This is not a statement about your DNS.',
+      };
+  }
+}
+
+/**
+ * The certificate dot, from the band the SERVICE computed (design G9).
+ *
+ * This switches on a string and computes nothing. The thresholds — 28 days and 7 — live in
+ * `internal/certobserve` and reach the console banded, so that a console and an `adminctl` cannot
+ * disagree about the same certificate because one of them was updated and the other was not.
+ * NEVER band a `notAfter` here; there is no clock in this file for a reason.
+ *
+ * A FAILED HANDSHAKE IS GREY, NOT RED. It is the one place our own probe's failure meets a colour
+ * scale, and red would claim the customer's node is broken when we cannot tell that apart from
+ * our transit, their firewall dropping our source address, or a listener that is simply not on
+ * 443 (G9). Grey says "we could not look", which is the only thing we know; the dialog carries
+ * the address that failed, and the observation is recorded, so a run of failures shows up in the
+ * history rather than as an absence.
+ *
+ * `uncovered` is red and is the most valuable red in this change: a certificate read perfectly
+ * that does not cover the name we asked for is the "issued and never deployed" failure, the
+ * "deployed to two nodes out of four" failure, and the "covers the names you had last month"
+ * failure — every one of which the challenge history reports as a success.
+ */
+export function certificateChip(band: CertificateBand): StatusChip {
+  switch (band) {
+    case 'healthy':
+      return {
+        label: 'valid',
+        colour: 'green',
+        tooltip: 'Every address we reached served a certificate covering this name with more than 28 days left.',
+      };
+    // The upper edge is 28 days and not 30 because every ACME client renews at 30 by default: a
+    // certificate with 29 days left has just been told to renew and has not yet, which is exactly
+    // when this band starts being informative.
+    case 'approaching':
+      return {
+        label: 'renewing soon',
+        colour: 'orange',
+        tooltip: 'A certificate has between 7 and 28 days left. Renewal is due and has not happened yet.',
+      };
+    case 'urgent':
+      return {
+        label: 'expires very soon',
+        colour: 'red',
+        tooltip: 'A certificate has less than 7 days left. Renewal should have happened by now.',
+      };
+    case 'expired':
+      return {
+        label: 'expired',
+        colour: 'red',
+        tooltip: 'A certificate we read has already expired. Visitors are seeing a browser warning.',
+      };
+    case 'uncovered':
+      return {
+        label: 'does not cover this name',
+        colour: 'red',
+        tooltip:
+          'A certificate was served and does not include the name we asked for, so it is refused by every client whatever its remaining life.',
+      };
+    case 'unexamined':
+      return {
+        label: 'could not look',
+        colour: 'default',
+        // Never a verdict on their machine: we cannot tell a node that is down from our own
+        // transit or a firewall that drops us (G9).
+        tooltip:
+          'We could not complete a handshake with at least one address. This says nothing about whether your node is working — open the dot for which address and how it failed.',
+      };
+    default:
+      return {
+        label: 'not observed yet',
+        colour: 'default',
+        tooltip: 'Nothing has been observed for this domain yet. The first pass runs within the observation interval.',
       };
   }
 }

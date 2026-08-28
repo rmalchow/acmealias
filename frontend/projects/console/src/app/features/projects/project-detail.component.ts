@@ -6,23 +6,31 @@ import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
-import { NzMessageService } from 'ng-zorro-antd/message';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAAStatus, CAN_WRITE, CAN_WRITE_KEYS, CheckResult, DNSPlan, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
+import { ApiService, CAAStatus, CAN_WRITE, CertificateState, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
 import { InteractionsPanelComponent } from './interactions-panel.component';
 import { openNodeCreateModal } from './node-create.modal';
 import { openNodeEditModal } from './node-edit.modal';
-import { openDomainHelpModal } from './domain-help.modal';
-import { openAcmeDnsCredentialsModal } from '../domains/acmedns-credentials.modal';
-import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } from './domain-status';
+import { openDelegationHelpModal } from './delegation-help.modal';
+import { openCaaHelpModal } from './caa-help.modal';
+import { openCertificateModal } from './certificate.modal';
+import { openDomainSettings } from '../domains/domain-settings.modal';
+import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, domainCheckFor, dotTitle } from './domain-status';
 
 /**
- * A project: its nodes, its domain table, the DNS plan panel (records, live verification, copy
- * and zone-snippet download), the API keys panel, and the reporting the project level always
- * had — usage over time.
+ * A project: its nodes, its domain table, the API keys panel, and the reporting the project level
+ * always had — usage over time.
+ *
+ * THE DNS PLAN PANEL IS GONE (design G2), and with it the record table, the zone-snippet
+ * download, `Copy records` and `Run verification`. It described the whole project as a record set
+ * and then joined back onto the domain rows by NAME, which is the indirection that made a
+ * per-domain answer hard to give in the first place. Everything it carried is on the domain row
+ * now: the CNAME target and the expected CAA entries come with the domain read, and the dots say
+ * what is true of each. The two endpoints behind it no longer exist, so nothing here may call
+ * them.
  *
  * This is the merge of two screens (change collapse-project-and-loadbalancer, design L6), and
  * the asymmetry is worth naming because it decided the shape: the load balancer screen was the
@@ -86,10 +94,15 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
       >
         <thead>
           <tr>
-            <th nzWidth="12rem">Label</th>
-            <th>IPv4</th>
-            <th>IPv6</th>
-            <th nzWidth="6rem"></th>
+            <!-- TWELFTHS, and the same twelfths the Domains table below uses, so the two tables
+                 share a rhythm instead of each finding its own: 2 / 3 / 6 / 1 here against
+                 2 / 3 / 2 / 2 / 2 / 1 there, which puts a column boundary at the same place on
+                 both at 2, 5 and 11. Percentages rather than rem because the tables are the full
+                 width of the page and rem stops tracking it the moment the window changes. -->
+            <th nzWidth="16.6667%">Label</th>
+            <th nzWidth="25%">IPv4</th>
+            <th nzWidth="50%">IPv6</th>
+            <th nzWidth="8.3333%"></th>
           </tr>
         </thead>
         <tbody>
@@ -134,6 +147,30 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
     <section>
       <div class="panel-head">
         <h2>Domains</h2>
+        <!--
+          RECHECK IS ONE BUTTON BECAUSE IT WAS ALWAYS ONE ACTION. It used to sit on every row,
+          which read as "check this domain" — and it never was: the control posts
+          /projects/:id/verification, which looks up every domain in the project and records what
+          it saw for all of them. A per-row button for a whole-project action is a promise the
+          code does not keep, and it also put a spinner on one row while the others changed
+          underneath it.
+
+          Outline rather than primary: the primary action on this panel is adding a domain. This
+          one is a refresh, and two filled buttons side by side make neither of them the answer to
+          "what do I do here".
+        -->
+        <button
+          nz-button
+          nzSize="small"
+          [nzLoading]="verifying()"
+          [disabled]="!project()?.domains?.length"
+          nz-tooltip
+          nzTooltipTitle="Look up every domain's delegation and CAA now, and record what we see"
+          (click)="checkNow()"
+        >
+          <span nz-icon nzType="reload"></span>
+          Recheck
+        </button>
         <button
           nz-button
           nzType="primary"
@@ -158,12 +195,16 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
       >
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Challenge name</th>
-            <th nzWidth="12rem">Alias</th>
-            <th nzWidth="16rem">Challenges</th>
-            <th nzWidth="18rem">Validation</th>
-            <th nzWidth="5rem"></th>
+            <th nzWidth="16.6667%">Name</th>
+            <th nzWidth="25%">Challenge name</th>
+            <th nzWidth="16.6667%">Alias</th>
+            <!-- Two twelfths now the cell holds one badge. It was 16rem when it also carried a
+                 timestamp and a button. -->
+            <th nzWidth="16.6667%">Challenges</th>
+            <!-- Three dots and their type names, not three labelled chips: the column was 18rem
+                 of mostly whitespace, and the width no longer depends on what the verdicts say. -->
+            <th nzWidth="16.6667%">Validation</th>
+            <th nzWidth="8.3333%"></th>
           </tr>
         </thead>
         <tbody>
@@ -177,71 +218,68 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
                    two disagree for a few minutes after somebody publishes the record, and that
                    gap is exactly what the check-now button below is for (task 4.3). -->
               <td>
+                <!--
+                  THE BADGE ALONE. This cell also carried a "Last looked / Last seen" timestamp
+                  and a Check now button, and both moved rather than went: the button is the
+                  Recheck control above, because it always acted on every domain rather than on
+                  this row, and the timestamp is in the badge's tooltip, where it answers the
+                  question it always answered — how long has this been true — without spending a
+                  line of every row on a date most rows never need.
+                -->
                 @if (activation(d); as act) {
-                  <nz-tag [nzColor]="act.colour" nz-tooltip [nzTooltipTitle]="act.tooltip">{{ act.label }}</nz-tag>
-                }
-                <p class="ac-hint stamp">
-                  @if (d.lastSuccessAt && stoppedResolving(d)) {
-                    <!-- "Since when", never "how many failures": the question anybody actually
-                         asks is how long this has been true, and the timestamp answers it exactly
-                         (design A1). No deadline is stated because there is none — nothing is
-                         ever switched off for this (A3). -->
-                    Last seen {{ d.lastSuccessAt | date: 'medium' }}
-                  } @else if (d.lastCheckedAt) {
-                    Last looked {{ d.lastCheckedAt | date: 'medium' }}
-                  } @else {
-                    Not looked at yet
-                  }
-                </p>
-                <!-- Offered in BOTH states a check can change: a domain that has never been seen,
-                     and one whose delegation has stopped resolving. The second is the state
-                     somebody has just fixed — they republished the CNAME and want the row to say
-                     so — and gating on "never seen" alone left exactly that person with no
-                     way to ask, waiting out the settled cadence for a chip to go green. Nothing
-                     is at risk in pressing it: a check that fails records only that we looked
-                     (A3). -->
-                @if (canCheckNow(d)) {
-                  <button nz-button nzType="link" nzSize="small" class="explain" [nzLoading]="verifying()" (click)="checkNow()">
-                    Check now
-                  </button>
+                  <nz-tag [nzColor]="act.colour" nz-tooltip [nzTooltipTitle]="act.tooltip + lookedAt(d)">{{ act.label }}</nz-tag>
                 }
               </td>
+              <!-- A dot per record type this domain HAS: a filled circle, the type beside it, the
+                   verdict in the tooltip, and a click that opens the dialog for that type alone
+                   (G3). The label is the record TYPE and never the verdict — a label reading
+                   "configured incorrectly" makes a row's width depend on how broken it is, and a
+                   table whose columns move as state changes is a table nobody can scan.
+
+                   A type this domain does not have gets NO dot rather than a grey one: CAA with
+                   no issuer configured, TLS with the switch off. A grey dot would claim we meant
+                   to look. And every dot is clickable, green included — a control that appears
+                   only when something is wrong teaches people to read its presence as an alarm. -->
               <td>
                 @if (checks(d); as ch) {
-                  <div class="check">
-                    <span class="check-label">Delegation</span>
-                    <nz-tag [nzColor]="ch.delegation.colour" nz-tooltip [nzTooltipTitle]="ch.delegation.tooltip">
-                      {{ ch.delegation.label }}
-                    </nz-tag>
+                  <div class="dots">
+                    <button type="button" class="dot-btn" nz-tooltip [nzTooltipTitle]="title(ch.delegation)" (click)="explainDelegation(d)">
+                      <span class="dot" [class]="'dot-' + ch.delegation.colour"></span>
+                      CNAME
+                    </button>
+                    @if (ch.caa; as caa) {
+                      <button type="button" class="dot-btn" nz-tooltip [nzTooltipTitle]="title(caa)" (click)="explainCaa(d)">
+                        <span class="dot" [class]="'dot-' + caa.colour"></span>
+                        CAA
+                      </button>
+                    }
+                    @if (ch.tls; as tls) {
+                      <button type="button" class="dot-btn" nz-tooltip [nzTooltipTitle]="title(tls)" (click)="explainCertificate(d)">
+                        <span class="dot" [class]="'dot-' + tls.colour"></span>
+                        TLS
+                      </button>
+                    }
                   </div>
-                  @if (ch.caa; as caa) {
-                    <div class="check">
-                      <span class="check-label">CAA</span>
-                      <nz-tag [nzColor]="caa.colour" nz-tooltip [nzTooltipTitle]="caa.tooltip">{{ caa.label }}</nz-tag>
-                    </div>
-                  }
-                  <button nz-button nzType="link" nzSize="small" class="explain" (click)="explain(d)">
-                    What does this mean?
-                  </button>
                 }
               </td>
               <td class="row-actions">
                 <!--
-                  What acme-dns's unauthenticated POST /register does elsewhere, done here by
-                  somebody who is already authorized. It mints a key, so it is gated on the same
-                  permission the key panel is, not on the one that reads this table.
+                  NO acme-dns CREDENTIALS ACTION HERE. It used to sit at the head of this cell and
+                  mint a key bound to the domain, which put "create a credential" in the middle of
+                  a table people read to see whether their DNS is right. Minting belongs where the
+                  other keys are minted; a domain row is for looking at a domain.
                 -->
                 <button
                   nz-button
                   nzType="text"
                   nzSize="small"
-                  [disabled]="!canWriteKeys()"
+                  [disabled]="!canWrite()"
                   nz-tooltip
-                  [nzTooltipTitle]="canWriteKeys() ? 'acme-dns credentials for this domain' : NOT_PERMITTED"
-                  aria-label="acme-dns credentials"
-                  (click)="acmeDnsCredentials(d)"
+                  [nzTooltipTitle]="canWrite() ? 'Observation settings' : NOT_PERMITTED"
+                  aria-label="Observation settings"
+                  (click)="domainSettings(d)"
                 >
-                  <span nz-icon nzType="key"></span>
+                  <span nz-icon nzType="safety-certificate"></span>
                 </button>
                 <button
                   nz-button
@@ -261,79 +299,15 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
           }
         </tbody>
       </nz-table>
+
+      <!-- A failure somebody PRESSED for. It used to sit under the plan panel, which is where the
+           button was; the button is on the row now, and the banner follows it rather than the
+           panel it outlived. A check nobody asked for still gets no banner (design D1) — it
+           degrades the dots it concerns and never the page. -->
+      @if (verifyError(); as msg) {
+        <nz-alert nzType="error" [nzMessage]="msg" nzShowIcon />
+      }
     </section>
-
-    @if (plan(); as pl) {
-      <section>
-        <div class="panel-head">
-          <h2>DNS plan</h2>
-          <button nz-button nzSize="small" (click)="copyPlan(pl)">
-            <span nz-icon nzType="copy"></span>
-            Copy records
-          </button>
-          <a
-            nz-button
-            nzSize="small"
-            [href]="zoneHref()"
-            target="_blank"
-            rel="noopener"
-          >
-            <span nz-icon nzType="download"></span>
-            Zone snippet
-          </a>
-          <button nz-button nzType="primary" nzSize="small" [nzLoading]="verifying()" (click)="checkNow()">
-            Run verification
-          </button>
-        </div>
-
-        <nz-table
-          class="ac-table"
-          nzSize="small"
-          nzBordered
-          [nzData]="pl.records"
-          [nzShowPagination]="false"
-        >
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th nzWidth="6rem">Type</th>
-              <th nzWidth="5rem">TTL</th>
-              <th>Value</th>
-              <th nzWidth="10rem">Status</th>
-              <th>Found</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (r of pl.records; track r.name + r.type + r.value) {
-              <tr>
-                <td>{{ r.name }}</td>
-                <td>{{ r.type }}</td>
-                <td>{{ r.ttl }}</td>
-                <td class="ac-mono">{{ r.value }}</td>
-                <td>
-                  @if (statusFor(r.name, r.type); as s) {
-                    <nz-tag [nzColor]="statusColour(s.status)">{{ s.status }}</nz-tag>
-                  } @else {
-                    <span class="ac-hint">not checked yet</span>
-                  }
-                </td>
-                <td class="ac-mono">{{ foundFor(r.name, r.type) }}</td>
-              </tr>
-            }
-          </tbody>
-        </nz-table>
-
-        <p class="ac-hint">
-          A CAA row of “not-published” is informational, not an error: an absent CAA record is the
-          default state of the internet and blocks nothing. A CAA record naming a different issuer
-          is the one CAA failure that matters.
-        </p>
-
-        @if (verifyError(); as msg) {
-          <nz-alert nzType="error" [nzMessage]="msg" nzShowIcon />
-        }
-      </section>
-    }
 
     @if (project(); as p) {
       <section>
@@ -364,37 +338,79 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
         margin-bottom: 2rem;
       }
       .panel-head {
+        /* THE HEADING LEFT, THE CONTROLS RIGHT — and margin-left:auto on whatever follows the
+           heading rather than justify-content:space-between, because a panel with TWO buttons
+           has three children and space-between would spread all three, parking one button in the
+           middle of the row. The auto margin takes up the slack once, so every control after the
+           heading stays a group at the right edge.
+
+           Why it matters at all: with gap alone the buttons sat against the end of the heading,
+           so their position moved with the length of a word — "Domains" and "Recent interactions"
+           put their buttons in different places on the same page, and a reader looking for the
+           button on the next panel down had to find it again. The right edge does not move. */
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        margin-bottom: 0.5rem;
+        /* A few pixels more, so the heading row reads as a label for the table below rather
+           than as part of its header row. */
+        margin-bottom: 0.75rem;
+      }
+      /* Everything after the heading goes right, as a group: on the Domains panel that is BOTH
+         buttons — Recheck and Add domain — with their gap preserved between them. Targeting the
+         second child rather than the buttons by name means a panel that gains a third control
+         needs no new rule. */
+      .panel-head > :nth-child(2) {
+        margin-inline-start: auto;
       }
       h2 {
         margin: 0 0.5rem 0 0;
         font-size: 1.125rem;
         font-weight: 500;
       }
-      /* A chip per record type, each labelled, because the two answer different questions on
-       * different axes: whether the delegation is published, and what CAA permits (design D3). */
-      .check {
+      /* A dot per record type, on one line (design G3). Each is a real <button>, so the keyboard
+       * and a screen reader reach it the same way the mouse does — a clickable <span> is a
+       * control only for people using a pointer. */
+      .dots {
         display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
-        margin-bottom: 0.25rem;
+        align-items: center;
+        gap: 0.75rem;
       }
-      .check-label {
-        width: 5.5rem;
-        color: var(--ac-muted);
-        font-size: 0.8125rem;
-      }
-      .explain {
+      .dot-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
         padding: 0;
-        height: auto;
+        border: 0;
+        background: none;
+        font: inherit;
+        font-size: 0.8125rem;
+        color: var(--ac-muted);
+        cursor: pointer;
       }
-      /* When we last looked, under the chip that says what we found. Small and quiet: it is
-       * context for the chip, not a second verdict. */
-      .stamp {
-        margin: 0.25rem 0 0;
+      .dot-btn:hover,
+      .dot-btn:focus-visible {
+        color: inherit;
+      }
+      .dot {
+        width: 0.625rem;
+        height: 0.625rem;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      /* The three colours and grey, and grey is "we did not look" rather than "this is fine".
+       * Falling back to literals because a deployment that has not defined these tokens would
+       * otherwise render four invisible dots, which is worse than four wrong ones. */
+      .dot-green {
+        background: var(--ac-ok, #52c41a);
+      }
+      .dot-orange {
+        background: var(--ac-warn, #fa8c16);
+      }
+      .dot-red {
+        background: var(--ac-error, #f5222d);
+      }
+      .dot-default {
+        background: var(--ac-line, #d9d9d9);
       }
       /* Row actions are icons only — the label is in the tooltip and the aria-label, so a table
        * of twenty rows is not twenty repetitions of the word "Delete". */
@@ -407,22 +423,21 @@ import { StatusChip, activationChip, caaChip, delegationChip, domainCheckFor } f
 export class ProjectDetailComponent implements OnChanges {
   private readonly api = inject(ApiService);
   private readonly modal = inject(NzModalService);
-  private readonly message = inject(NzMessageService);
   private readonly session = inject(SessionService);
 
   readonly id = input.required<string>();
 
-  /**
-   * The zone snippet is fetched by the browser rather than by HttpClient — it is a download, not
-   * a request the app renders — so it needs the full path, account and all. Building it here
-   * keeps the one place that knows the URL shape next to the one that knows the account.
-   */
-  protected zoneHref(): string {
-    return `/api/v1/accounts/${this.api.currentAccount()}/projects/${this.id()}/plan/zone`;
-  }
-
   readonly project = signal<Project | null>(null);
-  readonly plan = signal<DNSPlan | null>(null);
+  /**
+   * What was observed on the wire, per domain, keyed by domain id.
+   *
+   * One request per domain WITH THE SWITCH ON and none for the rest, which is what keeps this
+   * from being a request per row: observation is opt-in, and a project where nobody has turned it
+   * on makes no extra call at all. A domain still loading is simply absent from the map, and the
+   * dot reads "not observed yet" until it arrives — the same thing it says for a switch turned on
+   * a minute ago, and the same instruction, which is to wait.
+   */
+  readonly certificates = signal<Record<string, CertificateState>>({});
   readonly verification = signal<VerificationResult | null>(null);
   readonly verifying = signal(false);
   readonly verifyError = signal<string | null>(null);
@@ -437,24 +452,10 @@ export class ProjectDetailComponent implements OnChanges {
   readonly checkFailed = signal(false);
   readonly error = signal<string | null>(null);
 
-  /**
-   * What this caller may do to THIS project, as the service reported it with the row.
-   *
-   * It used to be a role-name test, which could only ever answer "may this person write
-   * anything, anywhere" — the question the permission model exists to stop asking. A caller
-   * granted one project and not another now sees the right controls on each.
-   *
-   * Until the row arrives the answer is no, which renders a read-only screen for an instant
-   * rather than a set of buttons that turn out to be refused.
-   */
-  readonly canWrite = computed(() => may(this.project(), CAN_WRITE));
-  /**
-   * Minting an acme-dns credentials file mints a KEY, so it is gated on the key permission and
-   * not on the one that edits the inventory. They differ: KEY_ROTATION rotates secrets and may
-   * not add a domain, and the whole point of that role is that the two are separable.
-   */
-  readonly canWriteKeys = computed(() => may(this.project(), CAN_WRITE_KEYS));
   protected readonly NOT_PERMITTED = NOT_PERMITTED;
+
+  /** Whether this session may change this project's inventory — nodes and domains. */
+  readonly canWrite = computed(() => may(this.project(), CAN_WRITE));
 
   readonly subtitle = () => {
     const p = this.project();
@@ -470,8 +471,8 @@ export class ProjectDetailComponent implements OnChanges {
     // somebody else's DNS.
     this.verification.set(null);
     this.checkFailed.set(false);
+    this.certificates.set({});
     this.load();
-    this.loadPlan();
     // Opening the screen asks the question (design D1). It was a button below the table whose
     // rows it explained, so a customer who mistyped a CNAME read "never validated" — which
     // sounds like "nothing has happened yet" and means "this will never work". The check stores
@@ -483,16 +484,35 @@ export class ProjectDetailComponent implements OnChanges {
     // One request where there were two. The project read carries its own domains now, so the
     // second call that fetched the parent's name for a breadcrumb has nothing left to fetch.
     this.api.get<Project>(`/projects/${this.id()}`).subscribe({
-      next: (p) => this.project.set(p),
+      next: (p) => {
+        this.project.set(p);
+        this.loadCertificates(p);
+      },
       error: (err) => this.error.set(apiErrorMessage(err)),
     });
   }
 
-  private loadPlan(): void {
-    this.api.get<DNSPlan>(`/projects/${this.id()}/plan`).subscribe({
-      next: (p) => this.plan.set(p),
-      error: (err) => this.error.set(apiErrorMessage(err)),
-    });
+  /**
+   * What each observed domain's dot is coloured by.
+   *
+   * A FAILURE HERE IS SILENT. The state read is one request per observed domain and it colours a
+   * dot; a banner for it would put the whole screen into an error state because one dot could not
+   * be filled in, and the dot already has an honest answer for "we do not know", which is grey.
+   * The screen is reused across ids, so a late answer is dropped rather than painted onto another
+   * project's rows.
+   */
+  private loadCertificates(p: Project): void {
+    const asked = this.id();
+    for (const d of p.domains ?? []) {
+      if (!d.observeTls) continue;
+      this.api.get<CertificateState>(`/domains/${d.id}/certificate`).subscribe({
+        next: (s) => {
+          if (this.id() !== asked) return;
+          this.certificates.update((m) => ({ ...m, [d.id]: s }));
+        },
+        error: () => undefined,
+      });
+    }
   }
 
   /**
@@ -533,8 +553,8 @@ export class ProjectDetailComponent implements OnChanges {
   private runCheck(record: boolean): void {
     // The screen is reused across ids and this request now takes as long as DNS does, so an
     // answer can arrive after somebody has navigated to another project. Dropping it is the
-    // whole fix: the plan table joins its rows by NAME, so a late answer for the previous
-    // project would annotate this one's rows wherever the two share a name.
+    // whole fix: an answer that arrives for the project somebody has just left would otherwise
+    // colour the dots of the one they are looking at now.
     const asked = this.id();
     // Only a press spins the button. The automatic pass used to set it too, so every screen open
     // showed a spinner on a control nobody had touched — which reads as if something were
@@ -565,43 +585,6 @@ export class ProjectDetailComponent implements OnChanges {
     });
   }
 
-  statusFor(name: string, type: string): CheckResult | undefined {
-    return this.verification()?.results.find((r) => r.name === name && r.type === type);
-  }
-
-  /** The states the verifier can report, coloured by what they mean for the operator. */
-  statusColour(status: string): string {
-    switch (status) {
-      case 'correct':
-        return 'green';
-      case 'missing':
-      case 'incorrect':
-      // A CAA set that names somebody else stops issuance however perfect the delegation is, so
-      // it is red here as well as in the chips. It used to fall through to grey, which put the
-      // one blocking state in the same colour as "not checked" (design D3).
-      case 'blocking':
-        return 'red';
-      case 'not-published':
-        return 'blue';
-      default:
-        return 'default';
-    }
-  }
-
-  /**
-   * What was found for a plan row, and never why a lookup failed.
-   *
-   * `found` on `undetermined` is our resolver's error text — an address and a transport failure,
-   * written for an operator. Rendering it verbatim reads as a verdict on the customer's zone when
-   * it is a verdict on our lookup, and this table is now painted on every screen open rather than
-   * only when somebody pressed the button (design D4).
-   */
-  foundFor(name: string, type: string): string {
-    const s = this.statusFor(name, type);
-    if (!s || s.status === 'undetermined') return '—';
-    return s.found || '—';
-  }
-
   /**
    * What the service will actually do for this domain, from the state it has stored (design
    * domain-activation A1). Deliberately not derived from the live check beside it: `/present`
@@ -610,6 +593,29 @@ export class ProjectDetailComponent implements OnChanges {
    */
   activation(d: Domain): StatusChip {
     return activationChip(d);
+  }
+
+  /**
+   * When we last looked, as a line appended to the activation chip's tooltip.
+   *
+   * It used to be a paragraph under the chip on every row. That spent a line of vertical space in
+   * every row on a date that matters for the few rows where something is wrong, and it made the
+   * row height depend on whether a domain had ever been checked — so a table of ten domains had
+   * two different row heights for no reason a reader could name.
+   *
+   * The wording is unchanged and so is the reasoning behind it: "since when", never "how many
+   * failures", because the question anybody actually asks is how long this has been true and the
+   * timestamp answers it exactly (design A1). No deadline is stated, because there is none —
+   * nothing is ever switched off for this (A3).
+   */
+  lookedAt(d: Domain): string {
+    if (d.lastSuccessAt && this.stoppedResolving(d)) {
+      return `\nLast seen ${new Date(d.lastSuccessAt).toLocaleString()}`;
+    }
+    if (d.lastCheckedAt) {
+      return `\nLast looked ${new Date(d.lastCheckedAt).toLocaleString()}`;
+    }
+    return '\nNot looked at yet';
   }
 
   /**
@@ -625,54 +631,55 @@ export class ProjectDetailComponent implements OnChanges {
   }
 
   /**
-   * Whether this row offers **Check now** — true in both states a check can change.
+   * A dot per record type this domain HAS (design G3).
    *
-   * "Waiting" is the obvious one: the customer has just published the record and does not want to
-   * wait out the poller. "Not resolving" is the one that was missing, and it is the same person a
-   * day later: they broke the delegation, saw the orange chip, fixed it, and had no way to say
-   * so. Without this they wait out the settled cadence — a day — for a chip to go green.
-   *
-   * An "active" row offers nothing, because there is nothing a check could tell it that it does
-   * not already say. Pressing it anywhere is safe regardless: a check that fails to see a
-   * delegation records only that we looked, and never takes a domain offline (design A3).
+   * Null is "no dot at all", never a grey one. CAA appears only where an issuer is configured for
+   * the deployment — the domain says so by carrying `expectedCaa`, so this is answerable without
+   * a check having run, and with no issuer there is nothing to authorise and so nothing about CAA
+   * that is true or false here. TLS appears only where somebody turned the switch on: we have not
+   * connected to anything, and a grey dot would claim we meant to.
    */
-  canCheckNow(d: Domain): boolean {
-    return !d.lastSuccessAt || this.stoppedResolving(d);
-  }
-
-  /**
-   * A chip per record type for one row. CAA is rendered only where the server sent one: with no
-   * issuer configured there is no CAA row in the plan, and so nothing about CAA is true or false
-   * for this domain — saying "not checked" there would claim we meant to look.
-   */
-  checks(d: Domain): { delegation: StatusChip; caa: StatusChip | null } {
+  checks(d: Domain): { delegation: StatusChip; caa: StatusChip | null; tls: StatusChip | null } {
     const a = this.answerFor(d);
     return {
       // Whether this domain has an alias at all is known from the row itself, not from the
-      // check: without one there is no target, nothing is ever asked, and the chip would sit at
+      // check: without one there is no target, nothing is ever asked, and the dot would sit at
       // "not checked" forever unless it says why.
       delegation: delegationChip(a.delegation.status, !!d.aliasLabel),
-      caa: a.caa ? caaChip(a.caa.status) : null,
+      caa: d.expectedCaa?.length ? caaChip(a.caa?.status ?? (this.checkFailed() ? 'undetermined' : 'not-checked')) : null,
+      // The band is the SERVICE's (G9). A domain whose state has not arrived is `unobserved`,
+      // which is the same grey and the same instruction as one whose first pass has not run.
+      tls: d.observeTls ? certificateChip(this.certificate(d)?.band ?? 'unobserved') : null,
     };
   }
 
+  /** A dot's tooltip: the verdict, then the sentence behind it. The dot itself carries no word. */
+  title(chip: StatusChip): string {
+    return dotTitle(chip);
+  }
+
+  /** What was observed for this domain, or null while the read is in flight or has failed. */
+  certificate(d: Domain): CertificateState | null {
+    return this.certificates()[d.id] ?? null;
+  }
+
   /**
-   * This row's answer for both record types, or the state we are in when none arrived.
+   * This row's answer for both DNS record types, or the state we are in when none arrived.
    *
    * Three things are folded together here on purpose:
    *
-   *   - The expected target comes from the plan when no answer has arrived, which is what lets
-   *     the help modal print the record to publish on a deployment that never configured a
-   *     resolver: which record a domain needs is known without asking DNS anything.
    *   - A request that FAILED is "could not check" — we looked and could not. One still in
    *     flight, or a deployment without a resolver, is "not checked": we have not looked, and
    *     that must never read as a fault in the customer's setup (design D4).
    *   - A failed re-check degrades an answer we already have rather than leaving it standing.
-   *     The previous answer is kept only for its SHAPE — which record types this domain has, and
-   *     what its target is — because the alternative is the CAA chip vanishing from a row that
-   *     said "blocks us" a second ago. Its statuses are not kept: an answer we could not refresh
-   *     is not an answer, and chips that go on asserting one while the page says the check failed
-   *     are two claims about the same moment.
+   *     The previous answer is kept only for its SHAPE — which record types this domain has —
+   *     because the alternative is the CAA dot vanishing from a row that said "blocks us" a
+   *     second ago. Its statuses are not kept: an answer we could not refresh is not an answer.
+   *   - THE TARGET IS NOT IN HERE ANY MORE. It used to be dug out of the project's DNS plan by
+   *     matching the challenge name, so a dialog opened before the plan arrived could not say
+   *     what to publish. It is a field on the domain now (task 11.2), which the dialogs read
+   *     directly — which record a domain needs is knowable without asking DNS anything, and this
+   *     is what keeps it that way.
    */
   private answerFor(d: Domain): { delegation: RecordCheck<DelegationStatus>; caa: RecordCheck<CAAStatus> | null } {
     const answered = domainCheckFor(d.id, this.verification());
@@ -683,40 +690,47 @@ export class ProjectDetailComponent implements OnChanges {
         caa: answered.caa ? (failed ? { ...answered.caa, status: 'undetermined' } : answered.caa) : null,
       };
     }
-    const planned = this.plan()?.records.find((r) => r.type === 'CNAME' && r.name === d.challengeName);
     return {
-      delegation: {
-        name: d.challengeName,
-        status: failed ? 'undetermined' : 'not-checked',
-        expected: planned ? [planned.value] : undefined,
-      },
+      delegation: { name: d.challengeName, status: failed ? 'undetermined' : 'not-checked' },
       caa: null,
     };
   }
 
-  /** The prescription behind the chips, carrying this domain's own values (design D5). */
-  explain(d: Domain): void {
-    const a = this.answerFor(d);
-    openDomainHelpModal(this.modal, { domain: d, delegation: a.delegation, caa: a.caa });
+  /**
+   * The three dialogs behind the three dots (design G7).
+   *
+   * One per record type, because a single dialog covering all of them has to lead with a section
+   * the reader did not click on. Each carries THIS domain's own values: the general instructions
+   * are in `docs/`, and what is missing at the moment somebody is confused is their own value,
+   * which a documentation page cannot know.
+   */
+  explainDelegation(d: Domain): void {
+    openDelegationHelpModal(this.modal, { domain: d, delegation: this.answerFor(d).delegation });
   }
 
-  copyPlan(p: DNSPlan): void {
-    const text = p.records.map((r) => `${r.name}\t${r.ttl}\tIN\t${r.type}\t${r.value}`).join('\n');
-    navigator.clipboard?.writeText(text).then(
-      () => this.message.success('DNS records copied'),
-      () => {
-        // Clipboard access can be denied by the browser; the zone-snippet download is the fallback.
-        this.message.error('The browser refused clipboard access — use the zone snippet instead.');
+  explainCaa(d: Domain): void {
+    openCaaHelpModal(this.modal, { domain: d, caa: this.answerFor(d).caa });
+  }
+
+  explainCertificate(d: Domain): void {
+    openCertificateModal(this.modal, {
+      domain: d,
+      // Nothing observed yet is an empty list rather than an absence the dialog has to test for,
+      // and the server name is the one we would ask for — the test hostname on a wildcard.
+      state: this.certificate(d) ?? {
+        serverName: d.tlsTestHost || d.name,
+        band: 'unobserved',
+        addresses: [],
       },
-    );
+    });
   }
 
   editNode(n: LBNode): void {
     openNodeEditModal(this.modal, n).afterClose.subscribe((updated?: LBNode) => {
       if (!updated) return;
+      // The addresses are what an observation connects to, so the states this reloads are the
+      // ones that just became about somewhere else.
       this.load();
-      // The plan is derived from these addresses, so it is stale the moment they change.
-      this.loadPlan();
     });
   }
 
@@ -724,7 +738,6 @@ export class ProjectDetailComponent implements OnChanges {
     openNodeCreateModal(this.modal, this.id()).afterClose.subscribe((created?: LBNode) => {
       if (!created) return;
       this.load();
-      this.loadPlan();
     });
   }
 
@@ -732,7 +745,6 @@ export class ProjectDetailComponent implements OnChanges {
     openDomainEditor(this.modal, this.project()!.id).afterClose.subscribe((created?: boolean) => {
       if (!created) return;
       this.load();
-      this.loadPlan();
       // The answers are per domain now, so a set of domains that changed leaves them describing
       // a table that no longer exists — and the new row is the one somebody is waiting on.
       this.verify();
@@ -742,30 +754,29 @@ export class ProjectDetailComponent implements OnChanges {
   async deleteNode(n: LBNode): Promise<void> {
     const ok = await confirmAction(this.modal, {
       title: `Delete node “${n.label}”?`,
-      message: 'Its addresses disappear from the DNS plan, so the records you publish have to change too.',
+      message: 'Challenges stop being answered from it, and nothing is observed on it any more.',
       okText: 'Delete',
       danger: true,
     });
     if (!ok) return;
     this.api.delete(`/nodes/${n.id}`).subscribe({
-      next: () => {
-        this.load();
-        this.loadPlan();
-      },
+      next: () => this.load(),
       error: (err) => this.error.set(apiErrorMessage(err)),
     });
   }
 
+
   /**
-   * The credentials an acme-dns client reads, for one domain.
-   *
-   * It reloads afterwards because the key it created shows up in this project's key panel — the
-   * file is not the only record of it, and somebody who loses the file revokes the key rather
-   * than being stuck with a credential they cannot see.
+   * The observation switch, opened from the row rather than only from "Add domain" — a switch
+   * that could only be set at creation would be a switch nobody could turn on for a domain they
+   * already have (design G-corrected 9.1). Reloads on save so the dot for this domain reflects
+   * the new setting immediately rather than after the next poll.
    */
-  acmeDnsCredentials(d: Domain): void {
-    openAcmeDnsCredentialsModal(this.modal, { domain: d, nodes: this.project()?.nodes ?? [] })
-      .afterClose.subscribe(() => this.load());
+  domainSettings(d: Domain): void {
+    openDomainSettings(this.modal, d).afterClose.subscribe((updated?: Domain) => {
+      if (!updated) return;
+      this.load();
+    });
   }
 
   async deleteDomain(d: Domain): Promise<void> {
@@ -779,7 +790,6 @@ export class ProjectDetailComponent implements OnChanges {
     this.api.delete(`/domains/${d.id}`).subscribe({
       next: () => {
         this.load();
-        this.loadPlan();
         this.verify();
       },
       error: (err) => this.error.set(apiErrorMessage(err)),

@@ -24,6 +24,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/activation"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/apikey"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/authz"
+	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/certobserve"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/config"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/dnsserver"
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/httpapi"
@@ -248,7 +249,8 @@ func runService(cfg config.Config, log *slog.Logger) error {
 		}
 		return nil
 	}, log)
-	go sweeper.Run(ctx, db, cfg.SweepInterval, cfg.InteractionRetention, metrics, log)
+	go sweeper.Run(ctx, db, cfg.SweepInterval, cfg.InteractionRetention,
+		cfg.ObservationFullResolutionWindow, cfg.ObservationRetention, metrics, log)
 	// Inventory size over time, which is the one thing reporting cannot derive
 	// from history: domains and aliases are mutable rows with no deletion
 	// record, so nobody can say in April how many there were in March unless it
@@ -278,6 +280,28 @@ func runService(cfg config.Config, log *slog.Logger) error {
 		}, log)
 		log.Info("domain activation checks running", "resolver", resolver,
 			"fresh", cfg.ActivationFreshInterval, "settled", cfg.ActivationSettledInterval)
+	}
+
+	// Certificate observation (domain-diagnostics G13): a periodic TLS
+	// handshake against every enabled domain's node addresses, out of band and
+	// never from /present, the same constraint activation above holds to.
+	//
+	// The off switch is the operational form of "nothing acts on an
+	// observation" (G14): turning it off costs a stale dialog and nothing
+	// else, so a deployment that disables it gets one info line and no
+	// goroutine — the same shape as activation's "no resolver to ask" warning
+	// above, because a worker that starts and then does nothing is a worker
+	// somebody will spend an afternoon debugging.
+	if !cfg.ObservationEnabled {
+		log.Info("certificate observation is not running: disabled",
+			"setting", "ACME_OBSERVATION_ENABLED")
+	} else {
+		go certobserve.Run(ctx, db, certobserve.Options{
+			Interval:         cfg.ObservationInterval,
+			HandshakeTimeout: cfg.ObservationHandshakeTimeout,
+		}, log)
+		log.Info("certificate observation running",
+			"interval", cfg.ObservationInterval, "handshake_timeout", cfg.ObservationHandshakeTimeout)
 	}
 
 	up.set(true)

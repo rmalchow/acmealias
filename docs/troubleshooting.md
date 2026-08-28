@@ -26,7 +26,7 @@ it them, or is it the network" in under a minute.
 | Command | Tells you |
 | --- | --- |
 | `dig @<service-ip> <zone> SOA +norecurse` | Is our DNS server alive and authoritative at all? No answer means the process is down or UDP/53 is filtered on the way to it — nothing downstream can possibly be working. |
-| `dig +short _acme-challenge.<domain> CNAME` | Did the customer's delegation survive? Compare the answer against the alias recorded for that domain in the console's DNS plan. Empty means missing or not propagated; present-but-different means someone edited the zone. |
+| `dig +short _acme-challenge.<domain> CNAME` | Did the customer's delegation survive? Compare the answer against the alias recorded for that domain's `CNAME` dot in the console. Empty means missing or not propagated; present-but-different means someone edited the zone. |
 | `curl -si -u "<keyid>:<secret>" -X POST https://acme-api.<domain>/present -d '{}'` | `400` means the credential and the source address were both accepted and only the empty body was rejected — the path from Traefik to the challenge API is fine. `401` means it is not: bad key, revoked key, or a source address outside the key's restriction. |
 
 ```
@@ -200,7 +200,7 @@ look up the TXT name directly instead of following the customer's CNAME to ours,
 See [per-load-balancer setup, step 3](load-balancer-setup.md#step-3-configure-traefik). Second, if CNAME support is
 correctly enabled, check where the customer's CNAME actually points:
 `dig +short _acme-challenge.<domain> CNAME` and compare the target against the alias
-shown in that domain's DNS plan in the console — a typo'd or stale target sends the query to a
+shown on that domain's `CNAME` dot in the console — a typo'd or stale target sends the query to a
 different alias than the one this service is answering for that domain.
 
 ### Console: signed in but there is nothing to work in

@@ -21,7 +21,10 @@ const (
 	// being able to mint one are different powers, even though the default role
 	// set happens to hand them out together.
 	ActionKeySecretView Action = "key.secret.view"
-	// ActionDNSPlan views the DNS plan and runs verification.
+	// ActionDNSPlan runs verification. It is no longer the DNS plan's
+	// permission, because there is no DNS plan (change domain-diagnostics,
+	// G2) — the string keeps its spelling deliberately: renaming it would mean
+	// migrating role_grants rows and editing the default role set for a word.
 	ActionDNSPlan Action = "dns.plan"
 	// ActionViewInventory views the inventory and the audit log.
 	ActionViewInventory Action = "inventory.view"

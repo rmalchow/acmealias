@@ -250,8 +250,10 @@ func DomainCreate(ctx context.Context, db *gorm.DB, sc store.Scope, out io.Write
 	return nil
 }
 
-// cnameLine renders one publishable CNAME record line, fully qualified, the
-// same shape inventory.RenderZoneSnippet uses for a zone file.
+// cnameLine renders one publishable CNAME record line, fully qualified, in
+// zone-file shape. It is the surviving half of the DNS plan the CLI used to
+// print: the one record a customer has to publish for a domain they just
+// created, said at the moment they need it.
 func cnameLine(challengeFQDN, label, zone string) string {
 	target := label
 	if zone != "" {

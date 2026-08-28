@@ -90,7 +90,7 @@ queries.
 >
 > Because both are normal, the form we receive says nothing about whether the customer's CNAME is
 > healthy. The authoritative check for that is
-> [the DNS plan's verification](load-balancer-setup.md#step-4-onboard-a-domain), which resolves the record directly.
+> [the domain's own check](load-balancer-setup.md#step-4-onboard-a-domain), which resolves the record directly.
 
 Steps 1 and 6 are why the service needs two very different things from infrastructure: an
 ordinary HTTPS endpoint, *and* a genuinely public authoritative nameserver on port 53. What we
@@ -111,7 +111,8 @@ and its `design.md`, which are authoritative and are not restated here.
    the full environment variable reference, OIDC client, and the first administrator. *For whoever
    runs the service.*
 4. **[Admin console guide](console-guide.md)** — using the web UI: projects, load balancers, domains
-   and wildcards, the DNS plan, API keys, live challenges and the audit log. *For everyday users.*
+   and wildcards, certificate observation, API keys, live challenges and the audit log. *For
+   everyday users.*
 5. **[Troubleshooting](troubleshooting.md)** — "certificates stopped renewing" and every other
    symptom, with the command that tells you which of the six moving parts broke. *For on-call.*
 

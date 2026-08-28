@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzIconModule } from 'ng-zorro-antd/icon';
+import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzSelectModule } from 'ng-zorro-antd/select';
@@ -46,6 +47,7 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
     NzSelectModule,
     NzTableModule,
     NzTagModule,
+    NzToolTipModule,
   ],
   template: `
     <h2>System keys</h2>
@@ -96,13 +98,15 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
     >
       <thead>
         <tr>
-          <th>Identifier</th>
-          <th>Note</th>
-          <th>Authority</th>
-          <th>Restrictions</th>
-          <th>Last used</th>
-          <th nzWidth="7rem">Status</th>
-          <th nzWidth="11rem"></th>
+          <!-- Twelfths, and the SAME ones the project key panel uses where the columns match, so
+               the two key tables read as one kind of table: 2 / 2 / 2 / 2 / 2 / 1 / 1. -->
+          <th nzWidth="16.6667%">Identifier</th>
+          <th nzWidth="16.6667%">Note</th>
+          <th nzWidth="16.6667%">Authority</th>
+          <th nzWidth="16.6667%">Restrictions</th>
+          <th nzWidth="16.6667%">Last used</th>
+          <th nzWidth="8.3333%">Status</th>
+          <th nzWidth="8.3333%"></th>
         </tr>
       </thead>
       <tbody>
@@ -163,10 +167,33 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
                 <nz-tag>expired</nz-tag>
               }
             </td>
-            <td>
-              <button nz-button nzType="link" nzSize="small" (click)="rotate(k)">Rotate</button>
+            <!-- Icons, as in the project key panel: sync to rotate, delete to revoke, with the
+                 word in the tooltip and the aria-label. -->
+            <td class="row-actions">
+              <button
+                nz-button
+                nzType="text"
+                nzSize="small"
+                nz-tooltip
+                nzTooltipTitle="Rotate"
+                aria-label="Rotate key"
+                (click)="rotate(k)"
+              >
+                <span nz-icon nzType="sync"></span>
+              </button>
               @if (!k.disabledAt) {
-                <button nz-button nzType="link" nzDanger nzSize="small" (click)="revoke(k)">Revoke</button>
+                <button
+                  nz-button
+                  nzType="text"
+                  nzDanger
+                  nzSize="small"
+                  nz-tooltip
+                  nzTooltipTitle="Revoke"
+                  aria-label="Revoke key"
+                  (click)="revoke(k)"
+                >
+                  <span nz-icon nzType="delete"></span>
+                </button>
               }
             </td>
           </tr>
@@ -195,6 +222,12 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
         font-size: 0.8125rem;
         color: var(--ac-warn);
         max-width: 24rem;
+      }
+    
+      /* Icons only, so the words do not repeat down the table — the label lives in the tooltip
+         and the aria-label. Nowrap keeps the pair on one line in a narrow column. */
+      .row-actions {
+        white-space: nowrap;
       }
     `,
   ],

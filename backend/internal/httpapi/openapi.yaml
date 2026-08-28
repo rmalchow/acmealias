@@ -563,11 +563,53 @@ paths:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
+    patch:
+      summary: Turn certificate observation on or off for this domain
+      description: >
+        `observeTls` is the switch; `tlsTestHost` is the name a wildcard is
+        observed under, since `*.example.com` is not a name a TLS client asks
+        for. Omitting `tlsTestHost` leaves the stored one alone, so turning the
+        switch off and on again does not ask for it a second time.
+      responses:
+        "200": { description: OK }
+        "400": { description: A wildcard with no test hostname, or one it does not cover }
     delete:
       summary: Remove a domain, and its alias if nothing else uses it
       responses:
         "200": { description: Deleted }
 
+  /accounts/{accountId}/domains/{id}/certificate:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: What this domain's addresses last presented
+      description: >
+        The most recent observation per node address, and the worst of their
+        bands as the domain's own. A read of what the observer already recorded
+        — it dials nothing.
+      responses:
+        "200": { description: OK }
+
+  /accounts/{accountId}/domains/{id}/certificate/history:
+    parameters:
+      - { $ref: "#/components/parameters/accountId" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      summary: Every observation of this domain, newest first
+      responses:
+        "200": { description: OK }
+        "418":
+          description: >
+            Not available on a personal account. This is the one response in this
+            document with a description rather than "OK", and it is here because
+            no generator infers a teapot and every one of them omits it silently.
+            The history is part of a team account; a personal account is served
+            the current state and not the history. It is deliberately NOT 403,
+            402 or 409: nothing is wrong with the caller's authority, nothing is
+            unpaid, and the account is not the wrong SHAPE for the request — the
+            feature is withheld commercially, which is what the `message` body
+            says. Read the message, not the number.
   /accounts/{accountId}/domains/{id}/acme-dns:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
@@ -685,33 +727,17 @@ paths:
       responses:
         "200": { description: Revoked }
 
-  /accounts/{accountId}/projects/{id}/plan:
-    parameters:
-      - { $ref: "#/components/parameters/accountId" }
-      - { $ref: "#/components/parameters/id" }
-    get:
-      summary: The DNS records the customer must publish
-      responses:
-        "200": { description: OK }
-
-  /accounts/{accountId}/projects/{id}/plan/zone:
-    parameters:
-      - { $ref: "#/components/parameters/accountId" }
-      - { $ref: "#/components/parameters/id" }
-    get:
-      summary: The same plan as a zone-file snippet
-      responses:
-        "200": { description: OK }
-
   /accounts/{accountId}/projects/{id}/verification:
     parameters:
       - { $ref: "#/components/parameters/accountId" }
       - { $ref: "#/components/parameters/id" }
     get:
-      summary: What the plan's records actually resolve to right now
+      summary: What each domain's records actually resolve to right now
       description: >
-        Answers per plan record and again per domain. With no verification
-        resolver configured it still answers 200, with every domain reading
+        Answers per domain. Which records a domain needs is a property of the
+        domain — `cnameTarget` and `expectedCaa` on the domain read — so this
+        answers only what DNS says about them. With no verification resolver
+        configured it still answers 200, with every domain reading
         "not-checked": a deployment that declined the feature is not broken.
       responses:
         "200": { description: OK }

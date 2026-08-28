@@ -161,7 +161,7 @@ func TestIntegrationExpiredValueIsUnansweredThenSwept(t *testing.T) {
 	// Stage 2: the sweep is housekeeping — it removes the now-useless row and
 	// records the count on the metric.
 	m := obs.New()
-	Sweep(ctx, db, 0, m, log)
+	Sweep(ctx, db, 0, 0, 0, m, log)
 
 	if n := countChallenges(t, db, alias.ID); n != 0 {
 		t.Fatalf("rows after sweep = %d, want 0", n)

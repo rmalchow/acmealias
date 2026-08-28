@@ -133,3 +133,23 @@ main {
 .ac-table {
   margin-bottom: 1.5rem;
 }
+
+/* ROW ACTIONS SIT AT THE RIGHT EDGE, in every table in both consoles.
+ *
+ * They are icons now rather than words, and a left-aligned icon pair in a column sized for it
+ * floats in the middle of a wide cell with nothing to anchor it. Against the right edge they form
+ * one vertical line down the table, which is what makes "the controls are over there" true of
+ * every row at a glance instead of per table.
+ *
+ * The header cell above them is empty, so it is aligned too — otherwise a column that gains a
+ * heading later would silently disagree with its own body. */
+.ac-table .row-actions,
+.ac-table thead th:last-child:empty {
+  text-align: end;
+}
+
+.ac-table .row-actions .ant-btn {
+  /* The buttons keep their own spacing rather than inheriting the cell's text alignment for
+     layout — nowrap so a pair never breaks onto two lines in a narrow column. */
+  white-space: nowrap;
+}

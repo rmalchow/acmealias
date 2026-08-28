@@ -282,3 +282,58 @@ func TestIntegrationConflictingCounterpartCreatesNothing(t *testing.T) {
 		}
 	})
 }
+
+// TestObservationHost is the service half of task 2.3: the covering test, and
+// the refusal a person reads. It needs no database — the rules are about the
+// domain's own name and the hostname submitted with it — which is why the
+// validation is a function of its own rather than inline in UpdateDomain.
+func TestObservationHost(t *testing.T) {
+	host := func(s string) *string { return &s }
+	wild := model.Domain{Name: "*.example.com"}
+	stored := model.Domain{Name: "*.example.com", TLSTestHost: host("shop.example.com")}
+	apex := model.Domain{Name: "example.com"}
+
+	for _, tc := range []struct {
+		what     string
+		domain   model.Domain
+		observe  bool
+		testHost *string
+		want     string // the stored hostname after this write, "" for "leave it alone"
+		wantErr  bool
+	}{
+		{"a plain domain is asked for by its own name", apex, true, nil, "", false},
+		{"and cannot carry a test hostname at all", apex, true, host("www.example.com"), "", true},
+
+		{"a wildcard cannot be observed without one", wild, true, nil, "", true},
+		{"but may sit switched off without one", wild, false, nil, "", false},
+		{"one label beneath is covered", wild, true, host("www.example.com"), "www.example.com", false},
+		{"and is normalized on the way in", wild, true, host("WWW.Example.Com."), "www.example.com", false},
+		{"two labels beneath are not", wild, true, host("a.b.example.com"), "", true},
+		{"the apex is not covered by its own wildcard", wild, true, host("example.com"), "", true},
+		{"nor is another wildcard", wild, true, host("*.example.com"), "", true},
+		{"an unrelated name is not covered", wild, true, host("www.example.net"), "", true},
+		{"an empty hostname is refused, not stored", wild, true, host(""), "", true},
+
+		// Refused even with the switch off: storing it would leave a row that
+		// turning the switch on later could never observe.
+		{"a hostname outside the wildcard is refused even when off", wild, false, host("a.b.example.com"), "", true},
+
+		// Task 2.5, from this side: nothing is sent, the stored hostname is what
+		// the switch is turned on against, and it is not rewritten.
+		{"a stored hostname satisfies the switch on its own", stored, true, nil, "", false},
+	} {
+		got, err := observationHost(tc.domain, tc.observe, tc.testHost)
+		switch {
+		case tc.wantErr && err == nil:
+			t.Errorf("%s: want a refusal, got %v", tc.what, got)
+		case tc.wantErr && !errors.Is(err, ErrInvalid):
+			t.Errorf("%s: refusal is not ErrInvalid, so it will not map to 400: %v", tc.what, err)
+		case !tc.wantErr && err != nil:
+			t.Errorf("%s: %v", tc.what, err)
+		case !tc.wantErr && tc.want == "" && got != nil:
+			t.Errorf("%s: want the stored hostname left alone, got %q", tc.what, *got)
+		case !tc.wantErr && tc.want != "" && (got == nil || *got != tc.want):
+			t.Errorf("%s: hostname = %v, want %q", tc.what, got, tc.want)
+		}
+	}
+}

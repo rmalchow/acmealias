@@ -86,6 +86,31 @@ type domainView struct {
 	// is ever switched off because of it (A3).
 	LastCheckedAt *time.Time `json:"lastCheckedAt"`
 	LastSuccessAt *time.Time `json:"lastSuccessAt"`
+
+	// The certificate-observation switch and the hostname a wildcard is observed
+	// under (domain-diagnostics 2.6). TLSTestHost is nullable and stays set when
+	// the switch is turned off, so somebody who turns it back on gets their
+	// hostname back rather than being asked again.
+	ObserveTLS  bool    `json:"observeTls"`
+	TLSTestHost *string `json:"tlsTestHost"`
+
+	// What this domain needs published in somebody else's zone. It used to be
+	// served as a project-wide record table with its own endpoint; it is a
+	// property of the domain, and the domain read is where a screen showing one
+	// row can get it without asking a second question (domain-diagnostics G2).
+	//
+	// CNAMETarget is what the _acme-challenge CNAME must point at. The empty
+	// string is the absence — a domain whose alias has gone missing — and NOT
+	// `omitempty`, because an omitted field would make "no alias yet"
+	// indistinguishable from an older service, which is the one thing this field
+	// exists to be able to say.
+	CNAMETarget string `json:"cnameTarget"`
+	// ExpectedCAA is the rendered rdata expected at the registrable name, both
+	// tags per configured issuer: `0 issue "letsencrypt.org"`. It is null, not
+	// empty, when no issuer is configured — there is then nothing to authorize
+	// and nothing to check, which is what lets a console hide the CAA dot
+	// instead of showing a grey one for a question nobody asked.
+	ExpectedCAA []string `json:"expectedCaa"`
 }
 
 // aliasView is the audit payload for an alias. Aliases have no route of their
@@ -104,7 +129,7 @@ func toAlias(a model.Alias) aliasView {
 
 // toProject renders a project. aliases may be nil, in which case domains carry
 // no alias label — the views that do not need it skip the extra query.
-func toProject(p model.Project, aliases map[model.ID]model.Alias, subj authz.Subject) projectView {
+func (a *admin) toProject(p model.Project, aliases map[model.ID]model.Alias, subj authz.Subject) projectView {
 	v := projectView{
 		ID: p.ID, Slug: p.Slug, Name: p.Name, CreatedAt: p.CreatedAt,
 		PermittedActions: authz.PermittedOn(subj, authz.ObjectOf(&p)),
@@ -114,7 +139,7 @@ func toProject(p model.Project, aliases map[model.ID]model.Alias, subj authz.Sub
 		v.Nodes = append(v.Nodes, toNode(n))
 	}
 	for _, d := range p.Domains {
-		v.Domains = append(v.Domains, toDomain(d, aliases))
+		v.Domains = append(v.Domains, a.toDomain(d, aliases))
 	}
 	return v
 }
@@ -123,8 +148,8 @@ func toProject(p model.Project, aliases map[model.ID]model.Alias, subj authz.Sub
 // contents. The two are separate functions rather than one with a flag because
 // they answer different questions — "what is in this project" and "how much is
 // in it" — and the listing must not start carrying the contents by accident.
-func toProjectListing(p store.ProjectListing, subj authz.Subject) projectView {
-	v := toProject(p.Project, nil, subj)
+func (a *admin) toProjectListing(p store.ProjectListing, subj authz.Subject) projectView {
+	v := a.toProject(p.Project, nil, subj)
 	// The listing carries the COUNTS and not the contents, and the contents are
 	// cleared rather than left as the empty slice toProject builds: a `nodes: []`
 	// on a row that has four of them is a claim, and the console would render it.
@@ -138,14 +163,60 @@ func toNode(n model.LBNode) nodeView {
 	return nodeView{ID: n.ID, ProjectID: n.ProjectID, Label: n.Label, IPv4: n.IPv4, IPv6: n.IPv6}
 }
 
-func toDomain(d model.Domain, aliases map[model.ID]model.Alias) domainView {
-	return domainView{
+// toDomain renders a domain. aliases may be nil, in which case the row carries
+// no alias label and no CNAME target — the views that do not need them skip the
+// extra query, and an audit payload is one of those.
+//
+// It is a method because the target and the expected CAA depend on the
+// deployment's configuration (the served zone, the configured issuers), which is
+// read off the effective config per request rather than captured at startup, so
+// a reload takes effect without one.
+func (a *admin) toDomain(d model.Domain, aliases map[model.ID]model.Alias) domainView {
+	v := domainView{
 		ID: d.ID, ProjectID: d.ProjectID, Name: d.Name,
 		ChallengeName: dnsname.ChallengeName(d.Name),
 		AliasID:       d.AliasID, AliasLabel: aliases[d.AliasID].Label,
 		CreatedAt:     d.CreatedAt,
 		LastCheckedAt: d.LastCheckedAt, LastSuccessAt: d.LastSuccessAt,
+		ObserveTLS: d.ObserveTLS, TLSTestHost: d.TLSTestHost,
 	}
+	// Taken from the ALIAS rather than recomputed from the domain name: the
+	// service answers for the alias's label, so rendering the target any other
+	// way risks telling a customer to publish a CNAME to a name we do not serve
+	// (domain-diagnostics 10.3). ChallengeName above is still computed, and
+	// deliberately so — that one is left exactly as it was.
+	if al, ok := aliases[d.AliasID]; ok {
+		v.CNAMETarget = inventory.DelegationTarget(al, a.opts.Config.Zone)
+	}
+	if r, err := dnsname.RegistrableDomain(d.Name); err == nil {
+		v.ExpectedCAA = caaExpectation(r, a.opts.Config.CAAIssuers)
+	}
+	return v
+}
+
+// caaExpectation renders the CAA rdata expected at one registrable name.
+//
+// Both tags are emitted, because a present issuewild governs wildcard issuance
+// *instead of* issue and wildcards are the case this service exists for. No
+// issuer configured returns nil rather than a guess: naming a CA we do not use
+// would lock issuance out entirely.
+//
+// ponytail: this is the second spelling of internal/inventory's caaLines, which
+// is unexported. The right fix is to export that one and delete this — the
+// duplication is small but it is exactly the kind that shows a customer two
+// different strings for one record. Left as is only because internal/inventory
+// belongs to another group in this change.
+func caaExpectation(registrable string, issuers []string) []string {
+	if registrable == "" || len(issuers) == 0 {
+		return nil
+	}
+	var out []string
+	for _, tag := range []string{"issue", "issuewild"} {
+		for _, issuer := range issuers {
+			out = append(out, fmt.Sprintf("0 %s %q", tag, issuer))
+		}
+	}
+	return out
 }
 
 // --- projects --------------------------------------------------------------
@@ -177,7 +248,7 @@ func (a *admin) listProjects(c echo.Context) error {
 	setTotal(c, total)
 	out := make([]projectView, 0, len(ps))
 	for _, p := range ps {
-		out = append(out, toProjectListing(p, subj))
+		out = append(out, a.toProjectListing(p, subj))
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -202,7 +273,7 @@ func (a *admin) createProject(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		out = toProject(*p, nil, subj)
+		out = a.toProject(*p, nil, subj)
 		return []authz.Event{{
 			Action: authz.ActionProjectCreate, ObjectType: authz.ObjectProject,
 			ObjectID: &p.ID, ObjectLabel: p.Slug, ProjectID: &p.ID, After: out,
@@ -243,7 +314,7 @@ func (a *admin) getProject(c echo.Context) error {
 		return err
 	}
 	p.Domains = domains
-	return c.JSON(http.StatusOK, toProject(*p, aliases, subj))
+	return c.JSON(http.StatusOK, a.toProject(*p, aliases, subj))
 }
 
 // updateProject renames a project. The slug is not editable: it appears in
@@ -278,12 +349,12 @@ func (a *admin) updateProject(c echo.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		before := toProject(*p, nil, subj)
+		before := a.toProject(*p, nil, subj)
 		if err := tx.WithContext(ctx).Model(&model.Project{}).Where("id = ?", id).Update("name", body.Name).Error; err != nil {
 			return nil, err
 		}
 		p.Name = body.Name
-		out = toProject(*p, nil, subj)
+		out = a.toProject(*p, nil, subj)
 		return []authz.Event{{
 			Action: authz.ActionProjectUpdate, ObjectType: authz.ObjectProject,
 			ObjectID: &p.ID, ObjectLabel: p.Slug, ProjectID: &p.ID, Before: before, After: out,
@@ -318,7 +389,7 @@ func (a *admin) deleteProject(c echo.Context) error {
 		}
 		return []authz.Event{{
 			Action: authz.ActionProjectDelete, ObjectType: authz.ObjectProject,
-			ObjectID: &id, ObjectLabel: p.Slug, ProjectID: &id, Before: toProject(*p, nil, subj),
+			ObjectID: &id, ObjectLabel: p.Slug, ProjectID: &id, Before: a.toProject(*p, nil, subj),
 		}}, nil
 	}); err != nil {
 		return err
@@ -465,7 +536,7 @@ func (a *admin) listDomains(c echo.Context) error {
 	}
 	out := make([]domainView, 0, len(domains))
 	for _, d := range domains {
-		out = append(out, toDomain(d, aliases))
+		out = append(out, a.toDomain(d, aliases))
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -526,13 +597,13 @@ func (a *admin) createDomain(c echo.Context) error {
 		aliasCreated = res.AliasCreated
 		aliases := map[model.ID]model.Alias{res.Alias.ID: *res.Alias}
 		out = domainCreated{
-			domainView:   toDomain(*res.Domain, aliases),
+			domainView:   a.toDomain(*res.Domain, aliases),
 			Domains:      make([]domainView, 0, len(res.Domains)),
 			AliasCreated: res.AliasCreated,
 			Warnings:     []string{},
 		}
 		for _, d := range res.Domains {
-			out.Domains = append(out.Domains, toDomain(*d, aliases))
+			out.Domains = append(out.Domains, a.toDomain(*d, aliases))
 		}
 		for _, w := range res.Warnings {
 			out.Warnings = append(out.Warnings, string(w))
@@ -561,6 +632,76 @@ func (a *admin) createDomain(c echo.Context) error {
 		a.refreshView(c)
 	}
 	return c.JSON(http.StatusCreated, out)
+}
+
+// updateDomain changes the two properties of a domain that can change: whether
+// we observe the certificate it serves, and the hostname a wildcard is observed
+// under (domain-diagnostics 2.6, 2.8).
+//
+// A domain had no update path at all before this. PATCH rather than a
+// /observation sub-route, and ActionInventoryWrite rather than a new permission
+// — this is a property of a domain, and adding an action would mean a
+// role_grants migration and an edit to defaultroles.go for a boolean on a row.
+//
+// tlsTestHost is a POINTER on the way in, because absent and null are different
+// requests. Absent leaves the stored hostname alone, which is what makes turning
+// the switch off and on again give somebody their hostname back rather than
+// asking for it a second time; null clears it. The validation — a wildcard
+// cannot be observed without one, and the hostname has to be one the wildcard
+// covers — is internal/inventory's, so the message a customer reads is the same
+// one the CLI would print.
+//
+// The audit entry is written HERE and not in internal/inventory, exactly as
+// CreateDomain and DeleteDomain are: the service layer performs the change and
+// this layer records who asked for it.
+func (a *admin) updateDomain(c echo.Context) error {
+	sc, err := a.scope(c)
+	if err != nil {
+		return err
+	}
+	subj, err := a.subject(c)
+	if err != nil {
+		return err
+	}
+	id, err := idParam(c, "id")
+	if err != nil {
+		return err
+	}
+	var body struct {
+		ObserveTLS  bool    `json:"observeTls"`
+		TLSTestHost *string `json:"tlsTestHost"`
+	}
+	if err := bind(c, &body); err != nil {
+		return err
+	}
+	ctx := c.Request().Context()
+	var v domainView
+	if err := a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
+		before, err := store.GetDomain(ctx, tx, sc, id)
+		if err != nil {
+			return nil, err
+		}
+		d, err := inventory.UpdateDomain(ctx, tx, sc, subj, id, body.ObserveTLS, body.TLSTestHost)
+		if err != nil {
+			return nil, err
+		}
+		v = a.toDomain(*d, nil)
+		projectID := d.ProjectID
+		return []authz.Event{{
+			// ponytail: the action string is a literal because authz's vocabulary
+			// has no domain.update yet and internal/authz belongs to another group
+			// in this change. It needs to become authz.ActionDomainUpdate and to
+			// join ClassConfig in vocab.go's actionClasses — until it does, this
+			// entry is written and readable but is missing from a listing filtered
+			// to `class=config`.
+			Action: "domain.update", ObjectType: authz.ObjectDomain,
+			ObjectID: &d.ID, ObjectLabel: d.Name, ProjectID: &projectID,
+			Before: a.toDomain(*before, nil), After: v,
+		}}, nil
+	}); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, v)
 }
 
 func (a *admin) deleteDomain(c echo.Context) error {
@@ -597,7 +738,7 @@ func (a *admin) deleteDomain(c echo.Context) error {
 		events := []authz.Event{{
 			Action: authz.ActionDomainDelete, ObjectType: authz.ObjectDomain,
 			ObjectID: &id, ObjectLabel: d.Name, ProjectID: &projectID,
-			Before: toDomain(*d, nil),
+			Before: a.toDomain(*d, nil),
 			After:  map[string]any{"aliasRemoved": aliasRemoved},
 		}}
 		if aliasRemoved {
