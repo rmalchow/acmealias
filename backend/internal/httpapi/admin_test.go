@@ -68,8 +68,8 @@ func (testConsoleAuth) Login(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (testConsoleAuth) Callback(http.ResponseWriter, *http.Request) error { return nil }
-func (testConsoleAuth) Logout(context.Context, http.ResponseWriter, *http.Request) error {
-	return nil
+func (testConsoleAuth) Logout(context.Context, http.ResponseWriter, *http.Request) (string, error) {
+	return "", nil
 }
 func (testConsoleAuth) CSRF() echo.MiddlewareFunc {
 	return middleware.CSRFWithConfig(middleware.CSRFConfig{

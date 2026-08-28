@@ -91,16 +91,10 @@ func identifierCovers(held, proposed Grant) bool {
 			// race with a move. Coverage is therefore refused unless the caller
 			// resolved the ancestry first — see CoversResolved.
 			return false
-		case FormWildcard, FormSelector:
-			// One object never covers a wildcard or a set.
+		case FormWildcard:
+			// One object never covers a wildcard.
 			return false
 		}
-
-	case FormSelector:
-		// Reserved and unused: no object type defines a selector, so a held one
-		// covers nothing. Refusing is the safe direction — the alternative is a
-		// grant that appears to confer something nothing can evaluate.
-		return false
 	}
 	return false
 }

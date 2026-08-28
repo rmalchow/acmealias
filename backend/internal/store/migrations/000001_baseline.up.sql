@@ -501,6 +501,11 @@ create index account_members_user_idx on account_members (user_id);
 -- authz.Grant.Validate refuses a grant carrying both forms — but the column and
 -- the constraint exist so that adding a type that does define one is a change to
 -- the evaluator rather than a migration of every grant already written.
+--
+-- SUPERSEDED by 000003: the selector column and both constraints are gone, and
+-- the grammar has two identifier forms. This block is left as written because a
+-- baseline that is edited after it has run is a baseline nobody can replay; read
+-- 000003 for why the reserved form did not earn its keep.
 create table role_grants (
   id           uuid primary key default uuidv7(),
   role_id      uuid not null references roles (id) on delete cascade,

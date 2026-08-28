@@ -53,7 +53,6 @@ type GrantCheck func(g Grant) error
 type Grant struct {
 	ObjectType  string
 	ObjectID    *model.ID
-	Selector    []byte
 	Action      string
 	Inheritable bool
 }
@@ -220,7 +219,7 @@ func checkGrants(check GrantCheck, grants []model.RoleGrant) error {
 	}
 	for _, g := range grants {
 		if err := check(Grant{
-			ObjectType: g.ObjectType, ObjectID: g.ObjectID, Selector: g.Selector,
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID,
 			Action: g.Action, Inheritable: g.Inheritable,
 		}); err != nil {
 			return err

@@ -135,6 +135,13 @@ type oidcBlock struct {
 
 	SessionIdleTimeout time.Duration `koanf:"session_idle_timeout"`
 	SessionMaxLifetime time.Duration `koanf:"session_max_lifetime"`
+
+	// PostLogoutRedirectURL is where RP-initiated logout returns the browser.
+	// It sits on the console's block and not on OIDCClient, which the staff
+	// plane shares: the two planes sign out to the same place, and putting it
+	// on the shared type would invent a second setting an operator has to keep
+	// equal to the first.
+	PostLogoutRedirectURL string `koanf:"post_logout_redirect_url"`
 }
 
 func (oidcBlock) Defaults() map[string]any {
@@ -142,6 +149,11 @@ func (oidcBlock) Defaults() map[string]any {
 		"groups_claim":         "groups",
 		"session_idle_timeout": time.Hour,
 		"session_max_lifetime": 8 * time.Hour,
+		// The development stack's marketing site (the `www` service). A default
+		// rather than a required setting because every deployment needs SOME
+		// landing page and "/" — today's behaviour — is the one answer that is
+		// wrong everywhere: it is the console the person has just left.
+		"post_logout_redirect_url": "http://www.localhost",
 	}
 }
 
@@ -269,6 +281,8 @@ func (f fileConfig) toConfig() Config {
 		OIDCGroupClaim:   f.OIDC.GroupsClaim,
 		OIDCGroupPrefix:  f.OIDC.GroupPrefix,
 
+		PostLogoutRedirectURL: f.OIDC.PostLogoutRedirectURL,
+
 		StaffHost:             f.Staff.Host,
 		StaffOIDCClientID:     f.Staff.OIDC.ClientID,
 		StaffOIDCClientSecret: f.Staff.OIDC.ClientSecret,
@@ -343,6 +357,7 @@ var envBindings = []envBinding{
 	{"ACME_OIDC_REDIRECT_URL", "oidc.redirect_url", kindString},
 	{"ACME_OIDC_GROUPS_CLAIM", "oidc.groups_claim", kindString},
 	{"ACME_OIDC_GROUP_PREFIX", "oidc.group_prefix", kindString},
+	{"ACME_POST_LOGOUT_REDIRECT_URL", "oidc.post_logout_redirect_url", kindString},
 	{"ACME_SESSION_IDLE_TIMEOUT", "oidc.session_idle_timeout", kindDuration},
 	{"ACME_SESSION_MAX_LIFETIME", "oidc.session_max_lifetime", kindDuration},
 

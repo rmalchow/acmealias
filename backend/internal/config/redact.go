@@ -43,6 +43,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("oidc_redirect_url", c.OIDCRedirectURL),
 		slog.String("oidc_group_claim", c.OIDCGroupClaim),
 		slog.String("oidc_group_prefix", c.OIDCGroupPrefix),
+		slog.String("post_logout_redirect_url", c.PostLogoutRedirectURL),
 		slog.Duration("session_idle_timeout", c.SessionIdleTimeout),
 		slog.Duration("session_max_lifetime", c.SessionMaxLifetime),
 		slog.Any("caa_issuers", c.CAAIssuers),

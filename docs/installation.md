@@ -523,6 +523,7 @@ services:
 | `oidc.redirect_url` | `ACME_OIDC_REDIRECT_URL` | *required* | Must exactly match what the IdP has registered. |
 | `oidc.groups_claim` | `ACME_OIDC_GROUPS_CLAIM` | `groups` | Claim carrying group membership. |
 | `oidc.group_prefix` | `ACME_OIDC_GROUP_PREFIX` | *empty* | Stripped from each group value — useful when the IdP emits path-style names. |
+| `oidc.post_logout_redirect_url` | `ACME_POST_LOGOUT_REDIRECT_URL` | `http://www.localhost` | Where sign-out lands. The console also ends the IdP session (RP-initiated logout), and the IdP must have this exact URL registered as a post-logout redirect URI. Empty keeps sign-out local and lands on `/`. |
 | `oidc.session_idle_timeout` | `ACME_SESSION_IDLE_TIMEOUT` | `1h` | Idle expiry. |
 | `oidc.session_max_lifetime` | `ACME_SESSION_MAX_LIFETIME` | `8h` | Absolute expiry. Also bounds how stale a user's group list can be. |
 

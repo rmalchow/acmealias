@@ -44,7 +44,9 @@ import (
 type ConsoleAuth interface {
 	Login(w http.ResponseWriter, r *http.Request) error
 	Callback(w http.ResponseWriter, r *http.Request) error
-	Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) error
+	// Logout returns where a browser should go next — the identity provider's
+	// end-session endpoint, or "" when there is nowhere further to send it.
+	Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) (string, error)
 	CSRF() echo.MiddlewareFunc
 }
 
@@ -127,14 +129,31 @@ func RegisterAdmin(e *echo.Echo, o AdminOptions) error {
 	// Which is indistinguishable, from the outside, from sign-out being broken.
 	//
 	// The POST keeps its 204, because its caller is a program that has no browser
-	// to move and would have to ignore a redirect anyway.
+	// to move and would have to ignore a redirect anyway — including the one
+	// below, which is the whole reason the two verbs cannot share an answer.
+	//
+	// Where the GET sends the browser is the identity provider's end-session
+	// endpoint, so that signing out of the console signs the person out of the
+	// provider too; the provider then returns them to the marketing site
+	// (ACME_POST_LOGOUT_REDIRECT_URL). Ending only OUR session left the
+	// provider's cookie standing, which made "sign out" mean "signed out until
+	// you press sign in" — fine alone at a desk, wrong on a shared machine.
+	//
+	// "/" remains the fallback, and it is not a failure path: a provider that
+	// publishes no end_session_endpoint has not implemented RP-initiated logout,
+	// which is a deployment choice. Refusing the sign-out over it would break
+	// the half that works to punish the half that is absent.
 	logout := func(redirect bool) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if err := o.Auth.Logout(c.Request().Context(), c.Response(), c.Request()); err != nil {
+			next, err := o.Auth.Logout(c.Request().Context(), c.Response(), c.Request())
+			if err != nil {
 				return err
 			}
 			if redirect {
-				return c.Redirect(http.StatusSeeOther, "/")
+				if next == "" {
+					next = "/"
+				}
+				return c.Redirect(http.StatusSeeOther, next)
 			}
 			return c.NoContent(http.StatusNoContent)
 		}

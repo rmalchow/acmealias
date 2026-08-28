@@ -231,16 +231,15 @@ type AccountMember struct {
 
 func (AccountMember) TableName() string { return "account_members" }
 
-// RoleGrant is one grant held by a role. ObjectID and Selector are mutually
-// exclusive and both null for a wildcard identifier; the database enforces the
-// same rule, so a row that disagrees cannot be stored.
+// RoleGrant is one grant held by a role. A null ObjectID is the wildcard
+// identifier; the database enforces the same rule, so a row that disagrees
+// cannot be stored.
 type RoleGrant struct {
-	ID          ID              `gorm:"primaryKey"`
-	RoleID      ID              `gorm:"column:role_id"`
-	AccountID   ID              `gorm:"column:account_id"`
-	ObjectType  string          `gorm:"column:object_type"`
-	ObjectID    *ID             `gorm:"column:object_id"`
-	Selector    json.RawMessage `gorm:"column:selector;type:jsonb"`
+	ID          ID     `gorm:"primaryKey"`
+	RoleID      ID     `gorm:"column:role_id"`
+	AccountID   ID     `gorm:"column:account_id"`
+	ObjectType  string `gorm:"column:object_type"`
+	ObjectID    *ID    `gorm:"column:object_id"`
 	Action      string
 	Inheritable bool
 	CreatedAt   time.Time
@@ -253,12 +252,11 @@ func (RoleGrant) TableName() string { return "role_grants" }
 // and different audit vocabulary, and one table would need a check constraint
 // saying exactly one owner is set — the same complexity somewhere less obvious.
 type APIKeyGrant struct {
-	ID          ID              `gorm:"primaryKey"`
-	APIKeyID    ID              `gorm:"column:api_key_id"`
-	AccountID   ID              `gorm:"column:account_id"`
-	ObjectType  string          `gorm:"column:object_type"`
-	ObjectID    *ID             `gorm:"column:object_id"`
-	Selector    json.RawMessage `gorm:"column:selector;type:jsonb"`
+	ID          ID     `gorm:"primaryKey"`
+	APIKeyID    ID     `gorm:"column:api_key_id"`
+	AccountID   ID     `gorm:"column:account_id"`
+	ObjectType  string `gorm:"column:object_type"`
+	ObjectID    *ID    `gorm:"column:object_id"`
 	Action      string
 	Inheritable bool
 	CreatedAt   time.Time

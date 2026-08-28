@@ -77,6 +77,29 @@ func (s *Service) oauth2Config(p *oidc.Provider) *oauth2.Config {
 	}
 }
 
+// endSessionEndpoint is the RP-initiated-logout endpoint from the provider's
+// OpenID configuration, or "" when the provider publishes none.
+//
+// Read from the discovery document rather than assembled from the issuer: the
+// path is provider-specific (authentik ends the session under
+// /application/o/<slug>/end-session/, Keycloak under
+// /protocol/openid-connect/logout), and a hardcoded path is a sign-out that
+// silently 404s the day the identity provider changes.
+//
+// go-oidc parses only the fields it needs, so the endpoint is pulled out of the
+// raw document with Claims. A provider that publishes no end_session_endpoint
+// has not implemented RP-initiated logout, which is a deployment choice and not
+// an error — the caller falls back to ending our own session only.
+func endSessionEndpoint(p *oidc.Provider) string {
+	var meta struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	if err := p.Claims(&meta); err != nil {
+		return ""
+	}
+	return meta.EndSessionEndpoint
+}
+
 // verifier validates ID tokens against the provider's JWKS for our client id:
 // signature, issuer, audience and expiry. The nonce is checked separately in
 // Callback, because only the caller knows which nonce it sent.

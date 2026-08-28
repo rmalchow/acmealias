@@ -62,6 +62,19 @@ func (c Config) Validate() error {
 		}
 	}
 
+	// Not required — a deployment may legitimately clear it, which turns
+	// sign-out back into "destroy our session and go to /" without ending the
+	// provider's. Malformed is a different matter: the identity provider would
+	// refuse the logout request at the moment somebody used it, which is the
+	// worst time to find out.
+	if c.PostLogoutRedirectURL != "" {
+		if u, err := url.Parse(c.PostLogoutRedirectURL); err != nil {
+			errs.add("ACME_POST_LOGOUT_REDIRECT_URL", err)
+		} else if u.Scheme == "" || u.Host == "" {
+			errs.add("ACME_POST_LOGOUT_REDIRECT_URL", fmt.Errorf("must be an absolute URL"))
+		}
+	}
+
 	positive := func(name string, d interface{ Seconds() float64 }) {
 		if d.Seconds() <= 0 {
 			errs.add(name, fmt.Errorf("must be positive"))

@@ -497,10 +497,10 @@ func toRole(r model.Role) roleView {
 	for _, g := range r.Grants {
 		parsed := authz.GrantFromRow(model.APIKeyGrant{
 			AccountID: g.AccountID, ObjectType: g.ObjectType, ObjectID: g.ObjectID,
-			Selector: g.Selector, Action: g.Action, Inheritable: g.Inheritable, ID: g.ID,
+			Action: g.Action, Inheritable: g.Inheritable, ID: g.ID,
 		})
 		v.Grants = append(v.Grants, grantView{
-			Type: g.ObjectType, ObjectID: g.ObjectID, Selector: parsed.Selector,
+			Type: g.ObjectType, ObjectID: g.ObjectID,
 			Action: g.Action, Inheritable: g.Inheritable, Summary: parsed.String(),
 		})
 	}
@@ -546,7 +546,7 @@ func (a *admin) subsetCheck(c echo.Context, sc store.Scope) (store.GrantCheck, e
 	return func(g store.Grant) error {
 		parsed := authz.GrantFromRow(model.APIKeyGrant{
 			AccountID: sc.AccountID(), ObjectType: g.ObjectType, ObjectID: g.ObjectID,
-			Selector: g.Selector, Action: g.Action, Inheritable: g.Inheritable,
+			Action: g.Action, Inheritable: g.Inheritable,
 		})
 		return authz.CheckSubset(writer, parsed)
 	}, nil
@@ -565,16 +565,9 @@ func (a *admin) grantsFromBody(c echo.Context, sc store.Scope, in []grantView) (
 			AccountID: sc.AccountID(), ObjectType: g.Type, ObjectID: g.ObjectID,
 			Action: g.Action, Inheritable: g.Inheritable,
 		}
-		if g.Selector != nil {
-			raw, err := authz.EncodeSelector(g.Selector)
-			if err != nil {
-				return nil, err
-			}
-			row.Selector = raw
-		}
 		parsed := authz.GrantFromRow(model.APIKeyGrant{
 			AccountID: row.AccountID, ObjectType: row.ObjectType, ObjectID: row.ObjectID,
-			Selector: row.Selector, Action: row.Action, Inheritable: row.Inheritable,
+			Action: row.Action, Inheritable: row.Inheritable,
 		})
 		if err := authz.CheckSubset(writer, parsed); err != nil {
 			return nil, err

@@ -7,7 +7,7 @@ import (
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
 )
 
-// The evaluator's table. Every combination of wildcard, identity, selector and
+// The evaluator's table. Every combination of wildcard, identity and
 // inheritance that the spec names, plus the ones it names by exclusion.
 
 var (

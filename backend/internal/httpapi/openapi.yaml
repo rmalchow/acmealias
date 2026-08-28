@@ -125,19 +125,12 @@ components:
       type: object
       description: |
         [object type, identifier, action] plus a flag saying whether it reaches objects contained
-        by the one it names. Each part may be a wildcard; the identifier may instead be a typed
-        selector where the type defines one. Every grant is anchored to one account, and a
-        wildcard means "within this account", never "everywhere".
+        by the one it names. Each part may be a wildcard; the identifier may instead name exactly
+        one object. Every grant is anchored to one account, and a wildcard means "within this
+        account", never "everywhere".
       properties:
         type: { type: string }
         objectId: { type: string, format: uuid, nullable: true }
-        selector:
-          type: object
-          nullable: true
-          properties:
-            zone: { type: string }
-            names: { type: string }
-            types: { type: array, items: { type: string } }
         action: { type: string }
         inheritable: { type: boolean }
         summary: { type: string }

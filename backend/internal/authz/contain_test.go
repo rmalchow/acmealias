@@ -143,8 +143,7 @@ func TestGrantValidation(t *testing.T) {
 		{"no account", Grant{Type: TypeLoadBalancer, Action: "x"}, false},
 		{"no action", Grant{AccountID: a, Type: TypeLoadBalancer}, false},
 		{"no type", Grant{AccountID: a, Action: "x"}, false},
-		{"both an id and a selector", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x", ObjectID: &oid, Selector: &Selector{}}, false},
-		{"a selector at all — no type defines one", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x", Selector: &Selector{}}, false},
+		{"one named object", Grant{AccountID: a, Type: TypeLoadBalancer, Action: "x", ObjectID: &oid}, true},
 		{"a wildcard type naming one object", Grant{AccountID: a, Type: TypeAny, Action: "x", ObjectID: &oid}, false},
 	} {
 		err := tc.g.Validate()

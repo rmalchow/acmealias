@@ -368,9 +368,8 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 // grantFlag collects repeated --grant values.
 //
 // A key's authority is a set, so the flag is repeatable rather than a single
-// comma-joined string: a comma is a character that appears inside a DNS record
-// selector, and a separator that can occur in a value is a parser waiting to be
-// wrong.
+// comma-joined string: a separator that can occur inside a value is a parser
+// waiting to be wrong, and a grant's parts are operator-supplied text.
 type grantFlag []adminctl.GrantSpec
 
 func (g *grantFlag) String() string {

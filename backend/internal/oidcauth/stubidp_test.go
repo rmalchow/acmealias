@@ -23,6 +23,10 @@ type stubIDP struct {
 	srv   *httptest.Server
 	key   *rsa.PrivateKey
 	token string // the id_token the token endpoint hands back next
+
+	// noEndSession makes discovery omit end_session_endpoint, which is how a
+	// provider says it has not implemented RP-initiated logout.
+	noEndSession bool
 }
 
 const stubClientID = "acme-console"
@@ -37,7 +41,7 @@ func newStubIDP(t *testing.T) *stubIDP {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{
+		doc := map[string]any{
 			"issuer":                                idp.srv.URL,
 			"authorization_endpoint":                idp.srv.URL + "/auth",
 			"token_endpoint":                        idp.srv.URL + "/token",
@@ -45,7 +49,11 @@ func newStubIDP(t *testing.T) *stubIDP {
 			"response_types_supported":              []string{"code"},
 			"subject_types_supported":               []string{"public"},
 			"id_token_signing_alg_values_supported": []string{"RS256"},
-		})
+		}
+		if !idp.noEndSession {
+			doc["end_session_endpoint"] = idp.srv.URL + "/end-session"
+		}
+		writeJSON(w, doc)
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"keys": []any{map[string]any{
@@ -106,12 +114,15 @@ func (idp *stubIDP) sign(t *testing.T, claims map[string]any) string {
 // panic rather than a silent pass.
 func (idp *stubIDP) service() *Service {
 	return New(config.Config{
-		OIDCIssuer:         idp.srv.URL,
-		OIDCClientID:       stubClientID,
-		OIDCClientSecret:   "secret",
-		OIDCRedirectURL:    "https://console.example.com/api/v1/auth/callback",
-		OIDCGroupClaim:     "groups",
-		OIDCGroupPrefix:    "/acme/",
+		OIDCIssuer:       idp.srv.URL,
+		OIDCClientID:     stubClientID,
+		OIDCClientSecret: "secret",
+		OIDCRedirectURL:  "https://console.example.com/api/v1/auth/callback",
+		OIDCGroupClaim:   "groups",
+		OIDCGroupPrefix:  "/acme/",
+
+		PostLogoutRedirectURL: "https://www.example.com/",
+
 		SessionIdleTimeout: time.Hour,
 		SessionMaxLifetime: 8 * time.Hour,
 	}, nil)

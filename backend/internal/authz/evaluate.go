@@ -94,11 +94,6 @@ func matches(g Grant, action string, o Object) bool {
 			return true
 		case FormID:
 			return *g.ObjectID == o.ID
-		case FormSelector:
-			// No object type defines a selector, and Validate refuses a grant
-			// carrying one — so a stored grant that has one is a row nothing can
-			// evaluate, and matching nothing is the safe reading.
-			return false
 		}
 
 	case Contains(g.Type, o.Type):
@@ -113,10 +108,6 @@ func matches(g Grant, action string, o Object) bool {
 		case FormID:
 			id, ok := o.ancestor(g.Type)
 			return ok && id == *g.ObjectID
-		case FormSelector:
-			// A selector describes objects of its own type; it cannot describe
-			// an ancestor of a different type.
-			return false
 		}
 	}
 	// Inheritance never reaches upward: a grant on a load balancer says nothing

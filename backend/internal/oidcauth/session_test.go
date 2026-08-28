@@ -1,9 +1,11 @@
 package oidcauth
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -105,5 +107,64 @@ func TestCheckSession(t *testing.T) {
 				t.Fatalf("err = %v, want nil", err)
 			}
 		})
+	}
+}
+
+// --- RP-initiated logout ---------------------------------------------------
+
+// TestEndSessionURLIsBuiltFromDiscovery pins the two things that make sign-out
+// end the PROVIDER's session as well as ours: the endpoint comes from the
+// discovery document rather than a guessed path, and the request carries no
+// id_token_hint — we store no ID token, by design (D10), and must work without
+// one.
+func TestEndSessionURLIsBuiltFromDiscovery(t *testing.T) {
+	idp := newStubIDP(t)
+	s := idp.service()
+
+	raw := s.EndSessionURL(context.Background())
+	if raw == "" {
+		t.Fatal("no end-session URL, want one built from the provider metadata")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+	if want := idp.srv.URL + "/end-session"; u.Scheme+"://"+u.Host+u.Path != want {
+		t.Errorf("endpoint = %q, want %q", u.Scheme+"://"+u.Host+u.Path, want)
+	}
+	q := u.Query()
+	if got := q.Get("post_logout_redirect_uri"); got != s.cfg.PostLogoutRedirectURL {
+		t.Errorf("post_logout_redirect_uri = %q, want %q", got, s.cfg.PostLogoutRedirectURL)
+	}
+	if got := q.Get("client_id"); got != stubClientID {
+		t.Errorf("client_id = %q, want %q", got, stubClientID)
+	}
+	if q.Has("id_token_hint") {
+		t.Error("an id_token_hint was sent; the session deliberately stores no ID token")
+	}
+}
+
+// TestEndSessionURLIsEmptyWhenTheProviderHasNone is the fallback the caller
+// turns back into today's behaviour, a redirect to "/". A provider without
+// RP-initiated logout is a deployment choice, not an error, so nothing here
+// fails.
+func TestEndSessionURLIsEmptyWhenTheProviderHasNone(t *testing.T) {
+	idp := newStubIDP(t)
+	idp.noEndSession = true
+
+	if got := idp.service().EndSessionURL(context.Background()); got != "" {
+		t.Errorf("end-session URL = %q, want empty", got)
+	}
+}
+
+// TestEndSessionURLIsEmptyWithoutALandingPage covers the other half: a
+// deployment that clears the setting keeps sign-out local rather than sending
+// the browser to a provider that would have nowhere to return it to.
+func TestEndSessionURLIsEmptyWithoutALandingPage(t *testing.T) {
+	s := newStubIDP(t).service()
+	s.cfg.PostLogoutRedirectURL = ""
+
+	if got := s.EndSessionURL(context.Background()); got != "" {
+		t.Errorf("end-session URL = %q, want empty", got)
 	}
 }

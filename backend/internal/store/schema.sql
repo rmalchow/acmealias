@@ -69,7 +69,6 @@ table aliases
   rls enabled=true forced=true
 
 table api_key_grants
-  check api_key_grants_identifier_form CHECK ((((object_id IS NULL) AND (selector IS NULL)) OR ((object_id IS NOT NULL) AND (selector IS NULL)) OR ((object_id IS NULL) AND (selector IS NOT NULL))))
   column account_id uuid not null
   column action text not null
   column api_key_id uuid not null
@@ -78,10 +77,8 @@ table api_key_grants
   column inheritable boolean not null default false
   column object_id uuid null
   column object_type text not null
-  column selector jsonb null
   constraint api_key_grants_account_id_fkey foreign key (account_id)
   constraint api_key_grants_api_key_id_fkey foreign key (api_key_id)
-  constraint api_key_grants_identifier_form check ()
   constraint api_key_grants_pkey primary key (id)
   index api_key_grants_key_idx CREATE INDEX api_key_grants_key_idx ON api_key_grants USING btree (api_key_id)
   index api_key_grants_pkey CREATE UNIQUE INDEX api_key_grants_pkey ON api_key_grants USING btree (id)
@@ -287,7 +284,6 @@ table projects
   rls enabled=true forced=true
 
 table role_grants
-  check role_grants_identifier_form CHECK ((((object_id IS NULL) AND (selector IS NULL)) OR ((object_id IS NOT NULL) AND (selector IS NULL)) OR ((object_id IS NULL) AND (selector IS NOT NULL))))
   column account_id uuid not null
   column action text not null
   column created_at timestamp with time zone not null default now()
@@ -296,9 +292,7 @@ table role_grants
   column object_id uuid null
   column object_type text not null
   column role_id uuid not null
-  column selector jsonb null
   constraint role_grants_account_id_fkey foreign key (account_id)
-  constraint role_grants_identifier_form check ()
   constraint role_grants_pkey primary key (id)
   constraint role_grants_role_id_fkey foreign key (role_id)
   index role_grants_pkey CREATE UNIQUE INDEX role_grants_pkey ON role_grants USING btree (id)

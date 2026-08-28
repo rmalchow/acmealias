@@ -2,7 +2,6 @@ package authz
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 
 	"gorm.io/gorm"
@@ -38,7 +37,7 @@ func SubjectFromRoles(accountID model.ID, roles []model.Role) Subject {
 			s.Unrestricted = true
 		}
 		for _, g := range r.Grants {
-			s.Grants = append(s.Grants, grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Selector, g.Action, g.Inheritable, g.ID))
+			s.Grants = append(s.Grants, grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Action, g.Inheritable, g.ID))
 		}
 	}
 	return s
@@ -55,7 +54,7 @@ func SubjectFromKey(k *model.APIKey) Subject {
 	}
 	s := Subject{AccountID: k.AccountID}
 	for _, g := range k.Grants {
-		s.Grants = append(s.Grants, grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Selector, g.Action, g.Inheritable, g.ID))
+		s.Grants = append(s.Grants, grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Action, g.Inheritable, g.ID))
 	}
 	return s
 }
@@ -64,11 +63,11 @@ func SubjectFromKey(k *model.APIKey) Subject {
 // Exported because the audit trail records a key's authority in full, and doing
 // that from the row shape would mean a second renderer that could drift.
 func GrantFromRow(g model.APIKeyGrant) Grant {
-	return grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Selector, g.Action, g.Inheritable, g.ID)
+	return grantFrom(g.AccountID, g.ObjectType, g.ObjectID, g.Action, g.Inheritable, g.ID)
 }
 
-func grantFrom(account model.ID, objectType string, objectID *model.ID, selector json.RawMessage, action string, inheritable bool, id model.ID) Grant {
-	g := Grant{
+func grantFrom(account model.ID, objectType string, objectID *model.ID, action string, inheritable bool, id model.ID) Grant {
+	return Grant{
 		ID:          id,
 		AccountID:   account,
 		Type:        ObjectType(objectType),
@@ -76,16 +75,6 @@ func grantFrom(account model.ID, objectType string, objectID *model.ID, selector
 		Action:      action,
 		Inheritable: inheritable,
 	}
-	// A selector that will not decode is dropped rather than treated as absent:
-	// absent means wildcard, and reading a corrupt selector as "everything"
-	// would turn a storage fault into an escalation. Dropping it makes the grant
-	// match nothing, which is the safe direction.
-	if sel, err := DecodeSelector(selector); err == nil && sel != nil {
-		g.Selector = sel
-	} else if len(selector) > 0 {
-		g.Type = ObjectType("unreadable")
-	}
-	return g
 }
 
 // ObjectOf describes an inventory row for the evaluator, filling in the

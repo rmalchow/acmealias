@@ -20,7 +20,7 @@ func CreateAPIKey(ctx context.Context, db *gorm.DB, sc Scope, k *model.APIKey, c
 	}
 	for _, g := range k.Grants {
 		if err := check(Grant{
-			ObjectType: g.ObjectType, ObjectID: g.ObjectID, Selector: g.Selector,
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID,
 			Action: g.Action, Inheritable: g.Inheritable,
 		}); err != nil {
 			return err

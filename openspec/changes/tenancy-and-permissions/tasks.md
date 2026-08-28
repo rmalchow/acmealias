@@ -18,6 +18,13 @@
 - [x] 2.5 Implement `List` applying the ACL predicate together with the caller's filters, paging and count; assert the count uses the same predicate as the page
 - [x] 2.6 Implement `GetWithPermission(id, perm)` as `List` narrowed by `id`, returning the object or nil, with absence and denial indistinguishable
 - [x] 2.7 WITHDRAWN with the DNS product: there are no record objects to select. The grant grammar keeps the third identifier form reserved and refuses any grant carrying one, since a stored selector nothing can evaluate would look like a permission somebody had. Original text: the `dns_record` predicate is compiled — reversed names, prefix match, apex excluded, record-type set — and unit-tested. The reversed COLUMN and its `text_pattern_ops` index arrive with `dns-records`, which creates the table; there is nothing to index yet
+
+  **The reservation was withdrawn afterwards.** Keeping the third form reserved was the right call
+  while it was plausible that something would define a selector; nothing did, and a form that is
+  refused everywhere it appears is a form that only costs reading. Migration `000003` drops the
+  column and tightens the check constraint to the two forms that exist, and `authz.Selector`,
+  `FormSelector` and their encoding are gone. This task's reasoning is left as written because it
+  was true when it was done — what changed is the world, not the judgement.
 - [x] 2.8 Thread `Scope` through `internal/inventory` and `internal/reporting`
 - [x] 2.9 Add a test asserting every exported store read takes a `Scope`, so a new query cannot be added without one
 - [x] 2.10 Add tests that an object of another account is refused as though it did not exist, for read, list, count and write

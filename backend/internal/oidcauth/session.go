@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
@@ -83,17 +84,71 @@ func checkSession(sess *model.Session, idle time.Duration, now time.Time) error 
 // Logout revokes the session the request carries and clears its cookie.
 // Revoking rather than deleting keeps the row for the audit trail; the sweep
 // (store.DeleteExpiredSessions) removes it once it has expired.
-func (s *Service) Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+//
+// It returns the URL a BROWSER should be sent to next, which is the identity
+// provider's end-session endpoint when the provider has one: our session is
+// only half of what "signed out" means, and leaving the provider's session
+// standing turns sign-out into "signed out until you press sign in" — on a
+// shared machine, the next person is one click from being the previous one.
+// A caller with no browser to move (the POST form of logout) ignores it.
+//
+// An empty return means "nothing further to visit", and the caller falls back
+// to its own landing page. That happens when the provider publishes no
+// end_session_endpoint, when discovery fails, and when no post-logout redirect
+// URL is configured — see EndSessionURL.
+func (s *Service) Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) (string, error) {
 	http.SetCookie(w, clearCookie(SessionCookieName))
 
 	c, err := r.Cookie(SessionCookieName)
-	if err != nil || c.Value == "" {
-		return nil // already signed out; nothing to revoke
+	if err == nil && c.Value != "" {
+		if err := store.RevokeSession(ctx, s.db, c.Value); err != nil {
+			return "", err
+		}
 	}
-	if err := store.RevokeSession(ctx, s.db, c.Value); err != nil {
-		return err
+	return s.EndSessionURL(ctx), nil
+}
+
+// EndSessionURL builds the RP-initiated logout request (OpenID Connect RP-
+// Initiated Logout 1.0, section 2) for the discovered provider, or returns ""
+// when there is nothing to visit.
+//
+// NO id_token_hint, deliberately. The parameter is the specification's
+// preferred way to tell the provider whose session to end, and supplying it
+// would mean storing the ID token on the session row — which turns the session
+// table into a credential store, exactly what design D10 refuses. Without the
+// hint the provider identifies the session from its own cookie, which the
+// browser is carrying anyway because it is the one being redirected; the cost
+// is that a provider may show a "do you want to sign out?" confirmation, and a
+// confirmation is a far smaller price than a table of bearer tokens.
+//
+// client_id is sent instead, which is what section 2 asks of a request without
+// the hint, and it is also what lets the provider validate the
+// post_logout_redirect_uri against the right application's registered list.
+//
+// Errors are swallowed rather than returned: the session is already destroyed
+// by the time this is called, and failing the request would report a sign-out
+// that DID happen as one that did not.
+func (s *Service) EndSessionURL(ctx context.Context) string {
+	if s.cfg.PostLogoutRedirectURL == "" {
+		return ""
 	}
-	return nil
+	p, err := s.discover(ctx)
+	if err != nil {
+		return ""
+	}
+	raw := endSessionEndpoint(p)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set("post_logout_redirect_uri", s.cfg.PostLogoutRedirectURL)
+	q.Set("client_id", s.cfg.OIDCClientID)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // randomToken returns 256 bits of crypto/rand as URL-safe base64 — used for

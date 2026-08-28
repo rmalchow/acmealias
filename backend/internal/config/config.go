@@ -181,6 +181,21 @@ type Config struct {
 	OIDCGroupClaim   string // ACME_OIDC_GROUPS_CLAIM, default "groups"
 	OIDCGroupPrefix  string // ACME_OIDC_GROUP_PREFIX, stripped from each group value
 
+	// PostLogoutRedirectURL is where the browser lands after a sign-out
+	// (ACME_POST_LOGOUT_REDIRECT_URL). Signing out ends the session at the
+	// identity provider too — otherwise "sign out" means "signed out until you
+	// press sign in", which on a shared machine is not what anybody means by it
+	// — and RP-initiated logout returns the browser to this URL.
+	//
+	// It is the marketing site rather than the console: the console's every
+	// route now answers 401, so landing there shows a signed-out shell whose
+	// only useful control is the one that signs you back in.
+	//
+	// A setting and not a constant because the identity provider must have the
+	// exact string registered as a post-logout redirect URI (it refuses an
+	// unregistered one), and that value differs per deployment.
+	PostLogoutRedirectURL string // ACME_POST_LOGOUT_REDIRECT_URL
+
 	// The staff surface (public-edition U7). One deployment, two hostnames, two
 	// applications at the identity provider — a token for one is not a token for
 	// the other, which is the property the separation rests on.

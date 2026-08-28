@@ -30,11 +30,10 @@ import (
 // set of grants, and every screen that lists keys has to show what they can
 // actually do (task 9.5).
 type grantView struct {
-	Type        string          `json:"type"`
-	ObjectID    *model.ID       `json:"objectId,omitempty"`
-	Selector    *authz.Selector `json:"selector,omitempty"`
-	Action      string          `json:"action"`
-	Inheritable bool            `json:"inheritable"`
+	Type        string    `json:"type"`
+	ObjectID    *model.ID `json:"objectId,omitempty"`
+	Action      string    `json:"action"`
+	Inheritable bool      `json:"inheritable"`
 	// Summary is the grant written the way the design writes them, so an
 	// operator reading a listing does not have to assemble four fields in their
 	// head.
@@ -75,7 +74,7 @@ func toKey(k model.APIKey) keyView {
 	for _, g := range k.Grants {
 		parsed := authz.GrantFromRow(g)
 		v.Grants = append(v.Grants, grantView{
-			Type: g.ObjectType, ObjectID: g.ObjectID, Selector: parsed.Selector,
+			Type: g.ObjectType, ObjectID: g.ObjectID,
 			Action: g.Action, Inheritable: g.Inheritable, Summary: parsed.String(),
 		})
 	}
@@ -199,7 +198,7 @@ func grantsOf(k *model.APIKey) []model.APIKeyGrant {
 	out := make([]model.APIKeyGrant, 0, len(k.Grants))
 	for _, g := range k.Grants {
 		out = append(out, model.APIKeyGrant{
-			ObjectType: g.ObjectType, ObjectID: g.ObjectID, Selector: g.Selector,
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID,
 			Action: g.Action, Inheritable: g.Inheritable,
 		})
 	}

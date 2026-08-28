@@ -140,7 +140,7 @@ func TestIntegrationLogoutEndsTheSession(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	r.AddCookie(newCookie(SessionCookieName, sess.ID, time.Hour))
 	rec := httptest.NewRecorder()
-	if err := s.Logout(ctx, rec, r); err != nil {
+	if _, err := s.Logout(ctx, rec, r); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 	for _, c := range rec.Result().Cookies() {

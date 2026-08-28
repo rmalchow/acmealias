@@ -1,7 +1,6 @@
 package authz
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"gitlab-mcww-admin.versioncontrol.io/tools/acmeservice/internal/model"
@@ -11,9 +10,8 @@ import (
 // it reaches objects contained by the one it names, anchored to exactly one
 // account.
 //
-// Each of the three parts may be a wildcard. The identifier may instead be a
-// typed selector, where the object type defines one — today only dns_record
-// does.
+// Each of the three parts may be a wildcard, and the identifier may instead name
+// exactly one object.
 //
 // # Why anchored
 //
@@ -67,26 +65,24 @@ func Contains(parent, child ObjectType) bool {
 	return false
 }
 
-// The identifier admits a third form the grammar reserves and nothing uses: a
-// typed SELECTOR, for an object type whose members are picked by a predicate
-// rather than named one at a time.
+// The grammar once admitted a third identifier form: a typed SELECTOR, for an
+// object type whose members are picked by a predicate rather than named one at a
+// time. It was built for DNS records — zone, name pattern, record type — and was
+// kept reserved-but-refused for a while after the DNS product went.
 //
-// It was built for DNS records — zone, name pattern, record type — and went with
-// them when the service stopped hosting DNS. The slot is kept because keeping it
-// costs one nil check and re-adding it would otherwise mean changing the grammar
-// every subject and every stored row is written against.
+// It is gone now. Keeping a form nothing can produce and everything must branch
+// on cost a nil check in the evaluator, a column in both grant tables and a
+// clause in both check constraints, all to buy back a change that would be a
+// grammar change anyway: a predicate identifier needs fields, a compiler and a
+// containment rule, none of which the empty placeholder supplied.
 
 // Grant is one row of a role or of an API key.
 type Grant struct {
 	ID        model.ID   `json:"id,omitempty"`
 	AccountID model.ID   `json:"accountId"`
 	Type      ObjectType `json:"type"`
-	// ObjectID names one object. Nil means the identifier is a wildcard or a
-	// selector — Selector says which.
+	// ObjectID names one object. Nil means the identifier is a wildcard.
 	ObjectID *model.ID `json:"objectId,omitempty"`
-	// Selector is the reserved typed identifier form. Always nil today: no object
-	// type defines one. See the note above.
-	Selector *Selector `json:"selector,omitempty"`
 	Action   string    `json:"action"`
 	// Inheritable makes the grant reach every object contained by the one it
 	// names. Without it a grant on a project is a grant on the project row and
@@ -94,7 +90,7 @@ type Grant struct {
 	Inheritable bool `json:"inheritable"`
 }
 
-// IdentifierForm is which of the three shapes a grant's identifier takes.
+// IdentifierForm is which of the two shapes a grant's identifier takes.
 type IdentifierForm int
 
 const (
@@ -102,29 +98,20 @@ const (
 	FormWildcard IdentifierForm = iota
 	// FormID names exactly one object.
 	FormID
-	// FormSelector names a set by a typed predicate.
-	FormSelector
 )
 
 // Form reports the identifier form, and is the single place that decides it —
 // the role_grants_identifier_form check constraint enforces the same rule, so a
 // row that disagrees cannot be stored.
 func (g Grant) Form() IdentifierForm {
-	switch {
-	case g.Selector != nil:
-		return FormSelector
-	case g.ObjectID != nil:
+	if g.ObjectID != nil {
 		return FormID
-	default:
-		return FormWildcard
 	}
+	return FormWildcard
 }
 
 // Validate rejects a grant that cannot mean anything.
 func (g Grant) Validate() error {
-	if g.ObjectID != nil && g.Selector != nil {
-		return fmt.Errorf("%w: a grant names either an object or a selector, not both", ErrInvalidGrant)
-	}
 	if g.Action == "" {
 		return fmt.Errorf("%w: a grant has no action", ErrInvalidGrant)
 	}
@@ -134,12 +121,6 @@ func (g Grant) Validate() error {
 	if g.AccountID == model.NilID {
 		return fmt.Errorf("%w: a grant is not anchored to an account", ErrInvalidGrant)
 	}
-	if g.Selector != nil {
-		// No object type defines a selector today, so any grant carrying one is a
-		// grant nothing could evaluate. Refused rather than ignored: a stored
-		// selector that matched nothing would look like a permission somebody had.
-		return fmt.Errorf("%w: object type %q defines no selector", ErrInvalidGrant, g.Type)
-	}
 	if g.Type == TypeAny && g.ObjectID != nil {
 		return fmt.Errorf("%w: a wildcard object type cannot name one object — "+
 			"an identifier only means something within a type", ErrInvalidGrant)
@@ -147,42 +128,12 @@ func (g Grant) Validate() error {
 	return nil
 }
 
-// Selector is the reserved predicate form of a grant identifier. It carries no
-// fields, because no object type defines one; it exists so the three-form shape
-// of an identifier stays visible in the type rather than only in a comment.
-type Selector struct{}
-
-// EncodeSelector renders the selector for storage. Nil selectors store as SQL
-// NULL rather than as the JSON literal "null", so the identifier-form check
-// constraint can tell the two apart.
-func EncodeSelector(s *Selector) ([]byte, error) {
-	if s == nil {
-		return nil, nil
-	}
-	return json.Marshal(s)
-}
-
-// DecodeSelector reads a stored selector back.
-func DecodeSelector(raw []byte) (*Selector, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var s Selector
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, fmt.Errorf("%w: selector is not readable: %v", ErrInvalidGrant, err)
-	}
-	return &s, nil
-}
-
 // String renders a grant the way the design writes them, which is also what the
 // audit trail records: [type, id, action] with the flag.
 func (g Grant) String() string {
 	id := Wildcard
-	switch g.Form() {
-	case FormID:
+	if g.Form() == FormID {
 		id = g.ObjectID.String()
-	case FormSelector:
-		id = "{selector}"
 	}
 	suffix := ""
 	if g.Inheritable {

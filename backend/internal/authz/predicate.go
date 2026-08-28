@@ -90,9 +90,6 @@ func CompilePredicate(s Subject, action string, target ObjectType) Predicate {
 				return Predicate{All: true}
 			case FormID:
 				p.Columns["id"] = append(p.Columns["id"], *g.ObjectID)
-			case FormSelector:
-				// Reserved and unused; a grant carrying one is refused at write
-				// time, so a stored one contributes nothing.
 			}
 
 		case Contains(g.Type, target) && g.Inheritable:
