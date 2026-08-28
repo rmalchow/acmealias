@@ -81,6 +81,8 @@ test-go:
 .build-image: &build-image
   stage: build
   image: docker:27-cli
+  tags:
+    - shared
   # The runners have the Docker socket mounted (design D13/D15), so a plain
   # `docker buildx` works here without docker:dind.
   before_script:
@@ -139,6 +141,8 @@ build-acmesite:
 .publish-image: &publish-image
   stage: publish
   image: docker:27-cli
+  tags:
+    - shared
   rules:
     - if: $CI_COMMIT_TAG
   before_script:
