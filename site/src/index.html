@@ -161,17 +161,10 @@
         </div>
 
         <p class="note">
-          Your DNS provider keeps every other record. We can answer one name, and it is a name that
-          exists for this and nothing else.
-        </p>
-      </section>
-
-      <section class="why">
-        <h2>Why a CNAME and not an API token</h2>
-        <p>
-          Handing a certificate tool your DNS credentials gives it the power to change every record you
-          have, in order to change one. The alias model gives away exactly one thing: the right to
-          answer one name that exists for this purpose alone.
+          Your DNS provider keeps every other record. That <code>CNAME</code> delegates exactly one
+          capability — the right to answer one name, which exists for this and nothing else. A DNS API
+          token delegates all of them: the power to change every record you have, in order to change
+          one.
         </p>
       </section>
 

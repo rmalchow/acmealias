@@ -435,27 +435,17 @@ h1 {
     0 18px 40px rgb(0 0 0 / 45%);
 }
 
-.reasons h2,
-.why h2 {
+.reasons h2 {
   margin: 0 0 0.5rem;
   font-size: 1.05rem;
   letter-spacing: -0.01em;
 }
 
-.reasons p,
-.why p {
+.reasons p {
   margin: 0;
   color: var(--ink-dim);
 }
 
-.why {
-  padding-block: 3rem;
-  max-inline-size: 60ch;
-}
-
-.why h2 {
-  font-size: 1.35rem;
-}
 
 /* A link with a <code> chip inside it. The underline runs beneath the chip's own
    background and box, which chops the descenders and makes one phrase read as
