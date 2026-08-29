@@ -28,6 +28,52 @@ export function slugify(name: string): string {
 }
 
 /**
+ * A name and the slug derived from it, as one editable pair.
+ *
+ * A class rather than two fields and two handlers copied into every dialog that creates something
+ * named. The rule is small but it is not obvious — deriving stops on the first keystroke in the
+ * slug, an emptied slug resumes deriving WITHOUT refilling on the spot — and the second copy of a
+ * rule like that is where it drifts. The checkout dialog (buying a team account) needs the same
+ * pair inside a form that also carries an amount, so it holds one of these rather than reaching
+ * for the modal below.
+ *
+ * Bind it one-way with an explicit change handler — `[ngModel]="pair.name"` plus
+ * `(ngModelChange)="pair.setName($event)"` — not `[(ngModel)]`: the setters are the whole point,
+ * and two-way binding would write the field behind their backs.
+ */
+export class DerivedSlug {
+  name = "";
+  slug = "";
+
+  /**
+   * True once the operator has typed in the slug field themselves. From then on the name stops
+   * driving the slug: the one thing worse than not deriving a slug is overwriting the one somebody
+   * deliberately chose. Emptying the field hands control back — the next keystroke in the name
+   * starts deriving again — so a slug typed by mistake does not need the dialog reopened.
+   */
+  private edited = false;
+
+  setName(value: string): void {
+    this.name = value;
+    if (!this.edited) this.slug = slugify(value);
+  }
+
+  /**
+   * Note what this does NOT do on an empty value: refill the field from the name. Deleting the
+   * last character would then put the whole slug straight back, and the field could never be
+   * cleared. It stays empty until the name is typed in again.
+   */
+  setSlug(value: string): void {
+    this.slug = value;
+    this.edited = value !== "";
+  }
+
+  get complete(): boolean {
+    return this.name !== "" && this.slug !== "";
+  }
+}
+
+/**
  * "New project", "New load balancer" — anything created from a slug and a display name.
  *
  * One modal rather than one per object type: the two fields, the slug pattern and the
@@ -55,8 +101,8 @@ export function slugify(name: string): string {
           <input
             nz-input
             name="name"
-            [(ngModel)]="name"
-            (ngModelChange)="onNameChange($event)"
+            [ngModel]="pair.name"
+            (ngModelChange)="pair.setName($event)"
             required
             autocomplete="off"
           />
@@ -71,8 +117,8 @@ export function slugify(name: string): string {
           <input
             nz-input
             name="slug"
-            [(ngModel)]="slug"
-            (ngModelChange)="onSlugChange($event)"
+            [ngModel]="pair.slug"
+            (ngModelChange)="pair.setSlug($event)"
             required
             pattern="[a-z0-9-]+"
             autocomplete="off"
@@ -92,7 +138,7 @@ export function slugify(name: string): string {
           nzType="primary"
           type="submit"
           [nzLoading]="saving()"
-          [disabled]="!slug || !name"
+          [disabled]="!pair.complete"
         >
           Create
         </button>
@@ -117,36 +163,14 @@ export class NameSlugModalComponent {
 
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
-  name = "";
-  slug = "";
-
-  /**
-   * True once the operator has typed in the slug field themselves. From then on the name stops
-   * driving the slug: the one thing worse than not deriving a slug is overwriting the one somebody
-   * deliberately chose. Emptying the field hands control back — the next keystroke in the name
-   * starts deriving again — so a slug typed by mistake does not need the dialog reopened.
-   */
-  private slugEdited = false;
-
-  onNameChange(value: string): void {
-    if (!this.slugEdited) this.slug = slugify(value);
-  }
-
-  /**
-   * Note what this does NOT do on an empty value: refill the field from the name. Deleting the
-   * last character would then put the whole slug straight back, and the field could never be
-   * cleared. It stays empty until the name is typed in again.
-   */
-  onSlugChange(value: string): void {
-    this.slugEdited = value !== "";
-  }
+  readonly pair = new DerivedSlug();
 
   save(): void {
-    if (!this.slug || !this.name || this.saving()) return;
+    if (!this.pair.complete || this.saving()) return;
     this.saving.set(true);
     this.error.set(null);
     this.api
-      .post<unknown>(this.data.path, { slug: this.slug, name: this.name })
+      .post<unknown>(this.data.path, { slug: this.pair.slug, name: this.pair.name })
       .subscribe({
         next: (created) => this.ref.close(created),
         error: (err) => {

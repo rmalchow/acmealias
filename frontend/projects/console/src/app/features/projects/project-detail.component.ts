@@ -1,4 +1,5 @@
 import { Component, computed, inject, input, OnChanges, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzModalService } from 'ng-zorro-antd/modal';
@@ -6,7 +7,7 @@ import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiService, CAAStatus, CAN_WRITE, HelpHintComponent, CertificateState, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
+import { ApiService, CAAStatus, CAN_ADMIN_PROJECT, CAN_WRITE, HelpHintComponent, CertificateState, DelegationStatus, Domain, LBNode, PageHeaderComponent, Project, RecordCheck, SessionService, VerificationResult, apiErrorMessage, confirmAction, may , NOT_PERMITTED} from '@acme/shared';
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
@@ -353,6 +354,48 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
     <section>
       <app-project-usage-panel [projectId]="id()" />
     </section>
+
+    <!--
+      LAST ON THE PAGE, and that is the whole placement argument: nothing below it, so nobody
+      scrolling to the keys panel or the usage chart passes over a delete button on the way. It is
+      the one control here that destroys the thing the screen is about.
+
+      Disabled rather than hidden for somebody without the grant, like every other control in this
+      console (NOT_PERMITTED in @acme/shared). A member who cannot delete projects learns where the
+      capability lives and that it is a permission they lack, instead of asking support where the
+      button went. The server refuses it regardless of what is rendered — project.admin follows
+      membership of the account's unrestricted role, so in practice the owner is who gets it.
+
+      The copy names the refusal that actually happens. The API declines to delete a project that
+      still holds domains (ErrNotEmpty, inventory.DeleteProject) — saying so up here means reading
+      it before the attempt rather than as a red line afterwards.
+    -->
+    @if (project(); as p) {
+      <section class="danger-zone">
+        <div class="danger-text">
+          <h2>Delete this project</h2>
+          <p>
+            The project, its nodes and its API keys go, and clients using those keys stop being
+            able to answer challenges. A project that still has domains in it cannot be deleted —
+            delete the domains first. This cannot be undone.
+          </p>
+          @if (deleteError(); as msg) {
+            <p class="ac-error">{{ msg }}</p>
+          }
+        </div>
+        <button
+          nz-button
+          nzDanger
+          [disabled]="!canAdmin()"
+          [nzLoading]="deleting()"
+          nz-tooltip
+          [nzTooltipTitle]="canAdmin() ? null : NOT_PERMITTED"
+          (click)="deleteProject(p)"
+        >
+          Delete project
+        </button>
+      </section>
+    }
   `,
   styles: [
     `
@@ -439,6 +482,39 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
       .row-actions {
         white-space: nowrap;
       }
+
+      /* Set apart by a red frame rather than by distance alone: the sections above it are all
+         boxes in a column, and a delete button in one more of those reads as the next panel's
+         ordinary control. The text sits left and the button right, which is the shape every panel
+         head on this page already has. */
+      .danger-zone {
+        display: flex;
+        align-items: flex-start;
+        gap: 2rem;
+        flex-wrap: wrap;
+        padding: 1rem 1.25rem;
+        border: 1px solid var(--ac-error, #f5222d);
+        border-radius: 4px;
+      }
+      .danger-text {
+        flex: 1 1 20rem;
+      }
+      .danger-zone h2 {
+        margin-bottom: 0.25rem;
+      }
+      .danger-zone p {
+        margin: 0;
+        color: var(--ac-muted);
+        max-width: 60ch;
+      }
+      .danger-zone p + p {
+        margin-top: 0.5rem;
+      }
+      /* Pushed to the right edge, and kept there when the text wraps to its own line on a narrow
+         screen — the same auto margin the panel heads use. */
+      .danger-zone button {
+        margin-inline-start: auto;
+      }
     `,
   ],
 })
@@ -446,6 +522,7 @@ export class ProjectDetailComponent implements OnChanges {
   private readonly api = inject(ApiService);
   private readonly modal = inject(NzModalService);
   private readonly session = inject(SessionService);
+  private readonly router = inject(Router);
 
   readonly id = input.required<string>();
 
@@ -478,6 +555,24 @@ export class ProjectDetailComponent implements OnChanges {
 
   /** Whether this session may change this project's inventory — nodes and domains. */
   readonly canWrite = computed(() => may(this.project(), CAN_WRITE));
+
+  /**
+   * Whether this session may delete the project.
+   *
+   * A different permission from canWrite and deliberately so: emptying a project and destroying it
+   * are not the same power. `project.admin` is not granted per object at all — it follows
+   * membership of the account's unrestricted role (design P14), which is why somebody who may
+   * delete every domain in a project may still not delete the project.
+   */
+  readonly canAdmin = computed(() => may(this.project(), CAN_ADMIN_PROJECT));
+
+  readonly deleting = signal(false);
+  /**
+   * Kept apart from `error`, which renders at the top of the page. The refusal this one carries —
+   * a project that still holds domains — answers a button at the BOTTOM, and a message five
+   * screens above the control that produced it is a message nobody reads.
+   */
+  readonly deleteError = signal<string | null>(null);
 
   readonly subtitle = () => {
     const p = this.project();
@@ -815,6 +910,39 @@ export class ProjectDetailComponent implements OnChanges {
         this.verify();
       },
       error: (err) => this.error.set(apiErrorMessage(err)),
+    });
+  }
+
+  /**
+   * Delete the project, then leave — the screen is about an object that no longer exists, and
+   * reloading it would show its own 404.
+   *
+   * The list is navigated to rather than `history.back()`: this screen is reached from the
+   * switcher and from a bookmark as well as from the list, and back would return some people to
+   * the page they had just destroyed.
+   */
+  async deleteProject(p: Project): Promise<void> {
+    if (!this.canAdmin() || this.deleting()) return;
+    const ok = await confirmAction(this.modal, {
+      title: `Delete project “${p.name}”?`,
+      message:
+        'Its nodes and API keys go with it, and clients using those keys stop being able to ' +
+        'answer challenges. This cannot be undone.',
+      okText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    this.deleting.set(true);
+    this.deleteError.set(null);
+    this.api.delete(`/projects/${p.id}`).subscribe({
+      next: () => {
+        this.deleting.set(false);
+        void this.router.navigate(['/projects']);
+      },
+      error: (err) => {
+        this.deleting.set(false);
+        this.deleteError.set(apiErrorMessage(err));
+      },
     });
   }
 }

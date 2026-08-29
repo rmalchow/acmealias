@@ -4,7 +4,7 @@ import { provideHttpClientTesting } from "@angular/common/http/testing";
 import { provideNoopAnimations } from "@angular/platform-browser/animations";
 import { provideNzIconsTesting } from "ng-zorro-antd/icon/testing";
 import { NZ_MODAL_DATA, NzModalRef } from "ng-zorro-antd/modal";
-import { NameSlugModalComponent, slugify } from "./name-slug.modal";
+import { DerivedSlug, NameSlugModalComponent, slugify } from "./name-slug.modal";
 
 describe("slugify", () => {
   it("lower cases and hyphenates the words of a name", () => {
@@ -33,6 +33,48 @@ describe("slugify", () => {
   });
 });
 
+describe("DerivedSlug", () => {
+  /** What the operator does: one keystroke at a time, and the slug keeps up with each one. */
+  function type(pair: DerivedSlug, name: string): void {
+    for (let i = 1; i <= name.length; i++) pair.setName(name.slice(0, i));
+  }
+
+  it("derives the slug from the name as it is typed", () => {
+    const pair = new DerivedSlug();
+    type(pair, "ACME Shop");
+    expect(pair.slug).toBe("acme-shop");
+  });
+
+  it("stops deriving once the operator edits the slug themselves", () => {
+    const pair = new DerivedSlug();
+    type(pair, "ACME");
+    pair.setSlug("shop-eu");
+
+    type(pair, "ACME Shop");
+    expect(pair.slug).toBe("shop-eu");
+  });
+
+  it("resumes deriving after the slug is emptied, without refilling it on the spot", () => {
+    const pair = new DerivedSlug();
+    type(pair, "ACME");
+    pair.setSlug("shop");
+    pair.setSlug("");
+    expect(pair.slug).toBe("");
+
+    type(pair, "ACME Shop");
+    expect(pair.slug).toBe("acme-shop");
+  });
+
+  it("is incomplete until both fields have something in them", () => {
+    const pair = new DerivedSlug();
+    expect(pair.complete).toBe(false);
+    pair.setName("!!!");
+    expect(pair.complete).toBe(false); // a name with nothing sluggable in it
+    pair.setSlug("shop");
+    expect(pair.complete).toBe(true);
+  });
+});
+
 describe("NameSlugModalComponent", () => {
   function build(): NameSlugModalComponent {
     TestBed.configureTestingModule({
@@ -49,40 +91,9 @@ describe("NameSlugModalComponent", () => {
     return TestBed.createComponent(NameSlugModalComponent).componentInstance;
   }
 
-  /** What the operator does: one keystroke at a time, and the slug keeps up with each one. */
-  function type(c: NameSlugModalComponent, name: string): void {
-    for (let i = 1; i <= name.length; i++) {
-      c.name = name.slice(0, i);
-      c.onNameChange(c.name);
-    }
-  }
-
-  it("derives the slug from the name as it is typed", () => {
+  it("carries the derived pair, so the dialog gets the rule rather than a copy of it", () => {
     const c = build();
-    type(c, "ACME Shop");
-    expect(c.slug).toBe("acme-shop");
-  });
-
-  it("stops deriving once the operator edits the slug themselves", () => {
-    const c = build();
-    type(c, "ACME");
-    c.slug = "shop-eu";
-    c.onSlugChange(c.slug);
-
-    type(c, "ACME Shop");
-    expect(c.slug).toBe("shop-eu");
-  });
-
-  it("resumes deriving after the slug is emptied, without refilling it on the spot", () => {
-    const c = build();
-    type(c, "ACME");
-    c.slug = "shop";
-    c.onSlugChange(c.slug);
-    c.slug = "";
-    c.onSlugChange("");
-    expect(c.slug).toBe("");
-
-    type(c, "ACME Shop");
-    expect(c.slug).toBe("acme-shop");
+    c.pair.setName("ACME Shop");
+    expect(c.pair.slug).toBe("acme-shop");
   });
 });

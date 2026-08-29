@@ -6,7 +6,7 @@ import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzRadioModule } from 'ng-zorro-antd/radio';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
-import { Account, MARKETING_SITE, apiErrorMessage } from '@acme/shared';
+import { Account, DerivedSlug, MARKETING_SITE, apiErrorMessage } from '@acme/shared';
 import { AccountsService } from './accounts.service';
 
 /**
@@ -66,17 +66,44 @@ export interface CheckoutData {
 
     <form nz-form nzLayout="vertical" class="ac-modal-form" (ngSubmit)="save()">
       @if (data.mode === 'buy') {
+        <!--
+          Name first and the slug derived from it, the same way New project does it. Somebody
+          buying a team account knows what the team is called; the URL-safe spelling of it is a
+          consequence, not a second decision, and asking for the slug first opened the dialog on
+          the one field they had not thought about.
+
+          DerivedSlug and not NameSlugModalComponent itself, though the two fields are now
+          identical: this dialog also carries the not-live alert and an amount, and it POSTs to
+          /accounts with that amount, which the shared modal has no concept of. Sharing the pair
+          rather than the component keeps the rule in one place without pretending the two dialogs
+          are one.
+        -->
         <nz-form-item>
-          <nz-form-label nzRequired>Slug</nz-form-label>
-          <nz-form-control nzExtra="Lower case, digits and hyphens. Appears in URLs and CLI arguments.">
-            <input nz-input name="slug" [(ngModel)]="slug" required pattern="[a-z0-9-]+" autocomplete="off" />
+          <nz-form-label nzRequired>Name</nz-form-label>
+          <nz-form-control>
+            <input
+              nz-input
+              name="name"
+              [ngModel]="pair.name"
+              (ngModelChange)="pair.setName($event)"
+              required
+              autocomplete="off"
+            />
           </nz-form-control>
         </nz-form-item>
 
         <nz-form-item>
-          <nz-form-label nzRequired>Name</nz-form-label>
-          <nz-form-control>
-            <input nz-input name="name" [(ngModel)]="name" required autocomplete="off" />
+          <nz-form-label nzRequired>Slug</nz-form-label>
+          <nz-form-control nzExtra="Lower case, digits and hyphens. Appears in URLs and CLI arguments.">
+            <input
+              nz-input
+              name="slug"
+              [ngModel]="pair.slug"
+              (ngModelChange)="pair.setSlug($event)"
+              required
+              pattern="[a-z0-9-]+"
+              autocomplete="off"
+            />
           </nz-form-control>
         </nz-form-item>
       } @else {
@@ -145,8 +172,7 @@ export class CheckoutModalComponent implements OnInit {
   protected readonly saving = signal(false);
   protected readonly error = signal<string | null>(null);
 
-  protected slug = '';
-  protected name = '';
+  protected readonly pair = new DerivedSlug();
   protected amount: number | null = null;
 
   async ngOnInit(): Promise<void> {
@@ -164,7 +190,7 @@ export class CheckoutModalComponent implements OnInit {
 
   protected ready(): boolean {
     if (this.amount === null) return false;
-    return this.data.mode === 'credit' || (!!this.slug && !!this.name);
+    return this.data.mode === 'credit' || this.pair.complete;
   }
 
   protected async save(): Promise<void> {
@@ -174,7 +200,7 @@ export class CheckoutModalComponent implements OnInit {
     try {
       const account =
         this.data.mode === 'buy'
-          ? await this.accounts.buy(this.slug, this.name, this.amount as number)
+          ? await this.accounts.buy(this.pair.slug, this.pair.name, this.amount as number)
           : await this.accounts.checkout(this.data.account!.id, this.amount as number);
       // The account comes back through afterClose so the caller can show the new balance without
       // reloading the page — the balance is the one thing the person was here for.

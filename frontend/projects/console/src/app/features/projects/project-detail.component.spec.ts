@@ -1,11 +1,12 @@
 import { TestBed } from '@angular/core/testing';
+import { of } from 'rxjs';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { provideNzIconsTesting } from 'ng-zorro-antd/icon/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
-import { ApiService, DelegationStatus, Domain, Project, RecordCheck, VerificationResult } from '@acme/shared';
+import { ApiService, CAN_ADMIN_PROJECT, DelegationStatus, Domain, Project, RecordCheck, VerificationResult } from '@acme/shared';
 import { DelegationHelpModalComponent } from './delegation-help.modal';
 import { ProjectDetailComponent } from './project-detail.component';
 
@@ -320,7 +321,106 @@ describe('ProjectDetailComponent', () => {
     expect(c.checks(wild).tls?.colour).toBe('red');
   });
 
+  // --- deleting the project ------------------------------------------------
+
+  /**
+   * Stands in for the confirmation dialog, which this spec is not testing.
+   *
+   * confirmAction resolves on the modal ref's `afterClose`, so a ref carrying `of(answer)` is the
+   * whole dialog as far as the component is concerned. Spying on `confirm` also keeps a real modal
+   * out of the DOM, which would otherwise outlive the fixture.
+   */
+  function answerConfirm(answer: boolean): jasmine.Spy {
+    const spy = spyOn(TestBed.inject(NzModalService), 'confirm');
+    spy.and.returnValue({ afterClose: of(answer) } as unknown as NzModalRef);
+    return spy;
+  }
+
+  function adminProject(): Project {
+    return { ...project(), permittedActions: [CAN_ADMIN_PROJECT] } as Project;
+  }
+
+  /**
+   * The keys and interactions panels, answered emptily.
+   *
+   * They ask as soon as they render, and in these tests they DO render: awaiting the confirmation
+   * lets change detection run after the project arrives, which the synchronous tests above never
+   * reach. Neither panel is what this is about, and an unanswered request fails http.verify().
+   */
+  function panels(): void {
+    http.expectOne(`${BASE}/projects/7/keys`).flush([]);
+    http.expectOne((r) => r.url === `${BASE}/projects/7/interactions`).flush([]);
+  }
+
+  it('deletes the project and leaves for the list', async () => {
+    const fixture = open(adminProject());
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    const navigate = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+    answerConfirm(true);
+
+    await fixture.componentInstance.deleteProject(adminProject());
+    panels();
+    const req = http.expectOne(`${BASE}/projects/7`);
+    expect(req.request.method).toBe('DELETE');
+    req.flush(null, { status: 204, statusText: 'No Content' });
+
+    // The screen is about an object that no longer exists, so it must not stay on it — and it
+    // must not reload it either, which would paint a 404 over a delete that worked.
+    expect(navigate).toHaveBeenCalledWith(['/projects']);
+    expect(fixture.componentInstance.deleting()).toBeFalse();
+  });
+
+  it('asks first, and does nothing at all when the answer is no', async () => {
+    const fixture = open(adminProject());
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    const confirm = answerConfirm(false);
+
+    await fixture.componentInstance.deleteProject(adminProject());
+    panels();
+
+    expect(confirm).toHaveBeenCalled();
+    // No DELETE: http.verify() in afterEach is what asserts it, and a request made here would
+    // fail that instead of this line.
+    expect(fixture.componentInstance.deleting()).toBeFalse();
+  });
+
+  it('does not ask, let alone send, without project.admin', async () => {
+    // The button is disabled for this session, but a disabled button is a courtesy and this is
+    // the handler behind it. The server refuses regardless; the point here is that a screen
+    // without the grant never gets as far as the confirmation.
+    const fixture = open(project());
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    const confirm = answerConfirm(true);
+
+    await fixture.componentInstance.deleteProject(project());
+    panels();
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.canAdmin()).toBeFalse();
+  });
+
+  it('shows a refusal beside the button rather than at the top of the page', async () => {
+    // The refusal that actually happens: the API declines to delete a project that still holds
+    // domains. It belongs next to the control that produced it — `error` renders five screens up.
+    const fixture = open(adminProject());
+    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    const navigate = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+    answerConfirm(true);
+
+    await fixture.componentInstance.deleteProject(adminProject());
+    panels();
+    http
+      .expectOne(`${BASE}/projects/7`)
+      .flush({ error: 'project "shop" still has 1 domain(s), delete them first' }, { status: 409, statusText: 'Conflict' });
+
+    expect(fixture.componentInstance.deleteError()).toContain('delete them first');
+    expect(fixture.componentInstance.error()).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.deleting()).toBeFalse();
+  });
+
 });
+
 
 /**
  * The one rule carried over from the dialog this one was split out of (task 8.9): a lookup that
