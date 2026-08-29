@@ -150,14 +150,4 @@ export class AppComponent {
    */
   readonly accountKey = computed(() => this.accounts.current()?.id ?? 'none');
 
-  /**
-   * Leaving is not signing out. "No account selected" is a state the service understands and
-   * answers distinctly, so someone who has finished with one account gets back to the picker
-   * without ending their session. It moved into this menu when the switcher became a select,
-   * which has options but no place to hang a verb.
-   */
-  async leave(): Promise<void> {
-    await this.accounts.leave();
-    await this.router.navigateByUrl('/accounts');
-  }
 }

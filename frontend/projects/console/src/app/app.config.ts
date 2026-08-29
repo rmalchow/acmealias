@@ -16,7 +16,6 @@ import { NzModalModule } from 'ng-zorro-antd/modal';
 import { NzMessageModule } from 'ng-zorro-antd/message';
 import {
   CheckOutline,
-  ClusterOutline,
   DeleteOutline,
   EditOutline,
   CloseCircleOutline,
@@ -64,11 +63,6 @@ export const appConfig: ApplicationConfig = {
     // components. Adding an `nz-icon` to a template means adding it to this list.
     provideNzIcons([
       CheckOutline,
-      // `cluster` was never registered here — which never threw only because the switcher used to
-      // render nothing below two accounts. It renders always now (design C12), so this line is
-      // what stands between the first sign-in and a broken screen. It is no longer the account
-      // glyph (that is `team`); what still draws it is "Leave this account" in the user menu.
-      ClusterOutline,
       DeleteOutline,
       EditOutline,
       CloseCircleOutline,

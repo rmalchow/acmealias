@@ -72,20 +72,12 @@ export class AccountsService {
     await this.load();
   }
 
-  /**
-   * Leaves the account this session is acting in, without signing out.
-   *
-   * Selection is nullable for exactly this reason (design P19): "no account selected" is a state
-   * the service understands and answers distinctly, not an error to be avoided. A person in
-   * several accounts who has finished with one should not have to sign out to get back to the
-   * picker.
-   */
-  async leave(): Promise<void> {
-    await firstValueFrom(this.api.rootPost<void>('/accounts/none/select'));
-    this.api.setAccount(null);
-    await this.session.load();
-    await this.load();
-  }
+  // THERE IS NO leave(). It posted to /accounts/none/select for a "Leave this account" item in the
+  // user menu, and that item is gone; the picker is reached by the console's home link and by the
+  // switcher, neither of which has to drop the selection to get there. The ROUTE still exists and
+  // selection is still nullable (design P19) — "no account selected" remains a state the service
+  // answers distinctly, which is what a session lands in before it has chosen. Nothing in the
+  // console asks for it on purpose any more.
 
   /** The amounts a checkout may ask for, served from the same list the service validates against. */
   offer(): Promise<CheckoutOffer> {
