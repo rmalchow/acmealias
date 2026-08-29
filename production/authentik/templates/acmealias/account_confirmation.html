@@ -1,0 +1,53 @@
+{% extends "acmealias/base.html" %}
+{% load i18n %}
+
+{% block content %}
+<tr>
+  <td align="center">
+    <h1>{% blocktrans with username=user.username %}Hi {{ username }},{% endblocktrans %}</h1>
+  </td>
+</tr>
+<tr>
+  <td align="center">
+    <table border="0">
+      <tr>
+        <td align="center" style="max-width: 300px; padding: 20px 0; color: #212124;">
+          {% trans "Somebody — we hope you — registered this address with AcmeAlias. Press the button below to confirm that the address is yours." %}
+        </td>
+      </tr>
+      <tr>
+        <td align="center" class="btn btn-primary">
+          <a id="confirm" href="{{ url }}" rel="noopener noreferrer" target="_blank">{% trans 'Confirm address' %}</a>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+{% endblock %}
+
+{% comment %}
+  THE CLOSING SENTENCE DIFFERS FROM DEVELOPMENT'S, and it is the reason these
+  templates are copied rather than shared.
+
+  Development runs an approval step: `activate_user_on_success` is false there,
+  `is_active` means "we have admitted this person", and confirming an address is
+  genuinely not the last thing that has to happen. This deployment has no such
+  step — `activate_user_on_success` is true, `is_active` recovers its ordinary
+  meaning of "this address has been confirmed" — so the development sentence,
+  which promises a review and a second message, would be a lie told to every
+  person who signs up, and one that leaves them waiting for mail that never
+  comes.
+{% endcomment %}
+{% block sub_content %}
+<tr>
+  <td style="padding: 20px; font-size: 12px; color: #212124; word-break: break-all; overflow-wrap: break-word;" align="center">
+    {% blocktrans with url=url %}If that doesn't work, copy and paste the following link into your browser: {{ url }}{% endblocktrans %}
+  </td>
+</tr>
+<tr>
+  <td style="padding: 0 20px 20px; font-size: 12px; color: #212124;" align="center">
+    {% trans "That is the last step: once the address is confirmed you can sign in straight away." %}
+  </td>
+</tr>
+{% include "acmealias/_footer.html" %}
+{% endblock %}

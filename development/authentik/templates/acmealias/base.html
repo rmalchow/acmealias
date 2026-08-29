@@ -1,0 +1,130 @@
+{% comment %}
+  OUR OWN EMAIL SHELL, and the reason it exists rather than extending
+  `email/base.html` from the image is that the parts carrying authentik's name are
+  not in overridable blocks.
+
+  Extending it put THREE of them into every message we send:
+
+    * A header image, `<img src="cid:logo" alt="authentik logo">`. The image is
+      not the brand's — `authentik.stages.email.utils.logo_data()` opens the
+      hardcoded path `web/dist/assets/icons/icon_left_brand.png`, which is
+      authentik's own wordmark, and never consults the Brand object. So the
+      logo, the favicon and the title we set on the brand for the sign-in pages
+      have no effect here at all: every message led with somebody else's mark.
+    * `Powered by <a href="goauthentik.io">authentik</a>.` in the last row, which
+      sits outside every `{% block %}` and so cannot be replaced by a child
+      template.
+    * `{% block logo_url %}` is overridable, but overriding it only swaps one
+      remote image for another, and most clients refuse to load remote images in
+      a message from an unknown sender. A recipient would see a broken-image icon
+      where the sender's identification belongs.
+
+  A WORDMARK IN TEXT, then, not an image. It renders everywhere, it cannot be
+  blocked, it needs no attachment, and for a two-word name it costs nothing that
+  a logo would buy. If a real logo is wanted later it wants a hosted URL and a
+  text fallback, not this comment.
+
+  What is deliberately kept from their template: the table-in-table structure and
+  the inline styles. Email clients are not browsers — Outlook renders with Word's
+  engine, Gmail strips `<style>` from the head in some contexts — and this layout
+  is the shape that survives them. The class names stay identical so the two
+  content templates did not have to change.
+
+  The upgrade hazard is now gone rather than reduced. Extending their base meant
+  a release that renamed the file or its `content` / `sub_content` blocks would
+  break rendering, with the symptom being a configuration-error event in
+  authentik and a person who never receives their link. Nothing here depends on
+  their templates any more.
+{% endcomment %}
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width">
+
+    <style type="text/css">
+      body {
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+        color: #212124;
+      }
+
+      h1 {
+        font-family: Arial, sans-serif;
+        font-size: 20px;
+        line-height: 125%;
+        font-weight: 700;
+        margin: 0;
+        padding: 10px 0;
+      }
+
+      /* The wordmark. Letter-spacing rather than a font nobody has: a webfont in
+         an email is a request most clients refuse, and the fallback would be the
+         same Arial with none of the spacing. */
+      .wordmark {
+        font-family: Arial, sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: #212124;
+        text-decoration: none;
+      }
+
+      .btn-primary {
+        text-decoration: none;
+        color: #FFF;
+        background-color: #348eda;
+        border: solid #348eda;
+        width: 100%;
+        line-height: 2em;
+        font-weight: bold;
+        text-align: center;
+        cursor: pointer;
+        display: inline-block;
+        text-transform: capitalize;
+      }
+
+      .btn-primary a {
+        color: #fff;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrapper">
+      <center>
+        <div style="-ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%; table-layout: fixed; width: 100%; max-width: 448px; padding: 60px 20px; font-size: 14px;">
+          <table border="0" align="center" width="100%">
+            <tr>
+              <td style="padding: 20px; border: 1px solid #c1c1c1;">
+                <table width="100%" style="background-color: #FFFFFF; border-spacing: 0; margin-top: 15px;">
+                  <tr height="60">
+                    <td align="center" style="padding: 10px 0 20px;">
+                      <span class="wordmark">AcmeAlias</span>
+                    </td>
+                  </tr>
+                  {% block content %}
+                  {% endblock %}
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <table border="0" style="margin-top: 10px;" width="100%">
+                  <tr>
+                    <td style="background: #FAFBFB;">
+                      <table style="width: 100%;">
+                        {% block sub_content %}
+                        {% endblock %}
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </div>
+      </center>
+    </div>
+  </body>
+</html>

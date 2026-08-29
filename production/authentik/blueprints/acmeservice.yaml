@@ -175,7 +175,7 @@ entries:
     attrs:
       name: acmeservice-enrollment-email
       use_global_settings: true
-      template: email/account_confirmation.html
+      template: acmealias/account_confirmation.html
       activate_user_on_success: true
       # The provider's default subject is the name of the wrong product: the
       # recipient came to us, and the identity provider being separate software
@@ -235,7 +235,7 @@ entries:
     attrs:
       name: acmeservice-recovery-email
       use_global_settings: true
-      template: email/password_reset.html
+      template: acmealias/password_reset.html
       activate_user_on_success: false
       subject: "Password reset — AcmeAlias"
 

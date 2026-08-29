@@ -63,6 +63,23 @@ x-authentik: &authentik
     ACME_ADMIN_OIDC_CLIENT_SECRET: ${ACME_ADMIN_OIDC_CLIENT_SECRET}
   volumes:
     - ./authentik/blueprints:/blueprints/custom:ro
+    # /templates is authentik's default `email.template_dir`, so mounting it is
+    # the whole of the configuration — no environment variable names it.
+    #
+    # BOTH SERVICES NEED IT, and this anchor is why they get it. The server is
+    # what globs the directory to build the list of templates an email stage may
+    # name; the WORKER is what renders and sends. A template mounted on one and
+    # not the other is a stage that validates in the API and then fails at send
+    # time with a configuration-error event and no mail — a person who signed up
+    # and never heard from us.
+    #
+    # This mount was missing in production while it existed in development, so
+    # every address confirmation this deployment has ever sent used authentik's
+    # own template: an authentik wordmark as the header image, "Powered by
+    # authentik" under it, and the account being confirmed described as "your
+    # authentik account" — software the recipient never signed up for and does
+    # not know we run.
+    - ./authentik/templates:/templates:ro
     - ./authentik/media:/media
     # The brand names these by URL, so the files must exist where the server
     # publishes /static/dist from. Bind-mounts rather than uploads: an uploaded
