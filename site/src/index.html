@@ -568,128 +568,43 @@
       </section>
 
       <!--
-        Pricing, as a comparison rather than two cards side by side.
+        THE PRICING BLOCK IS PARKED, NOT DELETED — site/disabled/pricing.html holds it, outside the
+        directory build.sh copies, so the numbers are not in the shipped HTML at all. `hidden` or
+        `display: none` would have left them one View Source away on a site that cannot take a
+        payment yet — and so would naming them in this comment, which is why it does not. That file
+        says how to put the block back.
 
-        A comparison is the honest shape here because the free account is NOT a crippled version of
-        the paid one: the challenge answering, the API and the certificate observation are identical,
-        and a reader scanning two separate cards has to hold both in their head to notice that. Put
-        them in one table and the answer to "what do I actually get for money" is legible in a
-        glance — colleagues, roles and a project limit that goes away. Nothing is withheld from the
-        free account to make the paid one attractive.
-
-        The dashes matter as much as the ticks. A row where the free column is empty is a row about
-        OTHER PEOPLE, and a person working alone should be able to see at once that they are not
-        missing anything they would use.
-
-        A <table> and not a grid of divs: this is tabular data, a screen reader should announce it as
-        such, and the header cells are what make a row's dash mean "Personal: no colleagues" rather
-        than a dash floating in a box.
+        What is left of the section is the door. The call to action was never pricing — it is the
+        only way onto the service from this page apart from Sign in in the header — and a front page
+        that ends on "What this is not" with no way in reads as a project that has been abandoned
+        rather than one that is not selling yet.
       -->
       <section class="pricing">
-        <h2>What money buys</h2>
-        <p class="section-lede">
-          Everything technical is in both. What a team account adds is other people — and no project
-          limit, because credit is the limit instead.
-        </p>
-
-        <div class="table-scroll">
-          <table class="compare">
-            <caption class="sr-only">Personal and team accounts compared</caption>
-            <thead>
-              <tr>
-                <td></td>
-                <th scope="col">Personal</th>
-                <th scope="col">Team</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr class="row-price">
-                <th scope="row">Price</th>
-                <td><strong>Free</strong><span class="sub">not a trial, does not expire</span></td>
-                <td>
-                  <strong>39 ct</strong> per challenge
-                  <span class="sub">capped at 199 EUR a month, however many you answer</span>
-                </td>
-              </tr>
-              <tr>
-                <th scope="row">Projects</th>
-                <td>5</td>
-                <td>No limit</td>
-              </tr>
-              <tr>
-                <th scope="row">Domains per project</th>
-                <td>No limit</td>
-                <td>No limit</td>
-              </tr>
-              <tr>
-                <th scope="row">Challenge answering</th>
-                <td class="yes">Full</td>
-                <td class="yes">Full</td>
-              </tr>
-              <tr>
-                <th scope="row">API, CLI and audit trail</th>
-                <td class="yes">Yes</td>
-                <td class="yes">Yes</td>
-              </tr>
-              <tr>
-                <th scope="row">Certificate observation</th>
-                <td class="yes">Yes</td>
-                <td class="yes">Yes</td>
-              </tr>
-              <tr>
-                <th scope="row">Colleagues</th>
-                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
-                <td class="yes">Invited by email</td>
-              </tr>
-              <tr>
-                <th scope="row">Roles and permissions</th>
-                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
-                <td class="yes">Defined by you</td>
-              </tr>
-              <tr>
-                <th scope="row">Transfer ownership</th>
-                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
-                <td class="yes">Yes</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
         <!--
-          One text column and one button, on a line: the two paragraphs are both conditions on what
-          pressing the button gets you — what it costs, and what you actually receive — so they read
-          as one block, and the button sits opposite them rather than beneath a wall of text.
+          One button, alone on its line and right-aligned. Everything that used to sit beside it was
+          about what an account costs, and it went with the prices; a lone button needs no sentence
+          explaining that pressing it signs you up, and a heading over a single control is furniture.
 
           There is no "buy the team plan" button, and there cannot be. A team account has an owner, a
           roster and a balance, so it must be bought BY a user, from inside. A stranger pressing Buy
           would be sent to sign up first — the button they were not shown, with the real first step
-          hidden behind a word promising a different one. So both columns lead to one door, and the
-          second paragraph says so rather than leaving somebody to discover it after clicking.
+          hidden behind a word promising a different one. So there is one door, and it says the step
+          it actually performs.
         -->
         <div class="signup">
-          <div class="signup-text">
-            <p>
-              Credit is prepaid in 25, 50 or 100 EUR top-ups — no subscription, no minimum term. An
-              account without credit waits for you rather than deleting anything.
-            </p>
-            <p>
-              Both start here: signing up gives you a personal account, and a team account is
-              something you add from inside it.
-            </p>
-          </div>
           <!--
             Straight to the console's login route, which 302s on to the identity provider — NOT to
             the console's front page.
 
             The console shows a "log in or sign up" screen to anybody who arrives without a session,
             because being thrown at another hostname unannounced is the shape of a phishing redirect.
-            But somebody who has just pressed a button that says Sign Up Now has already answered
-            that question, and showing them a second button saying the same thing is a step that
-            exists only because two pages were built separately.
+            But somebody who has just pressed a button that says Sign up has already answered that
+            question, and showing them a second button saying the same thing is a step that exists
+            only because two pages were built separately.
           -->
           <a class="button" href="http://console.localhost/api/v1/auth/login">
             <span class="icon" aria-hidden="true">→</span>
-            Sign Up Now
+            Sign up
           </a>
         </div>
       </section>

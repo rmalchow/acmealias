@@ -1075,7 +1075,10 @@ h1 {
   margin-block-start: 2rem;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* flex-end, not space-between: the text that used to sit opposite the button went
+     with the prices, and space-between on a single child is just flex-start. Restoring
+     the parked pricing block (site/disabled/pricing.html) means putting this back. */
+  justify-content: flex-end;
   gap: 2rem;
   flex-wrap: wrap;
 }

@@ -1,0 +1,117 @@
+<!--
+  THE PRICING BLOCK, PARKED OUT OF THE BUILD.
+
+  This is the "What money buys" section that sat on the front page between "What this is not" and
+  the sign-up call to action. It was taken out of src/index.html rather than hidden with `hidden` or
+  `display: none`, because those still ship the numbers: 39 ct and 199 EUR would be one View Source
+  away, quotable by anybody, on a site that cannot take a payment yet. A price nobody can pay is a
+  price worth not publishing.
+
+  This file lives OUTSIDE src/, which is the only reason it is not published. site/build.sh copies
+  src/. into dist/ wholesale — every file, whatever its name or extension — so a `.disabled` suffix
+  inside src/ would have served this at its own URL.
+
+  To put it back: paste the block below into src/index.html immediately after the opening
+  `<section class="pricing">` tag, delete the `<h2>Getting an account</h2>` that replaced it, and
+  restore the credit paragraph inside `.signup-text` (it is the first `<p>`, kept below the block
+  for that purpose). The CSS was never removed — .pricing, .compare, .row-price and .table-scroll
+  are all still in src/styles.css, doing nothing until this returns.
+-->
+
+      <!--
+        Pricing, as a comparison rather than two cards side by side.
+
+        A comparison is the honest shape here because the free account is NOT a crippled version of
+        the paid one: the challenge answering, the API and the certificate observation are identical,
+        and a reader scanning two separate cards has to hold both in their head to notice that. Put
+        them in one table and the answer to "what do I actually get for money" is legible in a
+        glance — colleagues, roles and a project limit that goes away. Nothing is withheld from the
+        free account to make the paid one attractive.
+
+        The dashes matter as much as the ticks. A row where the free column is empty is a row about
+        OTHER PEOPLE, and a person working alone should be able to see at once that they are not
+        missing anything they would use.
+
+        A <table> and not a grid of divs: this is tabular data, a screen reader should announce it as
+        such, and the header cells are what make a row's dash mean "Personal: no colleagues" rather
+        than a dash floating in a box.
+      -->
+      <section class="pricing">
+        <h2>What money buys</h2>
+        <p class="section-lede">
+          Everything technical is in both. What a team account adds is other people — and no project
+          limit, because credit is the limit instead.
+        </p>
+
+        <div class="table-scroll">
+          <table class="compare">
+            <caption class="sr-only">Personal and team accounts compared</caption>
+            <thead>
+              <tr>
+                <td></td>
+                <th scope="col">Personal</th>
+                <th scope="col">Team</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="row-price">
+                <th scope="row">Price</th>
+                <td><strong>Free</strong><span class="sub">not a trial, does not expire</span></td>
+                <td>
+                  <strong>39 ct</strong> per challenge
+                  <span class="sub">capped at 199 EUR a month, however many you answer</span>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Projects</th>
+                <td>5</td>
+                <td>No limit</td>
+              </tr>
+              <tr>
+                <th scope="row">Domains per project</th>
+                <td>No limit</td>
+                <td>No limit</td>
+              </tr>
+              <tr>
+                <th scope="row">Challenge answering</th>
+                <td class="yes">Full</td>
+                <td class="yes">Full</td>
+              </tr>
+              <tr>
+                <th scope="row">API, CLI and audit trail</th>
+                <td class="yes">Yes</td>
+                <td class="yes">Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Certificate observation</th>
+                <td class="yes">Yes</td>
+                <td class="yes">Yes</td>
+              </tr>
+              <tr>
+                <th scope="row">Colleagues</th>
+                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
+                <td class="yes">Invited by email</td>
+              </tr>
+              <tr>
+                <th scope="row">Roles and permissions</th>
+                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
+                <td class="yes">Defined by you</td>
+              </tr>
+              <tr>
+                <th scope="row">Transfer ownership</th>
+                <td class="no"><span aria-hidden="true">—</span><span class="sr-only">No</span></td>
+                <td class="yes">Yes</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+<!--
+  The paragraph that was the first of the two in `.signup-text`, removed with the prices because it
+  is one of them. The second paragraph began "Both start here", where "both" meant the table's two
+  columns; with the table gone it referred to nothing, so it was reworded in place.
+-->
+<p>
+  Credit is prepaid in 25, 50 or 100 EUR top-ups — no subscription, no minimum term. An
+  account without credit waits for you rather than deleting anything.
+</p>
