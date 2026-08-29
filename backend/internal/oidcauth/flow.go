@@ -50,17 +50,16 @@ type Identity struct {
 	// carried only so the session row can hold it for logout. Nothing else
 	// reads it: every claim this service acts on has already been verified and
 	// extracted into the fields around it.
-	RawIDToken  string
-	// Email is the address the provider says this person controls, and it is
-	// EMPTY unless the provider also said it had verified it.
+	RawIDToken string
+	// Email is the address the provider says this person controls.
 	//
-	// That condition is the whole of it. An invitation is bound to an address
-	// (account-invitations V2), and the only thing that makes the binding real
-	// is that "this user's address is alice@corp.com" was PROVEN rather than
-	// typed. An unverified `email` claim is a string somebody chose about
-	// themselves; accepting it here would let anybody who can register claim
-	// any address and walk into any account they had been shown an invitation
-	// to.
+	// An invitation is bound to an address (account-invitations V2), so this is
+	// what decides whether an invited person is ever shown their invitation.
+	// What makes the binding trustworthy is authentik's enrolment, which
+	// confirms the address by emailing a link before the account can be used —
+	// NOT the `email_verified` claim, which authentik's stock scope mapping
+	// hardcodes to false for everybody. See emailClaim for the full argument and
+	// for the condition under which this stops being safe.
 	Email string
 }
 
@@ -171,26 +170,49 @@ func (s *Service) verifyCallback(r *http.Request) (*Identity, error) {
 		RawIDToken:  rawID,
 		DisplayName: displayName(claims, idTok.Subject),
 		Groups:      Groups(claims, s.cfg.OIDCGroupClaim, s.cfg.OIDCGroupPrefix),
-		Email:       verifiedEmail(claims),
+		Email:       emailClaim(claims),
 	}, nil
 }
 
-// verifiedEmail reads the `email` claim, and ONLY when `email_verified` is
-// true.
+// emailClaim reads the `email` claim, and NO LONGER REQUIRES `email_verified`.
 //
-// The two claims are separate in OIDC for exactly this reason and the second is
-// routinely ignored, which is how "bound to an address" quietly becomes "bound
-// to a string the user typed". A provider that omits email_verified is treated
-// as not having verified anything: absent is not true.
+// It did require it, and the argument was a good one: an unverified `email` is a
+// string somebody chose about themselves, an invitation is bound to an address
+// (account-invitations V2), and trusting the claim would let anybody who can
+// register claim any address and walk into the account they had been shown an
+// invitation to. That reasoning has not stopped being true. What changed is
+// where the verification is done.
+//
+// AUTHENTIK NEVER SAYS TRUE. Its stock `email` scope mapping — the one both
+// providers in this deployment use — is literally:
+//
+//	return {"email": request.user.email, "email_verified": False}
+//
+// hardcoded, for every user, including one whose address authentik itself proved
+// by emailing them a link and waiting for the click. So the check did not
+// distinguish verified addresses from unverified ones; it discarded ALL of them.
+// Every users.email row in this deployment was NULL, no invitation could match
+// any user, and the invitation screens had never had anything to display.
+//
+// THE PROOF IS IN THE ENROLMENT, NOT THE TOKEN. Nobody reaches this service
+// without an authentik account, and authentik's enrolment flow confirms the
+// address before the account can be used: the confirmation link IS the proof of
+// control, and it is the same proof an `email_verified: true` would have been
+// asserting. The claim is therefore trusted here because of what happened
+// upstream of it, not because the claim says so.
+//
+// THE CONDITION UNDER WHICH THIS BECOMES WRONG, so that it is written down
+// rather than rediscovered: add a federated source — a social login, a partner
+// IdP, anything where a person arrives with an address this deployment never
+// confirmed — and this function starts accepting addresses nobody proved. The
+// fix then is not to restore the check, which authentik will still answer False
+// to, but to make the mapping tell the truth: write a per-source attribute when
+// an address is confirmed and have a scope mapping return it.
 //
 // The value is lower-cased and trimmed here so that it matches invitations,
 // which are stored normalized. A comparison that normalizes one side only is a
 // comparison that fails on `Alice@corp.com`.
-func verifiedEmail(claims map[string]any) string {
-	verified, _ := claims["email_verified"].(bool)
-	if !verified {
-		return ""
-	}
+func emailClaim(claims map[string]any) string {
 	addr, _ := claims["email"].(string)
 	return strings.ToLower(strings.TrimSpace(addr))
 }

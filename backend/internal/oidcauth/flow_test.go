@@ -191,3 +191,38 @@ func TestDiscoveryIsLazyAndRetried(t *testing.T) {
 		t.Fatal("discovery result was not reused after a successful sign-in start")
 	}
 }
+
+// TestEmailClaimIsTakenAsGiven pins the decision recorded on emailClaim.
+//
+// It USED to require `email_verified: true`, which sounded right and, against
+// authentik, discarded every address there is: the stock scope mapping hardcodes
+// that claim to false even for a user whose address authentik itself confirmed
+// by emailing them a link. The result was an empty users.email column, and
+// invitations — which are bound to an address — that could never match anybody.
+//
+// What makes the address trustworthy is that enrolment sends the confirmation
+// mail before the account can be used. If a federated source is ever added, that
+// stops being true and this test is where the change starts.
+func TestEmailClaimIsTakenAsGiven(t *testing.T) {
+	tests := []struct {
+		name   string
+		claims map[string]any
+		want   string
+	}{
+		{"verified", map[string]any{"email": "alice@corp.example", "email_verified": true}, "alice@corp.example"},
+		{"unverified is still taken", map[string]any{"email": "alice@corp.example", "email_verified": false}, "alice@corp.example"},
+		{"absent verification claim is still taken", map[string]any{"email": "alice@corp.example"}, "alice@corp.example"},
+		// Normalized on the way in, because invitations are stored normalized and
+		// a comparison that normalizes one side only fails on a capital letter.
+		{"normalized", map[string]any{"email": "  Alice@Corp.Example  "}, "alice@corp.example"},
+		{"no claim at all", map[string]any{}, ""},
+		{"wrong type", map[string]any{"email": 42}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := emailClaim(tc.claims); got != tc.want {
+				t.Errorf("emailClaim(%v) = %q, want %q", tc.claims, got, tc.want)
+			}
+		})
+	}
+}
