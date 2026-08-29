@@ -94,7 +94,7 @@ func (a *admin) scopeFor(c echo.Context, accountID model.ID) (store.Scope, error
 	if err != nil {
 		return store.Scope{}, err
 	}
-	if !store.Usable(acc) {
+	if !store.Usable(acc, a.opts.Config.Monetized) {
 		// The Scope is NOT returned. A caller that got one and a refusal could
 		// use the first and ignore the second; returning the zero value means a
 		// handler that mishandles the error reads nothing rather than reading a
@@ -104,7 +104,7 @@ func (a *admin) scopeFor(c echo.Context, accountID model.ID) (store.Scope, error
 		// hangs off /accounts/:accountId directly rather than inside the scoped
 		// group, because the owner of a suspended account has to be able to pay
 		// for it and this is exactly what would refuse them (design C4, C5).
-		return store.Scope{}, fmt.Errorf("%w: %s", store.ErrAccountSuspended, store.SuspensionReason(acc))
+		return store.Scope{}, fmt.Errorf("%w: %s", store.ErrAccountSuspended, store.SuspensionReason(acc, a.opts.Config.Monetized))
 	}
 	return sc, nil
 }

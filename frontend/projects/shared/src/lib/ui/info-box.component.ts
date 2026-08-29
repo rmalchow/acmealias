@@ -74,6 +74,15 @@ const STORAGE_PREFIX = 'acme.infobox.';
   `,
   styles: [
     `
+      /* THE HOST IS BLOCK, and this is the line whose absence broke the spacing on two screens.
+         A component element has no default display, so it is INLINE — and a margin-block on an
+         inline box is ignored outright. Every call site that had asked for room around its alert
+         (.intro on the project list, .panel-note on the keys panel) went on asking, correctly, and
+         got nothing, so the box sat flush against the table under it. Setting it here rather than
+         at each call site is what stops the next one rediscovering it. */
+      :host {
+        display: block;
+      }
       .box {
         display: block;
       }

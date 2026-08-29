@@ -52,7 +52,7 @@ func TestIntegrationOnePersonalAccountPerUser(t *testing.T) {
 	// Team accounts are deliberately unlimited: paying for one must not consume
 	// the free slot.
 	for _, slug := range []string{"team-one", "team-two"} {
-		if _, err := CreateAccountWithOwner(context.Background(), db, slug, slug, owner, 25); err != nil {
+		if _, err := CreateAccountWithOwner(context.Background(), db, slug, slug, owner, 25, true); err != nil {
 			t.Fatalf("create team account %q: %v", slug, err)
 		}
 	}
@@ -121,7 +121,7 @@ func TestIntegrationAccountKindIsImmutable(t *testing.T) {
 		t.Fatal("a personal account was reclassified as a team account")
 	}
 
-	team, err2 := CreateAccountWithOwner(context.Background(), db, "team-immutable", "Team", owner, 25)
+	team, err2 := CreateAccountWithOwner(context.Background(), db, "team-immutable", "Team", owner, 25, true)
 	if err2 != nil {
 		t.Fatalf("create team account: %v", err2)
 	}
@@ -168,7 +168,7 @@ func TestIntegrationTeamAccountTransfers(t *testing.T) {
 	owner := seedUser(t, db, "u-team-owner")
 	recipient := seedUser(t, db, "u-team-recipient")
 
-	acc, err := CreateAccountWithOwner(ctx, db, "team-transfer", "Team", owner, 25)
+	acc, err := CreateAccountWithOwner(ctx, db, "team-transfer", "Team", owner, 25, true)
 	if err != nil {
 		t.Fatalf("create team account: %v", err)
 	}

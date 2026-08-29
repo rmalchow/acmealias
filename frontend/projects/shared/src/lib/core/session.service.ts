@@ -41,6 +41,19 @@ export interface Me {
    * selected" therefore means "you have not yet said which", never "you have nothing".
    */
   selectedAccountId: string | null;
+  /**
+   * Whether this deployment charges for anything.
+   *
+   * A fact about the DEPLOYMENT and not about an account, which is why it rides here rather than on
+   * each account: every account in an unmonetized service is unmonetized, and the console needs the
+   * answer before an account is selected — the upgrade screen has to know whether it is offering a
+   * purchase or a creation.
+   *
+   * The credit machinery is untouched underneath. Balances are stored, top-ups recorded, the audit
+   * trail carries them; what this decides is whether any of it is SHOWN, and whether a balance gates
+   * anything server-side (config.Config.Monetized, store.Usable).
+   */
+  monetized: boolean;
 }
 
 /** Where the browser-side of the BFF sign-in starts; the backend 302s on to the IdP. */

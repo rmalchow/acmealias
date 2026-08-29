@@ -23,6 +23,7 @@ import (
 // question is answered (design C3, C6).
 //
 //	usable(account) = kind == personal
+//	                  OR NOT monetized
 //	                  OR (credits > 0 AND NOT staff_suspended)
 //
 // Three properties are worth being explicit about, because each of them was a
@@ -54,11 +55,27 @@ import (
 // A nil account is not usable. That is not a real state — every caller has just
 // read the row — and it answers false rather than panicking because the failure
 // mode of the alternative is a permitted request.
-func Usable(acc *model.Account) bool {
+//
+// `monetized` is config.Config.Monetized, and it is a PARAMETER rather than a
+// package variable because this function is the formula and a formula that reads
+// hidden state is a formula nobody can test a row against. Threading it costs
+// four call sites; the alternative costs a global whose value depends on whether
+// anything called a setter first.
+//
+// Note where the new clause sits: after the personal test and before the credit
+// test, so an unmonetized deployment still cannot be staff-suspended out of
+// existence by accident — a staff suspension of a TEAM account is honoured only
+// when money is real, which is the only situation where "suspended" has a
+// remedy the owner can act on. `staff-plane` is the change that will decide
+// whether it should bite regardless, and this is the line it edits.
+func Usable(acc *model.Account, monetized bool) bool {
 	if acc == nil {
 		return false
 	}
 	if acc.Kind == model.AccountKindPersonal {
+		return true
+	}
+	if !monetized {
 		return true
 	}
 	return acc.Credits > 0 && !acc.StaffSuspended
@@ -69,9 +86,9 @@ func Usable(acc *model.Account) bool {
 // comparison (C3) while the message must distinguish the two suspensions: one is
 // fixed by paying and the other is not, and C5's whole point is that a refusal
 // carries its remedy. It returns "" for a usable account.
-func SuspensionReason(acc *model.Account) string {
+func SuspensionReason(acc *model.Account, monetized bool) string {
 	switch {
-	case Usable(acc):
+	case Usable(acc, monetized):
 		return ""
 	case acc == nil:
 		return "the account could not be read"

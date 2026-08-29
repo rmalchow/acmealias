@@ -326,7 +326,7 @@ func challengeAccount(t *testing.T, db *gorm.DB) store.Scope {
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
-	acc, err := store.CreateAccountWithOwner(ctx, db, "challenge-fixture", "Challenge Fixture", owner.ID, 25)
+	acc, err := store.CreateAccountWithOwner(ctx, db, "challenge-fixture", "Challenge Fixture", owner.ID, 25, true)
 	if err != nil {
 		t.Fatalf("create account: %v", err)
 	}

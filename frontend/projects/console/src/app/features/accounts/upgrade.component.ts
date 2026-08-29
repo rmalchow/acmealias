@@ -1,10 +1,10 @@
-import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzModalService } from 'ng-zorro-antd/modal';
-import { Account, InfoBoxComponent, NOT_IN_PERSONAL_ACCOUNT, PageHeaderComponent } from '@acme/shared';
+import { Account, InfoBoxComponent, NOT_IN_PERSONAL_ACCOUNT, PageHeaderComponent, SessionService } from '@acme/shared';
 import { openCheckout } from './checkout.modal';
 
 /**
@@ -65,24 +65,40 @@ import { openCheckout } from './checkout.modal';
 
         <dt>Projects</dt>
         <dd>
-          As many as you need. A personal account holds five, which is what makes it free; a team
-          account is limited by its balance instead.
+          As many as you need. A personal account holds five; a team account has no limit.
         </dd>
 
-        <dt>Credits</dt>
-        <dd>
-          A team account works while its balance is above zero. You add credit here, and you can
-          add more at any time from Settings.
-        </dd>
+        <!--
+          THE CREDITS ROW IS BEHIND THE SWITCH, not deleted. A deployment that charges has to
+          explain the balance on the screen where somebody acquires one; a deployment that charges
+          nobody must not describe a limit it does not apply, and "a team account works while its
+          balance is above zero" is exactly the sentence that would send a customer looking for a
+          Settings panel with nothing in it.
+        -->
+        @if (monetized()) {
+          <dt>Credits</dt>
+          <dd>
+            A team account works while its balance is above zero. You add credit here, and you can
+            add more at any time from Settings.
+          </dd>
+        }
       </dl>
 
       <!--
-        Buying IS creating (design C1): there is no unfunded team account to make first and pay
-        for later, so this button is the only way one comes into existence.
+        Buying IS creating (design C1): there is no unfunded team account to make first and pay for
+        later, so this button is the only way one comes into existence. Where nothing is charged
+        that sentence loses its first half and the button says the half that is left.
+
+        No cart icon off the monetized path, and not merely because the word changed: a trolley is
+        a promise that the next screen asks for money, and the next screen asks for a name.
       -->
       <button nz-button nzType="primary" nzSize="large" (click)="buy()">
-        <span nz-icon nzType="shopping-cart"></span>
-        Buy now
+        @if (monetized()) {
+          <span nz-icon nzType="shopping-cart"></span>
+          Buy now
+        } @else {
+          Create
+        }
       </button>
 
       <!--
@@ -100,7 +116,7 @@ import { openCheckout } from './checkout.modal';
       <app-info-box
         key="personal-is-safe"
         heading="Your personal account is not affected"
-        [text]="personalIsSafe"
+        [text]="personalIsSafe()"
       />
     </div>
   `,
@@ -109,14 +125,20 @@ import { openCheckout } from './checkout.modal';
       .up {
         max-width: 44rem;
       }
-      /* The note under the button needs room above it. nz-alert's own margin is a BOTTOM one, set
-       * for the alerts higher up the page that precede their content; this one follows the control
-       * it qualifies, so without a top margin it sits against the button and reads as part of it. */
-      .up > nz-alert:last-of-type {
+      /* The note under the button needs room above it. The box's own margin is a BOTTOM one, set
+       * for the boxes higher up the page that precede their content; this one FOLLOWS the control
+       * it qualifies, so without a top margin it sits against the button and reads as part of it.
+       *
+       * It selects app-info-box and not nz-alert. It said nz-alert until these boxes became
+       * collapsible, at which point the selector matched nothing and the button and the box closed
+       * up against each other — a rule that silently stops applying is the failure mode of styling
+       * by element name, and the reason this one now names the component. */
+      .up > app-info-box:last-of-type {
         margin-block-start: 1.25rem;
       }
-      nz-alert {
-        display: block;
+      /* Names the component, not the element it used to render. app-info-box sets its own
+         display; what is left here is the gap this screen wants between its boxes. */
+      app-info-box {
         margin-block-end: 1.5rem;
       }
       .lead {
@@ -141,15 +163,33 @@ import { openCheckout } from './checkout.modal';
   ],
 })
 export class UpgradeComponent {
-  /** The note's body. A field rather than markup so the sentences stay one paragraph. */
-  protected readonly personalIsSafe =
-    'Buying does not change your personal account, move anything out of it, or use it up. ' +
-    'Projects are not permanently tied to the account they were made in either — moving them ' +
-    'between accounts is not built yet, and when it is, nothing you create now will be stranded.';
-
-
   private readonly modal = inject(NzModalService);
   private readonly router = inject(Router);
+  private readonly session = inject(SessionService);
+
+  /**
+   * Whether this deployment charges for anything, from /me.
+   *
+   * Everything about money on this screen hangs off it — the Credits row, the word on the button,
+   * the trolley, the first clause of the note below it. Not deleted, because the credit machinery
+   * underneath is intact and this screen is what a deployment that turns the switch on needs to
+   * have kept.
+   *
+   * It defaults to FALSE while /me is still loading, which is the safe direction: a screen that
+   * flickers "Buy now" on a service that charges nobody is worse than one that says Create and
+   * gains a price a moment later, because only the first one is a claim about money.
+   */
+  protected readonly monetized = computed(() => this.session.me()?.monetized ?? false);
+
+  /** The note's body. A field rather than markup so the sentences stay one paragraph. */
+  protected readonly personalIsSafe = computed(
+    () =>
+      (this.monetized()
+        ? 'Buying does not change your personal account, move anything out of it, or use it up. '
+        : 'Adding one does not change your personal account, move anything out of it, or use it up. ') +
+      'Projects are not permanently tied to the account they were made in either — moving them ' +
+      'between accounts is not built yet, and when it is, nothing you create now will be stranded.',
+  );
 
   /**
    * The screen somebody asked for and did not get, when a guard sent them here. Bound from the
@@ -161,7 +201,7 @@ export class UpgradeComponent {
   protected readonly NOT_IN_PERSONAL_ACCOUNT = NOT_IN_PERSONAL_ACCOUNT;
 
   protected buy(): void {
-    openCheckout(this.modal, { mode: 'buy' }).afterClose.subscribe((created?: Account) => {
+    openCheckout(this.modal, { mode: 'buy' }, this.monetized()).afterClose.subscribe((created?: Account) => {
       // The service selects a freshly bought account for its owner, so the honest next screen is
       // the account itself rather than this one with a message on it.
       if (created) void this.router.navigateByUrl('/projects');

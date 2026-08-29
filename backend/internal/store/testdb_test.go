@@ -199,7 +199,7 @@ func scopedDB(t *testing.T) (*gorm.DB, Scope) {
 func seedAccount(t *testing.T, db *gorm.DB, slug string) Scope {
 	t.Helper()
 	owner := seedUser(t, db, "owner:"+slug)
-	acc, err := CreateAccountWithOwner(context.Background(), db, slug, slug, owner, 25)
+	acc, err := CreateAccountWithOwner(context.Background(), db, slug, slug, owner, 25, true)
 	if err != nil {
 		t.Fatalf("create account %q: %v", slug, err)
 	}

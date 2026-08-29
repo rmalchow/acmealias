@@ -272,8 +272,18 @@ func GetAccount(ctx context.Context, db *gorm.DB, sc Scope) (*model.Account, err
 // --credits); this is what a third one — a repair script, a seed, the staff
 // plane — walks into instead of quietly producing an account that is broken from
 // its first instant.
-func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string, userID model.ID, credits int64) (*model.Account, error) {
-	if credits <= 0 {
+//
+// AND IT ASKS WHETHER MONEY IS REAL, because its entire premise is that zero
+// means suspended. That is true only where a balance gates something: with
+// config.Config.Monetized off, store.Usable returns true whatever the balance,
+// so a team account at zero is an ordinary working account and refusing to
+// create one refuses the only kind an unmonetized deployment ever makes. This
+// is the guard that produced "a team account is created by funding it" on a
+// deployment that funds nothing, from the Create button on a screen that had
+// stopped mentioning money — the handler had been taught the switch and the
+// floor beneath it had not.
+func CreateAccountWithOwner(ctx context.Context, db *gorm.DB, slug, name string, userID model.ID, credits int64, monetized bool) (*model.Account, error) {
+	if monetized && credits <= 0 {
 		return nil, fmt.Errorf("%w: a team account is created by funding it, and %d leaves it suspended "+
 			"from its first instant (design C8)", ErrAmountNotOffered, credits)
 	}

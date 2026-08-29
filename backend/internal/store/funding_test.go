@@ -60,10 +60,14 @@ func TestUsableIsTheWholeRule(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Usable(tc.acc); got != tc.want {
+			// The table is the MONETIZED deployment, which is where the
+			// predicate has anything to decide. The unmonetized case is one
+			// answer for every row and is asserted below rather than doubling
+			// this table with a column whose value never varies.
+			if got := Usable(tc.acc, true); got != tc.want {
 				t.Fatalf("Usable = %v, want %v", got, tc.want)
 			}
-			reason := SuspensionReason(tc.acc)
+			reason := SuspensionReason(tc.acc, true)
 			if tc.want && reason != "" {
 				t.Fatalf("a usable account carries the reason %q", reason)
 			}
@@ -76,8 +80,35 @@ func TestUsableIsTheWholeRule(t *testing.T) {
 	// The two suspensions must not be described in the same sentence: one is
 	// fixed by paying and one is not, and a message that does not distinguish
 	// them sends somebody to buy credit that will change nothing.
-	if SuspensionReason(team(0, false)) == SuspensionReason(team(100, true)) {
+	if SuspensionReason(team(0, false), true) == SuspensionReason(team(100, true), true) {
 		t.Fatal("running out of credit and being stopped by staff read as the same refusal")
+	}
+
+	// UNMONETIZED: a balance decides nothing, because nobody was asked for one.
+	// A zero balance is not a statement about a customer who was never billed,
+	// and refusing them would be refusing them for not paying a price that was
+	// never quoted.
+	for _, acc := range []*model.Account{team(0, false), team(0, true), team(100, false), personal(0, false)} {
+		if !Usable(acc, false) {
+			t.Errorf("Usable(%+v, monetized=false) = false; an unmonetized deployment charges nobody", acc)
+		}
+		if r := SuspensionReason(acc, false); r != "" {
+			t.Errorf("an unmonetized account carries the refusal %q", r)
+		}
+	}
+
+	// The one thing the switch must NOT do is resurrect an account a human
+	// stopped for a reason that has nothing to do with money... except that it
+	// does, and deliberately: see the note in Usable. This asserts the choice
+	// rather than leaving it to be discovered.
+	if !Usable(team(0, true), false) {
+		t.Error("a staff suspension bites on an unmonetized deployment; Usable says it should not, and staff-plane is the change that revisits it")
+	}
+
+	// A missing account is still not usable, whatever the mode. The failure mode
+	// of the alternative is a permitted request.
+	if Usable(nil, false) {
+		t.Error("a nil account is usable when unmonetized")
 	}
 }
 
@@ -205,7 +236,7 @@ func TestIntegrationCreditAddsUp(t *testing.T) {
 	db, _ := migratedDB(t)
 	ctx := context.Background()
 	owner := seedUser(t, db, "u-credit")
-	acc, err := CreateAccountWithOwner(ctx, db, "credited", "Credited", owner, 25)
+	acc, err := CreateAccountWithOwner(ctx, db, "credited", "Credited", owner, 25, true)
 	if err != nil {
 		t.Fatalf("create account: %v", err)
 	}

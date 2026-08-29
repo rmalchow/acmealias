@@ -22,7 +22,7 @@ describe('roleGuard', () => {
   });
 
   function signedInWith(...roles: Role[]) {
-    session.me.set({ subject: 'idp|test', displayName: 'Test', groups: [], roles, selectedAccountId: 'acct-1', permissions: [] });
+    session.me.set({ subject: 'idp|test', displayName: 'Test', groups: [], roles, selectedAccountId: 'acct-1', permissions: [], monetized: false });
   }
 
   it('lets a holder of one of the allowed roles through', () => {

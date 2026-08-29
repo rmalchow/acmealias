@@ -53,7 +53,7 @@ describe('authInterceptor', () => {
   });
 
   it('prompts instead of navigating when a session expires mid-use', () => {
-    session.me.set({ subject: 'idp|test', displayName: 'Test', groups: [], roles: ['READ_ONLY'], selectedAccountId: 'acct-1', permissions: [] });
+    session.me.set({ subject: 'idp|test', displayName: 'Test', groups: [], roles: ['READ_ONLY'], selectedAccountId: 'acct-1', permissions: [], monetized: false });
     fail401();
     expect(session.expired()).toBeTrue();
     expect(signIn).not.toHaveBeenCalled();

@@ -22,13 +22,21 @@ function account(over: Partial<Account>): Account {
   };
 }
 
-function signedIn(): void {
+/**
+ * A signed-in session.
+ *
+ * `monetized` defaults to FALSE, which is what this deployment runs and therefore what most of
+ * these tests should be asserting against. The one test about the balance warning passes true,
+ * because a warning about running out of credit is only a fact where credit runs out.
+ */
+function signedIn(monetized = false): void {
   TestBed.inject(SessionService).me.set({
     subject: 'idp|1',
     displayName: 'Reader',
     groups: [],
     roles: [],
     permissions: [],
+    monetized,
     selectedAccountId: 'acct-1',
   });
 }
@@ -124,13 +132,26 @@ describe('AppComponent', () => {
     expect(fixture.componentInstance.nav()).toEqual([]);
   });
 
-  it('warns before the balance reaches zero', () => {
-    signedIn();
+  it('warns before the balance reaches zero, where a balance means something', () => {
+    signedIn(true);
     TestBed.inject(AccountsService).accounts.set([account({ credits: 10 })]);
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     expect(fixture.componentInstance.lowBalance()?.credits).toBe(10);
     expect(fixture.nativeElement.textContent).toContain('stop renewing');
+  });
+
+  it('says nothing about a balance where nothing is charged', () => {
+    // The warning names a consequence — at zero the account stops — that an unmonetized
+    // deployment never carries out, because store.Usable ignores the balance there. Showing it
+    // would be threatening somebody with a refusal that cannot happen.
+    signedIn(false);
+    TestBed.inject(AccountsService).accounts.set([account({ credits: 10 })]);
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.lowBalance()).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('stop renewing');
+    expect(fixture.nativeElement.textContent).not.toContain('EUR');
   });
 
   it('prompts when the session has expired', () => {

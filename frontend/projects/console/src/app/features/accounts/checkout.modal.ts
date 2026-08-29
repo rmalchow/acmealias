@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzFormModule } from 'ng-zorro-antd/form';
@@ -6,7 +6,7 @@ import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzRadioModule } from 'ng-zorro-antd/radio';
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from 'ng-zorro-antd/modal';
-import { Account, DerivedSlug, MARKETING_SITE, apiErrorMessage } from '@acme/shared';
+import { Account, DerivedSlug, MARKETING_SITE, SessionService, apiErrorMessage } from '@acme/shared';
 import { AccountsService } from './accounts.service';
 
 /**
@@ -55,14 +55,22 @@ export interface CheckoutData {
       about the state of a business, and the page it points at can say more and change without a
       release.
     -->
-    <nz-alert class="not-live" nzType="warning" nzMessage="Payment is not live" [nzDescription]="notLive" />
-    <ng-template #notLive>
-      Nothing is charged and no card is asked for. The credit is real — it lands in the account and
-      is spent like any other — but no money moves.
-      <a [href]="about" target="_blank" rel="noopener">
-        There are other ways to support this</a
-      >.
-    </ng-template>
+    <!--
+      THE WARNING EXISTS ONLY WHERE THERE IS SOMETHING TO WARN ABOUT. It said "payment is not live"
+      beside a form that asks for money; a deployment that asks for no money has no such form, and a
+      notice that nothing is being charged, on a screen that charges nothing and mentions no price,
+      is a sentence that raises the question it answers.
+    -->
+    @if (monetized()) {
+      <nz-alert class="not-live" nzType="warning" nzMessage="Payment is not live" [nzDescription]="notLive" />
+      <ng-template #notLive>
+        Nothing is charged and no card is asked for. The credit is real — it lands in the account and
+        is spent like any other — but no money moves.
+        <a [href]="about" target="_blank" rel="noopener">
+          There are other ways to support this</a
+        >.
+      </ng-template>
+    }
 
     <form nz-form nzLayout="vertical" class="ac-modal-form" (ngSubmit)="save()">
       @if (data.mode === 'buy') {
@@ -113,6 +121,7 @@ export interface CheckoutData {
         </p>
       }
 
+      @if (monetized()) {
       <nz-form-item>
         <nz-form-label nzRequired>Amount</nz-form-label>
         <nz-form-control>
@@ -126,6 +135,7 @@ export interface CheckoutData {
           </nz-radio-group>
         </nz-form-control>
       </nz-form-item>
+      }
 
       @if (error(); as msg) {
         <p class="ac-error">{{ msg }}</p>
@@ -135,7 +145,7 @@ export interface CheckoutData {
       <div class="actions">
         <button nz-button type="button" (click)="ref.close()">Cancel</button>
         <button nz-button nzType="primary" type="submit" [nzLoading]="saving()" [disabled]="!ready()">
-          {{ data.mode === 'buy' ? 'Buy now' : 'Add credit' }}
+          {{ okLabel() }}
         </button>
       </div>
     </form>
@@ -164,6 +174,7 @@ export class CheckoutModalComponent implements OnInit {
   protected readonly about = MARKETING_SITE + '/about';
 
   private readonly accounts = inject(AccountsService);
+  private readonly session = inject(SessionService);
   readonly ref = inject(NzModalRef<CheckoutModalComponent, Account | undefined>);
   readonly data = inject<CheckoutData>(NZ_MODAL_DATA);
 
@@ -188,8 +199,31 @@ export class CheckoutModalComponent implements OnInit {
     }
   }
 
+  /**
+   * Whether this deployment charges for anything, from /me.
+   *
+   * The dialog keeps BOTH shapes rather than losing the paid one: the credit machinery underneath
+   * is intact, and this is the screen a deployment that turns the switch on gets back.
+   */
+  protected readonly monetized = computed(() => this.session.me()?.monetized ?? false);
+
+  /**
+   * What the primary button says.
+   *
+   * `Create` and not `Buy now` where nothing is charged, and the distinction is not decoration: a
+   * button that says Buy is a promise about what happens next, and on this deployment what happens
+   * next is that an account exists.
+   */
+  protected readonly okLabel = computed(() => {
+    if (this.data.mode === 'credit') return 'Add credit';
+    return this.monetized() ? 'Buy now' : 'Create';
+  });
+
   protected ready(): boolean {
-    if (this.amount === null) return false;
+    // The amount is only a requirement where it is a question. Unmonetized, the service ignores
+    // whatever is sent (createAccount zeroes it), so demanding one here would be the console
+    // enforcing a rule the service has stopped having.
+    if (this.monetized() && this.amount === null) return false;
     return this.data.mode === 'credit' || this.pair.complete;
   }
 
@@ -212,10 +246,26 @@ export class CheckoutModalComponent implements OnInit {
   }
 }
 
-/** Opens checkout. `afterClose` emits the funded account, or undefined if it was cancelled. */
-export function openCheckout(modal: NzModalService, data: CheckoutData): NzModalRef<CheckoutModalComponent, Account | undefined> {
+/**
+ * Opens checkout. `afterClose` emits the funded account, or undefined if it was cancelled.
+ *
+ * `monetized` is a PARAMETER and not read from the session here, which looks like duplication of
+ * what the component already computes and is not. A modal's title is set when the modal is created,
+ * from outside any component, so this function runs in no injection context and cannot reach
+ * SessionService at all — and the caller that opens a `buy` dialog is the upgrade screen, which
+ * has the answer in hand because its own button is labelled from it. Defaulted to false so the two
+ * `credit` callers, whose title does not depend on it, say nothing about money they do not mean.
+ */
+export function openCheckout(
+  modal: NzModalService,
+  data: CheckoutData,
+  monetized = false,
+): NzModalRef<CheckoutModalComponent, Account | undefined> {
   return modal.create<CheckoutModalComponent, CheckoutData>({
-    nzTitle: data.mode === 'buy' ? 'Buy a team account' : 'Add credit',
+    // "Buy a team account" is a claim about what pressing the button does. Where nothing is
+    // charged it does not buy anything, and the heading of the dialog is the first place somebody
+    // reads what they are about to do.
+    nzTitle: data.mode !== 'buy' ? 'Add credit' : monetized ? 'Buy a team account' : 'Create a team account',
     nzContent: CheckoutModalComponent,
     nzData: data,
     nzFooter: null,

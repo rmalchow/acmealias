@@ -82,6 +82,29 @@ type Config struct {
 	// internet.
 	AllowAccountCreation bool
 
+	// Monetized decides whether an account's balance means anything
+	// (ACME_MONETIZED, default FALSE).
+	//
+	// The credit machinery is built and wired and this switch does not remove
+	// any of it: balances are still stored, top-ups still recorded, the audit
+	// trail still carries them. What it decides is whether the balance GATES
+	// anything, and whether the console shows a price anywhere.
+	//
+	// Off, which is the default and what this deployment runs: a team account is
+	// created without a payment and works with a balance of zero, because a
+	// balance of zero is not a statement about a customer who was never asked
+	// for money. store.Usable takes it for exactly this reason, so the one place
+	// the usability rule lives (design C3, C6) stays the one place.
+	//
+	// REJECTED: creating team accounts with an enormous balance instead. It is
+	// two lines rather than this, and it writes a fiction into the column the
+	// day the answer is meant to change — every account created while the
+	// service was free would carry a nine-million-euro balance that somebody has
+	// to unpick before the first real charge, and the credit check would still
+	// be running, refusing anybody whose fiction ran out. A switch says what is
+	// true, which is that nobody is being charged yet.
+	Monetized bool
+
 	// ProjectsPerPersonalAccount is how many projects a personal account may
 	// hold (ACME_PROJECT_QUOTA, default 5; design C13).
 	//

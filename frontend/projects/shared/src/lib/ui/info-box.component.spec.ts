@@ -70,6 +70,16 @@ describe('InfoBoxComponent', () => {
     key.and.callThrough();
   });
 
+  it('is a block, so the margins call sites ask for are not silently ignored', () => {
+    // A component element has no default display and is therefore INLINE, where margin-block does
+    // nothing at all. Two screens asked for room around their box, correctly, and got none: the
+    // rule applied and the browser ignored it. Asserted here rather than trusted, because the
+    // symptom is invisible in every unit test that does not measure layout.
+    const fixture = build('display');
+    const host: HTMLElement = fixture.nativeElement;
+    expect(getComputedStyle(host).display).toBe('block');
+  });
+
   it('announces whether it is expanded, since the heading is the control', () => {
     const fixture = build('aria');
     const toggle: HTMLElement = fixture.nativeElement.querySelector('.toggle');

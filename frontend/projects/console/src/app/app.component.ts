@@ -112,6 +112,11 @@ export class AppComponent {
    * clock the customer will not feel for weeks, so the warning is the part that protects them.
    */
   readonly lowBalance = computed(() => {
+    // Nothing to warn about where nothing is charged. The warning names a consequence — "at zero
+    // this account stops" — that an unmonetized deployment never carries out, since store.Usable
+    // ignores the balance there, so showing it would be threatening a customer with a refusal that
+    // cannot happen.
+    if (!this.session.me()?.monetized) return null;
     const account = this.accounts.current();
     if (!account || account.kind !== 'team' || account.suspended) return null;
     return account.credits <= LOW_BALANCE ? account : null;

@@ -100,7 +100,7 @@ func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
-	acc, err := store.CreateAccountWithOwner(ctx, db, "inventory-fixture", "Fixture", owner.ID, 25)
+	acc, err := store.CreateAccountWithOwner(ctx, db, "inventory-fixture", "Fixture", owner.ID, 25, true)
 	if err != nil {
 		t.Fatalf("create account: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestIntegrationAnotherTenantsDomainIsRefusedWithoutNamingThem(t *testing.T)
 	if err != nil {
 		t.Fatalf("create the second owner: %v", err)
 	}
-	acc, err := store.CreateAccountWithOwner(ctx, db, "second-tenant", "Second", owner.ID, 25)
+	acc, err := store.CreateAccountWithOwner(ctx, db, "second-tenant", "Second", owner.ID, 25, true)
 	if err != nil {
 		t.Fatalf("create the second account: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestIntegrationAProjectSlugIsUniquePerAccountAndNotGlobally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second owner: %v", err)
 	}
-	acc2, err := store.CreateAccountWithOwner(ctx, db, "inventory-second", "Second", other.ID, 25)
+	acc2, err := store.CreateAccountWithOwner(ctx, db, "inventory-second", "Second", other.ID, 25, true)
 	if err != nil {
 		t.Fatalf("create second account: %v", err)
 	}

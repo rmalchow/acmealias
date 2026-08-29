@@ -246,7 +246,7 @@ func scopedDB(t *testing.T) (*gorm.DB, store.Scope) {
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
-	acc, err := store.CreateAccountWithOwner(ctx, db, "audit-fixture", "Audit Fixture", owner.ID, 25)
+	acc, err := store.CreateAccountWithOwner(ctx, db, "audit-fixture", "Audit Fixture", owner.ID, 25, true)
 	if err != nil {
 		t.Fatalf("create account: %v", err)
 	}

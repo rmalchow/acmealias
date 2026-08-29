@@ -17,6 +17,11 @@ type meView struct {
 	Groups            []string `json:"groups"`
 	Roles             []string `json:"roles"`
 	Permissions       []string `json:"permissions"`
+	// Monetized is the deployment's answer to "does a balance decide anything".
+	// The funding assertions read it rather than assuming, so this suite says
+	// something true against a deployment configured either way instead of
+	// failing on the one it was not written for.
+	Monetized bool `json:"monetized"`
 }
 
 func (s *session) me(t *testing.T) meView {

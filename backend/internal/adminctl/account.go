@@ -33,7 +33,12 @@ import (
 // team account is created by funding it (design C8): an account with no credit
 // is suspended, so a CLI that made one would be handing an operator an account
 // that does not work and no explanation of why.
-func AccountCreate(ctx context.Context, db *gorm.DB, out io.Writer, slug, name, ownerSubject string, credits int64) error {
+//
+// UNLESS NOTHING IS CHARGED. `monetized` is config.Config.Monetized, and where
+// it is off the sentence above stops being true: an account at zero is not
+// suspended, because store.Usable stops consulting the balance. --credits is
+// then accepted at any value including the default, and simply recorded.
+func AccountCreate(ctx context.Context, db *gorm.DB, out io.Writer, slug, name, ownerSubject string, credits int64, monetized bool) error {
 	switch {
 	case slug == "":
 		return fmt.Errorf("--slug is required")
@@ -41,7 +46,7 @@ func AccountCreate(ctx context.Context, db *gorm.DB, out io.Writer, slug, name, 
 		return fmt.Errorf("--name is required")
 	case ownerSubject == "":
 		return fmt.Errorf("--owner is required: the identity-provider subject of the person this account belongs to")
-	case !store.IsOfferedAmount(credits):
+	case monetized && !store.IsOfferedAmount(credits):
 		// The same fixed set the console's checkout takes, and for the same
 		// reason (design C8): --credits stands in for a purchase, and an
 		// amount this service does not sell would write an account.checkout
@@ -54,7 +59,7 @@ func AccountCreate(ctx context.Context, db *gorm.DB, out io.Writer, slug, name, 
 	if err != nil {
 		return err
 	}
-	acc, err := store.CreateAccountWithOwner(ctx, db, slug, name, user.ID, credits)
+	acc, err := store.CreateAccountWithOwner(ctx, db, slug, name, user.ID, credits, monetized)
 	if err != nil {
 		return err
 	}

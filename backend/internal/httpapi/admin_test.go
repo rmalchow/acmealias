@@ -135,7 +135,7 @@ func newAdminEnv(t *testing.T) *adminEnv {
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
-	acc, err := store.CreateAccountWithOwner(ctx, db, "acme-fixture", "Acme Fixture", owner.ID, 25)
+	acc, err := store.CreateAccountWithOwner(ctx, db, "acme-fixture", "Acme Fixture", owner.ID, 25, true)
 	if err != nil {
 		t.Fatalf("create account: %v", err)
 	}

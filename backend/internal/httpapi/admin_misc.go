@@ -41,6 +41,14 @@ type meView struct {
 	Permissions       []string  `json:"permissions"`
 	SignedInAt        time.Time `json:"signedInAt"`
 	ExpiresAt         time.Time `json:"expiresAt"`
+
+	// Monetized tells the console whether this deployment charges for anything.
+	// It rides on /me rather than on each account because it is a fact about the
+	// DEPLOYMENT, not about an account — every account in an unmonetized service
+	// is unmonetized — and because the console needs it before an account is
+	// selected, to decide whether the upgrade screen offers a purchase or a
+	// creation.
+	Monetized bool `json:"monetized"`
 }
 
 func (a *admin) me(c echo.Context) error {
@@ -55,6 +63,7 @@ func (a *admin) me(c echo.Context) error {
 		Groups: []string(sess.Groups), Roles: []string{},
 		Permissions: []string{},
 		SignedInAt:  sess.CreatedAt, ExpiresAt: sess.ExpiresAt,
+		Monetized: a.opts.Config.Monetized,
 		// Which account this session is acting in, so the console knows what to
 		// put in the path without a second request — and knows to render the
 		// picker when the answer is none (design P19).

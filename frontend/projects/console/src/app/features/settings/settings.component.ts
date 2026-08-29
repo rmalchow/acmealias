@@ -4,7 +4,7 @@ import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { Account, LOW_BALANCE, PageHeaderComponent } from '@acme/shared';
+import { Account, LOW_BALANCE, PageHeaderComponent, SessionService } from '@acme/shared';
 import { AccountsService } from '../accounts/accounts.service';
 import { openCheckout } from '../accounts/checkout.modal';
 import { RolesComponent } from '../roles/roles.component';
@@ -47,6 +47,13 @@ import { SystemKeysPanelComponent } from '../apikeys/system-keys-panel.component
           </dl>
         </div>
 
+        <!--
+          THE WHOLE CREDITS PANEL IS BEHIND THE SWITCH. Not the balance alone: a heading with a
+          number and no way to change it is worse than no panel, and the low-balance warning below
+          it describes a refusal that an unmonetized deployment never issues (store.Usable returns
+          true whatever the balance). The panel returns intact the day the switch flips.
+        -->
+        @if (monetized()) {
         <div>
           <h2>Credits</h2>
           <p class="balance">
@@ -80,6 +87,7 @@ import { SystemKeysPanelComponent } from '../apikeys/system-keys-panel.component
             Add credit
           </button>
         </div>
+        }
       </section>
 
       <!-- Its own two headings, Roles and Members, carry this part; a third above them would
@@ -136,6 +144,10 @@ import { SystemKeysPanelComponent } from '../apikeys/system-keys-panel.component
 export class SettingsComponent {
   private readonly accounts = inject(AccountsService);
   private readonly modal = inject(NzModalService);
+  private readonly session = inject(SessionService);
+
+  /** Whether this deployment charges for anything; the Credits panel exists only where it does. */
+  protected readonly monetized = computed(() => this.session.me()?.monetized ?? false);
 
   protected readonly account = computed(() => this.accounts.current());
   protected readonly low = computed(() => {

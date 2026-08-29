@@ -226,7 +226,7 @@ func dispatchAdminctl(ctx context.Context, db *gorm.DB, sc store.Scope, cfg conf
 		// read the source to perform.
 		credits := fs.Int64("credits", store.CheckoutAmounts[0], "opening credit balance, in EUR")
 		fs.Parse(args)
-		return adminctl.AccountCreate(ctx, db, out, *slug, *name, *owner, *credits)
+		return adminctl.AccountCreate(ctx, db, out, *slug, *name, *owner, *credits, cfg.Monetized)
 
 	// The three repair verbs. They exist for an account nobody can get into: an
 	// empty roster and an owner nobody can authenticate as, which is the shape

@@ -66,14 +66,24 @@ func TestTheTeamAccountArc(t *testing.T) {
 	if err := json.Unmarshal(raw, &account); err != nil {
 		t.Fatalf("decoding the created account: %v", err)
 	}
+	// What the balance should be depends on whether the deployment charges. Asked
+	// rather than assumed: this suite ran against a monetized service until the
+	// switch existed, and hard-coding either answer makes it a test of the
+	// configuration rather than of the behaviour.
+	monetized := owner.me(t).Monetized
+	wantCredits := int64(0)
+	if monetized {
+		wantCredits = 25
+	}
 	switch {
 	case account.Kind != "team":
 		t.Fatalf("the created account has kind %q, want team", account.Kind)
-	case account.Credits != 25:
-		t.Fatalf("the created account holds %d credits, want the 25 that was paid — "+
-			"creating and funding are one transaction (task 5.4)", account.Credits)
+	case account.Credits != wantCredits:
+		t.Fatalf("the created account holds %d credits, want %d (monetized=%v) — where money is "+
+			"real, creating and funding are one transaction (task 5.4); where it is not, the "+
+			"amount is ignored and the balance decides nothing", account.Credits, wantCredits, monetized)
 	case account.Suspended:
-		t.Fatalf("the account is suspended the moment it is bought (%s); an account that "+
+		t.Fatalf("the account is suspended the moment it is created (%s); an account that "+
 			"exists but was never funded is a state with no purpose", account.SuspendedReason)
 	case !account.Owner:
 		t.Fatalf("%s bought the account and does not own it", adminUser)
@@ -184,6 +194,21 @@ func TestTheTeamAccountArc(t *testing.T) {
 
 	// --- 4. the balance reaches zero -----------------------------------------
 	//
+	// Only where a balance means something. Unmonetized, store.Usable ignores it
+	// entirely, so setting it to zero changes nothing and the assertions below —
+	// every one of which is about a REFUSAL — would be asserting that a
+	// deployment which charges nobody refuses somebody.
+	//
+	// Skipped rather than deleted, and the whole of the paid path above it has
+	// already run. The unit tests carry both modes of the predicate itself
+	// (store.TestUsable); what is lost while the switch is off is the end-to-end
+	// proof that a lapsed account refuses a member with 402, and it comes back by
+	// setting ACME_MONETIZED=1 in development/.env and running this again.
+	if !monetized {
+		t.Log("unmonetized deployment: skipping the lapse, since a balance gates nothing")
+		return
+	}
+
 	// Written directly because nothing spends credit yet; see setCredits.
 	setCredits(t, account.ID, 0)
 

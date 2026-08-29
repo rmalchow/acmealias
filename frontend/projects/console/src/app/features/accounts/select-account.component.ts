@@ -7,7 +7,7 @@ import { NzCardModule } from 'ng-zorro-antd/card';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzTagModule } from 'ng-zorro-antd/tag';
-import { Account, accountIcon, accountLabel, apiErrorMessage } from '@acme/shared';
+import { Account, accountIcon, accountLabel, apiErrorMessage, SessionService } from '@acme/shared';
 import { AccountsService } from './accounts.service';
 import { InvitationsService } from '../invitations/invitations.service';
 import { InvitationOffer } from '../invitations/invitations.models';
@@ -128,7 +128,7 @@ import { InvitationOffer } from '../invitations/invitations.models';
                   <p class="ac-hint">
                     {{ a.owner ? 'Add credit to start it again.' : 'Its owner can restore it by adding credit.' }}
                   </p>
-                } @else {
+                } @else if (monetized()) {
                   <p class="ac-hint">{{ a.credits }} EUR</p>
                 }
               }
@@ -230,6 +230,10 @@ export class SelectAccountComponent implements OnInit {
   protected readonly accounts = inject(AccountsService);
   protected readonly invitations = inject(InvitationsService);
   private readonly router = inject(Router);
+  private readonly session = inject(SessionService);
+
+  /** A balance is only worth a line where it decides something. */
+  protected readonly monetized = computed(() => this.session.me()?.monetized ?? false);
 
   protected readonly query = signal('');
   protected readonly error = signal<string | null>(null);

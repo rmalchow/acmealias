@@ -154,6 +154,7 @@ func runService(cfg config.Config, log *slog.Logger) error {
 			LastUsed:          apikey.NewLastUsed(db, log),
 			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 			Lifetime:          cfg.ChallengeLifetime,
+			Monetized:         cfg.Monetized,
 			Metrics:           metrics,
 			Log:               log,
 		},

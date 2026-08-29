@@ -250,6 +250,13 @@ type limitsBlock struct {
 
 	AllowAccountCreation bool `koanf:"allow_account_creation"`
 
+	// Monetized: whether a balance gates anything. See config.Config.Monetized
+	// for what it does and what was rejected. In `limits` because it is the
+	// block that already holds the other question of the same shape — what a
+	// deployment lets an ordinary user do — and a block of its own for one
+	// boolean would be a section nobody finds.
+	Monetized bool `koanf:"monetized"`
+
 	// The three invitation limits (account-invitations V9).
 	//
 	// Inviting is the first surface where an ORDINARY TENANT can make this
@@ -388,6 +395,7 @@ func (f fileConfig) toConfig() Config {
 		MigrateOnStart: f.Database.MigrateOnStart,
 
 		AllowAccountCreation:       f.Limits.AllowAccountCreation,
+		Monetized:                  f.Limits.Monetized,
 		ProjectsPerPersonalAccount: f.Limits.ProjectsPerPersonalAccount,
 
 		InvitationsPerAccountPerHour: f.Limits.InvitationsPerAccountPerHour,
@@ -529,6 +537,7 @@ var envBindings = []envBinding{
 	{"ACME_OBSERVATION_RETENTION", "observation.retention", kindDuration},
 
 	{"ACME_ALLOW_ACCOUNT_CREATION", "limits.allow_account_creation", kindBool},
+	{"ACME_MONETIZED", "limits.monetized", kindBool},
 	{"ACME_PROJECT_QUOTA", "limits.projects_per_personal_account", kindInt},
 	{"ACME_INVITATIONS_PER_ACCOUNT_PER_HOUR", "limits.invitations_per_account_per_hour", kindInt},
 	{"ACME_INVITATIONS_PER_ADDRESS_PER_DAY", "limits.invitations_per_address_per_day", kindInt},

@@ -128,6 +128,14 @@ type ChallengeOptions struct {
 	// (ACME_CHALLENGE_LIFETIME).
 	Lifetime time.Duration
 
+	// Monetized is config.Config.Monetized: whether an account's balance gates
+	// anything. It reaches this handler because the funding check on /present is
+	// one of the four places store.Usable is asked, and an unmonetized
+	// deployment must not refuse a renewal for a balance nobody was asked to
+	// pay. Zero value false, which is the safe direction here: a deployment that
+	// forgets to set it serves challenges rather than refusing them.
+	Monetized bool
+
 	// Metrics, when set, receives a counter of submitted name forms
 	// (fqdn_form="alias"|"challenge") registered on its Registry. nil records
 	// nothing.
@@ -529,8 +537,8 @@ func (h *challenge) resolve(c echo.Context, action string, decode func(*http.Req
 			slog.String("fqdn", name), slog.Any("error", err))
 		return nil, errStorage
 	}
-	if !store.Usable(acc) {
-		reason := store.SuspensionReason(acc)
+	if !store.Usable(acc, h.opts.Monetized) {
+		reason := store.SuspensionReason(acc, h.opts.Monetized)
 		// Logged through the same outcome record as an authorization refusal so
 		// it appears in the same place an operator already looks, with a reason
 		// string that is deliberately NOT the authz vocabulary — nothing was
