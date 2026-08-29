@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
-import { SessionService } from '@acme/shared';
+import { InfoBoxComponent, SessionService } from '@acme/shared';
 
 /**
  * What the staff console shows until `staff-plane` gives it something to do.
@@ -14,7 +14,7 @@ import { SessionService } from '@acme/shared';
 @Component({
   selector: 'app-overview',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NzAlertModule],
+  imports: [NzAlertModule, InfoBoxComponent],
   template: `
     <h1>Staff console</h1>
     <p class="lead">
@@ -24,11 +24,10 @@ import { SessionService } from '@acme/shared';
       exercised rather than designed.
     </p>
 
-    <nz-alert
-      nzType="info"
-      nzShowIcon
-      nzMessage="No staff endpoints yet"
-      nzDescription="/api/admin/** answers 404 with the path you asked for, so a caller learns the surface exists and their route does not."
+    <app-info-box
+      key="no-staff-endpoints"
+      heading="No staff endpoints yet"
+      text="/api/admin/** answers 404 with the path you asked for, so a caller learns the surface exists and their route does not."
     />
 
     <section class="who">

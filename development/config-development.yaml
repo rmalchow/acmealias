@@ -36,6 +36,23 @@ zone:
     - ns1.dev.acmeservice.internal.
     - ns2.dev.acmeservice.internal.
 
+  # The authority a customer's CAA record must name, which is what the console's
+  # CAA table and its dots are measured against.
+  #
+  # Set here, unset in the base file. With no issuer configured there is nothing
+  # to authorise, so the console shows no CAA row and no CAA dot at all — which
+  # is correct for a deployment that has not decided on an authority, and useless
+  # for a dev stack, where the whole CAA half of the DNS panel would then be
+  # invisible to anybody working on it.
+  #
+  # letsencrypt.org and not pebble, even though pebble is the CA this stack
+  # issues from. This value never reaches an authority; it is the identifier we
+  # tell a customer to publish and the one we compare an answer against. Using
+  # the real one means the record the dev console prints is the record production
+  # prints, which is what makes a screenshot from here worth anything.
+  caa_issuers:
+    - letsencrypt.org
+
 # One issuer, two OIDC applications: the customer console and the staff
 # console are separate clients at authentik, so a token minted for one is not
 # a token for the other. Only the client ids are here; each secret stays in

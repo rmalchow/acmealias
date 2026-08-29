@@ -106,11 +106,20 @@ type domainView struct {
 	// exists to be able to say.
 	CNAMETarget string `json:"cnameTarget"`
 	// ExpectedCAA is the rendered rdata expected at the registrable name, both
-	// tags per configured issuer: `0 issue "letsencrypt.org"`. It is null, not
+	// tags per configured issuer, each pinned to an ACME account:
+	// `0 issue "letsencrypt.org; accounturi=…"`. It is null, not
 	// empty, when no issuer is configured — there is then nothing to authorize
 	// and nothing to check, which is what lets a console hide the CAA dot
 	// instead of showing a grey one for a question nobody asked.
 	ExpectedCAA []string `json:"expectedCaa"`
+	// CAAName is the name that rdata belongs AT — the registrable domain, since
+	// CAA is inherited and the nearest ancestor wins. It rides along with the
+	// rdata because rdata without an owner name is not a record anybody can
+	// publish, and the console cannot derive it: the public suffix list is what
+	// separates example.com from example.co.uk, and shipping that to a browser
+	// to compute a name the service already knows would be absurd. Empty exactly
+	// when ExpectedCAA is null.
+	CAAName string `json:"caaName"`
 }
 
 // aliasView is the audit payload for an alias. Aliases have no route of their
@@ -188,35 +197,16 @@ func (a *admin) toDomain(d model.Domain, aliases map[model.ID]model.Alias) domai
 	if al, ok := aliases[d.AliasID]; ok {
 		v.CNAMETarget = inventory.DelegationTarget(al, a.opts.Config.Zone)
 	}
+	// One renderer, in internal/inventory, for a reason the deleted copy here
+	// records: two spellings of one record is two records as far as a customer
+	// reading them is concerned. CAAName rides along because rdata with no owner
+	// name is not something anybody can publish.
 	if r, err := dnsname.RegistrableDomain(d.Name); err == nil {
-		v.ExpectedCAA = caaExpectation(r, a.opts.Config.CAAIssuers)
-	}
-	return v
-}
-
-// caaExpectation renders the CAA rdata expected at one registrable name.
-//
-// Both tags are emitted, because a present issuewild governs wildcard issuance
-// *instead of* issue and wildcards are the case this service exists for. No
-// issuer configured returns nil rather than a guess: naming a CA we do not use
-// would lock issuance out entirely.
-//
-// ponytail: this is the second spelling of internal/inventory's caaLines, which
-// is unexported. The right fix is to export that one and delete this — the
-// duplication is small but it is exactly the kind that shows a customer two
-// different strings for one record. Left as is only because internal/inventory
-// belongs to another group in this change.
-func caaExpectation(registrable string, issuers []string) []string {
-	if registrable == "" || len(issuers) == 0 {
-		return nil
-	}
-	var out []string
-	for _, tag := range []string{"issue", "issuewild"} {
-		for _, issuer := range issuers {
-			out = append(out, fmt.Sprintf("0 %s %q", tag, issuer))
+		if lines := inventory.CAALines(r, a.opts.Config.CAAIssuers); lines != nil {
+			v.ExpectedCAA, v.CAAName = lines, r
 		}
 	}
-	return out
+	return v
 }
 
 // --- projects --------------------------------------------------------------

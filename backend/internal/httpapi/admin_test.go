@@ -1596,22 +1596,102 @@ func TestDomainReadCarriesTheRecordsToPublish(t *testing.T) {
 	// rdata, which is what a dialog prints. With no issuer it would be null
 	// rather than empty, which is what lets a console hide the CAA dot instead
 	// of showing a grey one for a question nobody asked.
-	want := []string{`0 issue "letsencrypt.org"`, `0 issuewild "letsencrypt.org"`}
+	//
+	// EVERY LINE CARRIES accounturi. The record we recommend is the one that
+	// bounds this service, not the minimum that lets a certificate issue: a
+	// customer who has published the delegation has given us what we need to
+	// complete a DNS-01 validation for the name, and pinning issuance to their
+	// own ACME account is what takes that back. The value is a placeholder
+	// because an account URI lives in the customer's ACME client.
+	want := []string{
+		`0 issue "letsencrypt.org; accounturi=` + inventory.AccountURIPlaceholder + `"`,
+		`0 issuewild "letsencrypt.org; accounturi=` + inventory.AccountURIPlaceholder + `"`,
+	}
 	for _, d := range got {
 		if !slices.Equal(d.ExpectedCAA, want) {
 			t.Errorf("%s: expectedCaa = %v, want %v at the registrable name", d.Name, d.ExpectedCAA, want)
+		}
+		// Rdata with no owner name is not a record anybody can publish, and the
+		// console cannot derive this one — separating example.com from
+		// example.co.uk needs the public suffix list.
+		if d.CAAName != "example.com" {
+			t.Errorf("%s: caaName = %q, want the registrable name example.com", d.Name, d.CAAName)
 		}
 	}
 }
 
 // --- the expectation-to-checks adapter (no database) -----------------------
 
+// The console asks about one table at a time, so a pass must be able to ask
+// about one record type at a time — and actually ask less, not answer less. A
+// filter applied to the ANSWER would have left the queries going out anyway,
+// which is the opposite of what a second button is for.
+func TestGroupForChecksAsksOnlyWhatWasRequested(t *testing.T) {
+	issuers := []string{"letsencrypt.org"}
+	kinds := func(checks []planCheck) map[string]int {
+		out := map[string]int{}
+		for _, c := range checks {
+			out[c.kind]++
+		}
+		return out
+	}
+
+	both := kinds(groupForChecks(expectedDomains(), issuers, recordKinds{}))
+	if both["CNAME"] == 0 || both["CAA"] == 0 {
+		t.Fatalf("the zero value must ask everything, asked %v", both)
+	}
+
+	only := kinds(groupForChecks(expectedDomains(), issuers, recordKinds{delegation: true}))
+	if only["CAA"] != 0 || only["CNAME"] != both["CNAME"] {
+		t.Errorf("delegation-only asked %v, want every CNAME and no CAA", only)
+	}
+
+	only = kinds(groupForChecks(expectedDomains(), issuers, recordKinds{caa: true}))
+	if only["CNAME"] != 0 || only["CAA"] != both["CAA"] {
+		t.Errorf("caa-only asked %v, want every CAA and no CNAME", only)
+	}
+
+	// Both flags set is the same as neither, and says so here so nobody reads
+	// the zero value as a third mode.
+	if got := kinds(groupForChecks(expectedDomains(), issuers, recordKinds{delegation: true, caa: true})); got["CNAME"] != both["CNAME"] || got["CAA"] != both["CAA"] {
+		t.Errorf("both flags asked %v, want the same as the zero value %v", got, both)
+	}
+}
+
+// A record type this pass did not ask about must read "not checked" rather than
+// vanish from the answer: the console merges a partial answer over the one it
+// already has, and a missing row would silently drop what it knew.
+func TestDomainChecksKeepsRowsForRecordsNotAsked(t *testing.T) {
+	exps := expectedDomains()
+	checks := groupForChecks(exps, []string{"letsencrypt.org"}, recordKinds{delegation: true})
+	answers := map[string]recordCheck{}
+	for _, ch := range checks {
+		answers[ch.kind+"|"+ch.name] = recordCheck{Name: ch.name, Status: "correct"}
+	}
+
+	for _, dc := range domainChecks(exps, answers) {
+		if dc.Delegation.Status != "correct" {
+			t.Errorf("%s: delegation = %q, want the answer that was asked for", dc.Name, dc.Delegation.Status)
+		}
+		if dc.CAA == nil {
+			t.Errorf("%s: CAA row vanished; it must stay, reading not-checked", dc.Name)
+			continue
+		}
+		if dc.CAA.Status != statusNotChecked {
+			t.Errorf("%s: CAA = %q, want %q for a record type nobody asked about", dc.Name, dc.CAA.Status, statusNotChecked)
+		}
+		if len(dc.CAA.Expected) == 0 {
+			t.Errorf("%s: CAA row lost the record to publish", dc.Name)
+		}
+	}
+}
+
 // A wildcard and its apex share one challenge name and every domain under one
 // registrable name shares one CAA set, so both are asked once. Getting this
 // wrong quadruples the queries one screen open puts on somebody's recursor, and
 // it is the only thing standing between "answer per domain" and doing so.
 func TestGroupForChecksAsksEachDistinctNameOnce(t *testing.T) {
-	checks := groupForChecks(expectedDomains(), []string{"letsencrypt.org"})
+	checks := groupForChecks(expectedDomains(), []string{"letsencrypt.org"}, recordKinds{})
 	if len(checks) != 3 {
 		t.Fatalf("%d checks, want 3 (two challenge names, one registrable): %+v", len(checks), checks)
 	}
@@ -1640,7 +1720,7 @@ func TestGroupForChecksAsksEachDistinctNameOnce(t *testing.T) {
 func TestGroupForChecksSkipsADomainWithNoAlias(t *testing.T) {
 	exps := expectedDomains()
 	exps[2].Target = ""
-	checks := groupForChecks(exps, nil)
+	checks := groupForChecks(exps, nil, recordKinds{})
 	for _, c := range checks {
 		if c.name == "_acme-challenge.shop.example.com" {
 			t.Fatalf("a domain with no alias was asked for anyway: %+v", c)

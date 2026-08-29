@@ -109,36 +109,58 @@ export function delegationChip(status: DelegationStatus, hasAlias = true): Statu
 }
 
 /**
- * CAA by what it permits (design D3).
+ * CAA by HOW MUCH IT LEAVES OPEN, which is a different scale from the one this used.
  *
- * `not-published` is the commonest state and is entirely correct — absent CAA means anyone may
- * issue — so it reads as an absence of restriction, never as an absence of configuration.
- * `blocking` is the only bad one, and it stops issuance no matter how perfect the delegation is.
+ * The old scale asked whether issuance works, and on that scale absence is perfect: no CAA record
+ * means any authority may issue, so ours may, so the dot was green. Every domain on the internet
+ * without a CAA record was told it had nothing to do.
  *
- * It was BLUE, and blue was the best a chip could do: a chip carries a word, and `correct` and
- * `not-published` are not the same fact, so the two could not share a colour without the label
- * lying about one of them. A DOT carries no word. The two states keep their own sentences in the
- * tooltip — "authorises us", "no restriction" — and share the green, because they are the same
- * INSTRUCTION, which is do nothing, and that is what a dot is for (G5). On a three-colour scale
- * blue means "unclear" to everybody who has not read the tooltip.
+ * The question a customer of THIS service should be asked is not whether their authority may issue
+ * but who else may — and on a domain that has published the delegation CNAME, the honest list
+ * includes us. That CNAME is what lets us answer a DNS-01 challenge for the name, and for its
+ * wildcard, since a wildcard and its base share one challenge name. It is what the service is for
+ * and it is not something we can hand back.
+ *
+ * One record bounds it: RFC 8657's `accounturi`, which pins issuance to a single ACME account. So:
+ *
+ *   red    `not-published`   nothing published; any authority, any account
+ *   red    `blocking`        published, and it locks OUT the authority the customer is using
+ *   amber  `unconstrained`   names the authority; every account there may issue, ours included
+ *   green  `correct`         names the authority AND an account
+ *
+ * The two reds are not the same instruction — "publish a record" against "change the record you
+ * have" — which is why they stay separate states rather than collapsing into one. Amber is the
+ * state most customers who have thought about CAA at all are in, and it is a real finding rather
+ * than a nag: the fix is a parameter on a line they already publish.
+ *
+ * Green does NOT claim the account named is the customer's. Nothing in DNS says whose an account
+ * URI is, and a chip that asserted it would be claiming something it cannot see.
  */
 export function caaChip(status: CAAStatus): StatusChip {
   switch (status) {
     case 'correct':
       return {
-        label: 'authorises us',
+        label: 'bound to one account',
         colour: 'green',
         // Not "allowed" or "permitted": those are the words the console uses for what a CALLER
         // may do (NOT_PERMITTED renders in the same row), and a customer reading both in one
         // table should never have to work out which of the two a chip is about.
-        tooltip: 'A CAA record set exists and names our issuer among the authorities it authorises.',
+        tooltip:
+          'The CAA set names your authority and pins issuance to one ACME account, so no one else holding this delegation — including us — can obtain a certificate for this name.',
+      };
+    case 'unconstrained':
+      return {
+        label: 'no account limit',
+        colour: 'orange',
+        tooltip:
+          'The CAA set names your authority but no account, so any ACME account at that authority may issue for this name — including ours, using the delegation you published. Add accounturi to the record to bound it.',
       };
     case 'not-published':
       return {
-        label: 'no restriction',
-        colour: 'green',
+        label: 'no CAA published',
+        colour: 'red',
         tooltip:
-          'No CAA record is published for this name, which is the default state of the internet: any authority may issue. Nothing to do.',
+          'No CAA record exists for this name, so any authority and any account may issue for it — including us, using the delegation you published. Publishing the record below bounds that.',
       };
     case 'blocking':
       return {

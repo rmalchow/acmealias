@@ -106,6 +106,26 @@ func TestCheckCAA(t *testing.T) {
 			m.Answer = append(m.Answer,
 				rr(t, q.Name+` 300 IN CAA 0 issue "letsencrypt.org"`),
 				rr(t, q.Name+` 300 IN CAA 0 issuewild "letsencrypt.org"`))
+		case "pinned.example.com.":
+			m.Answer = append(m.Answer,
+				rr(t, q.Name+` 300 IN CAA 0 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/1"`),
+				rr(t, q.Name+` 300 IN CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/1"`))
+		case "halfpinned.example.com.":
+			// The wildcard is pinned and plain issuance is not. Anybody holding
+			// the delegation can still get a certificate for the name itself.
+			m.Answer = append(m.Answer,
+				rr(t, q.Name+` 300 IN CAA 0 issue "letsencrypt.org"`),
+				rr(t, q.Name+` 300 IN CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/1"`))
+		case "namedlikeaparam.example.com.":
+			// An authority whose name merely contains the word: no parameter is
+			// present, so nothing is pinned.
+			m.Answer = append(m.Answer,
+				rr(t, q.Name+` 300 IN CAA 0 issue "accounturi.example"`),
+				rr(t, q.Name+` 300 IN CAA 0 issuewild "accounturi.example"`))
+		case "emptyparam.example.com.":
+			m.Answer = append(m.Answer,
+				rr(t, q.Name+` 300 IN CAA 0 issue "letsencrypt.org; accounturi="`),
+				rr(t, q.Name+` 300 IN CAA 0 issuewild "letsencrypt.org; accounturi="`))
 		case "otherauthority.example.com.":
 			m.Answer = append(m.Answer, rr(t, q.Name+` 300 IN CAA 0 issue "someotherca.example"`))
 		case "absent.example.com.":
@@ -122,7 +142,13 @@ func TestCheckCAA(t *testing.T) {
 		domain     string
 		wantStatus CAAStatus
 	}{
-		{"authorized.example.com", CAACorrect},
+		// Names the authority and nothing else: issuance works, and works for
+		// every account at that authority — including this service's.
+		{"authorized.example.com", CAAUnconstrained},
+		{"pinned.example.com", CAACorrect},
+		{"halfpinned.example.com", CAAUnconstrained},
+		{"namedlikeaparam.example.com", CAABlocking},
+		{"emptyparam.example.com", CAAUnconstrained},
 		{"otherauthority.example.com", CAABlocking},
 		{"absent.example.com", CAANotPublished},
 	}
@@ -133,10 +159,19 @@ func TestCheckCAA(t *testing.T) {
 		}
 	}
 
-	// The one place this table is backwards on purpose: absent is fine,
-	// present-but-wrong is fatal (design D5).
+	// Absent and blocking stay different answers even though both are now shown
+	// in red: one is "publish a record" and the other is "change the record you
+	// have", which are instructions for different people on different days.
 	if got := c.CheckCAA(context.Background(), CAACheck{Domain: "absent.example.com", Issuers: []string{"letsencrypt.org"}}); got.Status == CAABlocking {
 		t.Fatal("an absent CAA record must never be reported as blocking")
+	}
+
+	// Found is populated in every state that has rdata to show, because the
+	// console prints it beside the record it recommends.
+	for _, d := range []string{"authorized.example.com", "pinned.example.com", "otherauthority.example.com"} {
+		if got := c.CheckCAA(context.Background(), CAACheck{Domain: d, Issuers: []string{"letsencrypt.org"}}); got.Found == "" {
+			t.Errorf("CheckCAA(%q): Found is empty, so the console has nothing to print in the second column", d)
+		}
 	}
 	if got := c.CheckCAA(context.Background(), CAACheck{Domain: "otherauthority.example.com", Issuers: []string{"letsencrypt.org"}}); got.Found == "" {
 		t.Fatal("a blocking CAA result must report what was found")

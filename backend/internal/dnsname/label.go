@@ -21,24 +21,37 @@ func ValidateLabel(label string) error {
 	return validateLDH(label, label)
 }
 
-// GenerateLabel draws an alias label at random: 16 characters of lowercase
-// base32, 80 bits from crypto/rand (design A1).
+// GenerateLabel draws an alias label at random: 10 characters of lowercase
+// base32, 48 bits from crypto/rand (design A1).
 //
 // Random and not a hash of the challenge name. A hash is unreadable but still
 // deterministic, so anyone can compute a domain's label and ask our
 // nameservers whether it answers — the enumeration oracle this change exists
 // to close. Only unpredictability closes it.
 //
-// Ten bytes encode to exactly 16 base32 characters with no padding, and the
-// base32 alphabet lowercased is letters and digits only, so the result is a
-// valid DNS label by construction: never empty, never over 63 octets, never
-// hyphenated at either end. No trimming or fallback is needed.
+// IT WAS 80 BITS AND 16 CHARACTERS. Six of those characters were doing nothing
+// a customer benefits from: this string is typed into a DNS provider's form by
+// hand, read back off a screen to check it, and quoted in support threads, and
+// every character is one more chance to transpose two of them. 48 bits is
+// enough for both jobs it has. Guessing: 2^48 is 281 trillion, and a guess buys
+// an attacker the ability to publish a TXT record under a name nobody has
+// delegated to them, which is worth nothing without the matching delegation.
+// Collision: at a hundred thousand aliases the birthday probability that ANY
+// two collide is about 1 in 56 million, and a collision is not a fault anyway —
+// it is a retry, handled twice over, before the insert by the caller and by the
+// database's unique index if two transactions race.
+//
+// Six bytes encode to exactly 10 base32 characters WITH PADDING SUPPRESSED, and
+// suppressing it is load-bearing: StdEncoding would append six '=' characters,
+// which are not legal in a DNS label. The lowercased base32 alphabet is letters
+// and digits only, so what comes back is a valid label by construction — never
+// empty, never over 63 octets, never hyphenated at either end.
 func GenerateLabel() (string, error) {
-	var b [10]byte
+	var b [6]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generating an alias label: %w", err)
 	}
-	return strings.ToLower(base32.StdEncoding.EncodeToString(b[:])), nil
+	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b[:])), nil
 }
 
 // SuggestLabel proposes an alias label for a challenge name:

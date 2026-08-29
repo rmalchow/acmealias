@@ -77,3 +77,27 @@ func TestIntegrationAliasRoundTrip(t *testing.T) {
 		t.Fatalf("delete alias after domains removed: %v", err)
 	}
 }
+
+// LabelTaken is what decides whether a failed insert is retried, so telling the
+// three unique indexes on this table apart is the whole of its job: retrying the
+// challenge-name conflict would loop on a refusal that will never change.
+func TestLabelTaken(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"label collision", errors.New(`ERROR: duplicate key value violates unique constraint "aliases_label_key" (SQLSTATE 23505)`), true},
+		{"challenge name already claimed", errors.New(`ERROR: duplicate key value violates unique constraint "aliases_challenge_fqdn_key" (SQLSTATE 23505)`), false},
+		{"some other unique index", errors.New(`ERROR: duplicate key value violates unique constraint "domains_name_key" (SQLSTATE 23505)`), false},
+		{"not a unique violation at all", errors.New("connection refused"), false},
+		{"no error", nil, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := LabelTaken(tc.err); got != tc.want {
+				t.Errorf("LabelTaken(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}

@@ -11,6 +11,7 @@ import { ApiService, CAAStatus, CAN_ADMIN_PROJECT, CAN_WRITE, HelpHintComponent,
 import { openDomainEditor } from '../domains/domain-editor.component';
 import { ApiKeysPanelComponent } from '../apikeys/apikeys-panel.component';
 import { ProjectUsagePanelComponent } from '../reporting/project-usage-panel.component';
+import { DnsRecordsPanelComponent, RecordKind } from './dns-records-panel.component';
 import { InteractionsPanelComponent } from './interactions-panel.component';
 import { openNodeCreateModal } from './node-create.modal';
 import { openNodeEditModal } from './node-edit.modal';
@@ -19,6 +20,41 @@ import { openCaaHelpModal } from './caa-help.modal';
 import { openCertificateModal } from './certificate.modal';
 import { openDomainSettings } from '../domains/domain-settings.modal';
 import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, domainCheckFor, dotTitle } from './domain-status';
+
+/**
+ * Folds one pass's answers into the ones already on screen.
+ *
+ * A partial pass — ?records=delegation, say — comes back with every domain present and its CAA row
+ * reading "not checked", because the service builds the answer from what a domain NEEDS and not
+ * from what it asked. Taking that response whole would therefore blank the CAA column somebody
+ * checked a minute ago, which is the exact failure two buttons exist to avoid: pressing one must
+ * never undo the other.
+ *
+ * So a kinded pass replaces only its own half, per domain, and a pass that named no kind — the
+ * recorded re-check — replaces everything, because it genuinely asked everything.
+ *
+ * Domains are matched by id and a domain absent from the previous answer simply takes the new one:
+ * the pair of answers can disagree about which domains exist, since one of them may predate a
+ * domain being added.
+ */
+function mergeChecks(
+  previous: VerificationResult | null,
+  incoming: VerificationResult,
+  kind?: RecordKind,
+): VerificationResult {
+  if (!kind || !previous) return incoming;
+  const before = new Map(previous.domains.map((d) => [d.domainId, d]));
+  return {
+    ...incoming,
+    domains: incoming.domains.map((d) => {
+      const old = before.get(d.domainId);
+      if (!old) return d;
+      return kind === 'delegation'
+        ? { ...d, caa: old.caa }
+        : { ...d, delegation: old.delegation };
+    }),
+  };
+}
 
 /**
  * A project: its nodes, its domain table, the API keys panel, and the reporting the project level
@@ -45,6 +81,7 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
     PageHeaderComponent,
     HelpHintComponent,
     ApiKeysPanelComponent,
+    DnsRecordsPanelComponent,
     InteractionsPanelComponent,
     ProjectUsagePanelComponent,
     NzToolTipModule,
@@ -333,6 +370,20 @@ import { StatusChip, activationChip, caaChip, certificateChip, delegationChip, d
     </section>
 
     @if (project(); as p) {
+      <!--
+        Under the domain table and above the keys: it is the answer to the question the dots on
+        that table raise — "what should this name have on it" — and a reader who has just found a
+        red dot scrolls down, not up.
+      -->
+      <section>
+        <app-dns-records-panel
+          [domains]="p.domains ?? []"
+          [checks]="verification()?.domains ?? null"
+          [checking]="checkingKind()"
+          (check)="verify($event)"
+        />
+      </section>
+
       <section>
         <app-apikeys-panel [projectId]="p.id" [project]="p" [nodes]="p.nodes ?? []" />
       </section>
@@ -566,6 +617,16 @@ export class ProjectDetailComponent implements OnChanges {
    */
   readonly canAdmin = computed(() => may(this.project(), CAN_ADMIN_PROJECT));
 
+  /**
+   * Which record type has a check in flight, so the panel can spin one button and not both.
+   *
+   * Separate from `verifying`, which is the Recheck control's own spinner on the Domains panel and
+   * belongs to the recorded check. Two signals rather than one enum covering three buttons: the
+   * recorded check is a different act with a different consequence, and collapsing them would make
+   * "somebody is looking" and "somebody is writing down what we saw" one state.
+   */
+  readonly checkingKind = signal<RecordKind | null>(null);
+
   readonly deleting = signal(false);
   /**
    * Kept apart from `error`, which renders at the top of the page. The refusal this one carries —
@@ -590,11 +651,17 @@ export class ProjectDetailComponent implements OnChanges {
     this.checkFailed.set(false);
     this.certificates.set({});
     this.load();
-    // Opening the screen asks the question (design D1). It was a button below the table whose
-    // rows it explained, so a customer who mistyped a CNAME read "never validated" — which
-    // sounds like "nothing has happened yet" and means "this will never work". The check stores
-    // nothing, so running it on load changes when it happens, not what it does.
-    this.verify();
+    // NO AUTOMATIC CHECK, which reverses design D1 and is worth stating rather than leaving as an
+    // absence. D1 argued that opening the screen should ask DNS, because a customer who had
+    // mistyped a CNAME would otherwise read "never validated" — a phrase that sounds like "nothing
+    // has happened yet" and means "this will never work".
+    //
+    // What changed is that the screen now ANSWERS THE QUESTION WITHOUT ASKING DNS. The records a
+    // domain needs are known from the project read alone, and the DNS panel prints all of them on
+    // open; the check adds a second column saying what is published. D1's customer is no longer
+    // staring at an empty screen wondering what to do — they are looking at the exact lines to
+    // publish — so the argument for spending a query per name on every screen open, against a
+    // recursor we do not own, on behalf of somebody who did not ask, is gone with it.
   }
 
   load(): void {
@@ -633,12 +700,16 @@ export class ProjectDetailComponent implements OnChanges {
   }
 
   /**
-   * The check that runs when the screen opens: an observation, and nothing else (design
-   * domain-setup-feedback D1). It stores nothing, which is what makes it safe to run on every
-   * open and what keeps it a GET.
+   * The DNS panel's button: an observation and nothing else (design domain-setup-feedback D1).
+   *
+   * It stores nothing, which is what keeps it a GET — and it no longer runs on open, so "stores
+   * nothing" has stopped being the argument that makes it safe and become simply what it is. The
+   * difference from checkNow() below is not the lookup, which is identical, but whether the answer
+   * is written down against the domains.
    */
-  verify(): void {
-    this.runCheck(false);
+  verify(kind?: RecordKind): void {
+    this.checkingKind.set(kind ?? null);
+    this.runCheck(false, kind);
   }
 
   /**
@@ -667,37 +738,43 @@ export class ProjectDetailComponent implements OnChanges {
    * for every row rather than refusing (design D4) — and, since nothing was asked, records
    * nothing.
    */
-  private runCheck(record: boolean): void {
+  private runCheck(record: boolean, kind?: RecordKind): void {
     // The screen is reused across ids and this request now takes as long as DNS does, so an
     // answer can arrive after somebody has navigated to another project. Dropping it is the
     // whole fix: an answer that arrives for the project somebody has just left would otherwise
     // colour the dots of the one they are looking at now.
     const asked = this.id();
-    // Only a press spins the button. The automatic pass used to set it too, so every screen open
-    // showed a spinner on a control nobody had touched — which reads as if something were
-    // running on the customer's behalf, and is exactly the manual control task 2.9 keeps honest.
-    if (record) this.verifying.set(true);
+    // Every run is a press now, so every run spins its button and every failure gets a banner.
+    // The distinction this used to draw — a spinner only for the recorded check, because the
+    // automatic pass would otherwise have put one on a control nobody touched — has no automatic
+    // pass left to draw it against.
+    this.verifying.set(true);
     this.verifyError.set(null);
-    const path = `/projects/${asked}/verification`;
+    // ?records= is what makes the second button worth having: a CAA check must send no CNAME
+    // queries, or the split would be cosmetic and the screen would quietly double its DNS traffic.
+    // The recorded check names nothing and so asks for everything, as it always did.
+    const path = kind ? `/projects/${asked}/verification?records=${kind}` : `/projects/${asked}/verification`;
     const answer = record
       ? this.api.post<VerificationResult>(path)
       : this.api.get<VerificationResult>(path);
     answer.subscribe({
       next: (v) => {
-        if (record) this.verifying.set(false);
+        this.verifying.set(false);
+        this.checkingKind.set(null);
         if (this.id() !== asked) return;
         this.checkFailed.set(false);
-        this.verification.set(v);
+        this.verification.set(mergeChecks(this.verification(), v, kind));
         // The recorded check has just changed the stored activation stamps, and the rows on
         // screen still carry the old ones. Reloading is what turns "waiting for delegation" into
         // "active" in front of the person who published the record ten seconds ago.
         if (record) this.load();
       },
       error: (err) => {
-        if (record) this.verifying.set(false);
+        this.verifying.set(false);
+        this.checkingKind.set(null);
         if (this.id() !== asked) return;
         this.checkFailed.set(true);
-        if (record) this.verifyError.set(apiErrorMessage(err));
+        this.verifyError.set(apiErrorMessage(err));
       },
     });
   }
@@ -862,9 +939,11 @@ export class ProjectDetailComponent implements OnChanges {
     openDomainEditor(this.modal, this.project()!.id).afterClose.subscribe((created?: boolean) => {
       if (!created) return;
       this.load();
-      // The answers are per domain now, so a set of domains that changed leaves them describing
-      // a table that no longer exists — and the new row is the one somebody is waiting on.
-      this.verify();
+      // NO RE-CHECK. The answers are keyed by NAME, so a domain that has just been added simply
+      // has none and its rows read "not checked yet" — which is true, and is the same thing the
+      // screen says about every row before somebody presses the button. Re-running here would be
+      // the automatic pass coming back through a side door, and it would spend a query on every
+      // OTHER name to fill in the one that changed.
     });
   }
 
@@ -906,8 +985,9 @@ export class ProjectDetailComponent implements OnChanges {
     if (!ok) return;
     this.api.delete(`/domains/${d.id}`).subscribe({
       next: () => {
+        // The deleted domain's rows go with it, and any answer that was about it goes unread —
+        // rows are matched by name, and the name is no longer on the screen.
         this.load();
-        this.verify();
       },
       error: (err) => this.error.set(apiErrorMessage(err)),
     });

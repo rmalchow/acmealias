@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -33,6 +33,9 @@ function domain(over: Partial<Domain> = {}): Domain {
     observeTls: false,
     tlsTestHost: null,
     cnameTarget: 'shop-example-com.svc.example.net',
+    // Where the CAA rdata belongs. The DNS panel needs an owner name to print a record at, and a
+    // fixture without one silently tests the "no issuer configured" table instead.
+    caaName: 'example.com',
     expectedCaa: ['0 issue "letsencrypt.org"', '0 issuewild "letsencrypt.org"'],
     ...over,
   };
@@ -111,8 +114,26 @@ describe('ProjectDetailComponent', () => {
     // NO PLAN READ. The endpoint it used to call no longer exists, and every call site of it was
     // a 404 that painted an error banner over an operation that had actually succeeded — which
     // is what "the delete button does not work" turned out to be (task 11.1).
+    //
+    // AND NO VERIFICATION READ, which is the newer half. Opening the screen asks DNS nothing at
+    // all; the records a domain needs come from the project read above, and what is published at
+    // those names is asked for by a button. A test that wants answers presses it with runCheck().
     reporting();
     return fixture;
+  }
+
+  /**
+   * Presses the DNS panel's button and answers it: the GET that stores nothing.
+   *
+   * It takes the fixture rather than reaching for the component so the call site reads like the
+   * thing a person does — press, then the answer arrives — which is now the only way any row on
+   * this screen acquires a colour.
+   */
+  function runCheck(fixture: ComponentFixture<ProjectDetailComponent>, answer = verification()) {
+    fixture.componentInstance.verify();
+    const req = http.expectOne(`${BASE}/projects/7/verification`);
+    req.flush(answer);
+    return req;
   }
 
   /**
@@ -126,36 +147,28 @@ describe('ProjectDetailComponent', () => {
     http.expectOne((r) => r.url === `${BASE}/projects/7/usage`).flush({ recorded: false, buckets: [] });
   }
 
-  it('asks without being asked, and says nothing about the button while it does', () => {
-    // The check runs on load (design D1). The manual control is a different question and must
-    // not look pressed: a spinner nobody started reads as work somebody set going.
+  it('asks DNS nothing at all until somebody asks it to', () => {
+    // This REVERSES design D1, which had the screen check on open. The argument for D1 was that a
+    // customer with a mistyped CNAME would otherwise read "never validated" and learn nothing; the
+    // records panel now prints the exact line to publish without asking anybody, so the empty
+    // screen that argument was about does not exist. http.verify() in afterEach is what enforces
+    // it: an automatic pass would show up as an unanswered request.
     const fixture = open();
-    const req = http.expectOne(`${BASE}/projects/7/verification`);
-    expect(fixture.componentInstance.verifying()).toBeFalse();
-    req.flush(verification());
+    expect(fixture.componentInstance.verification()).toBeNull();
     expect(fixture.componentInstance.verifying()).toBeFalse();
   });
 
-  it('shows no banner when the automatic check fails, only a degraded row', () => {
-    // Task 3.3: a check nobody asked for that fails is not an error on the page. It degrades the
-    // rows it concerns and never the screen (design D1, D4).
+  it('banners a failure and degrades the rows, because every check is one somebody pressed', () => {
+    // The old split — no banner for the automatic pass, a banner for the press — had no automatic
+    // pass left to draw itself against. A failure now always has somebody waiting on it.
     const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush('boom', { status: 500, statusText: 'Server Error' });
-
-    expect(fixture.componentInstance.verifyError()).toBeNull();
-    const chips = fixture.componentInstance.checks(domain());
-    expect(chips.delegation.label).toBe('could not check');
-  });
-
-  it('banners a failure somebody pressed for', () => {
-    const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
-
-    fixture.componentInstance.checkNow();
+    fixture.componentInstance.verify();
     expect(fixture.componentInstance.verifying()).toBeTrue();
     http.expectOne(`${BASE}/projects/7/verification`).flush('boom', { status: 500, statusText: 'Server Error' });
+
     expect(fixture.componentInstance.verifyError()).not.toBeNull();
     expect(fixture.componentInstance.verifying()).toBeFalse();
+    expect(fixture.componentInstance.checks(domain()).delegation.label).toBe('could not check');
   });
 
   it('degrades both chips on a failed re-check rather than dropping CAA or keeping a stale verdict', () => {
@@ -163,7 +176,7 @@ describe('ProjectDetailComponent', () => {
     // must not go on asserting the old answer either: the banner and the chips would then
     // disagree about whether anything is known.
     const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     expect(fixture.componentInstance.checks(domain()).caa?.label).toBe('blocks us');
 
     fixture.componentInstance.verify();
@@ -179,8 +192,6 @@ describe('ProjectDetailComponent', () => {
   // changed and the person pressing it is watching for exactly that.
   it('records what a check-now saw and reloads the rows it changed', () => {
     const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
-
     fixture.componentInstance.checkNow();
     const req = http.expectOne(`${BASE}/projects/7/verification`);
     expect(req.request.method).toBe('POST');
@@ -191,21 +202,27 @@ describe('ProjectDetailComponent', () => {
     http.expectOne(`${BASE}/projects/7`).flush(project());
   });
 
-  // The automatic pass must stay a GET. It runs on every screen open, and a page that activated
-  // domains as a side effect of being looked at is a page nobody can safely open.
-  it('asks the automatic check as a read', () => {
+  // The panel's own button stays a GET. It is the check that only LOOKS, and the difference from
+  // Recheck beside it is exactly that: pressing one asks a question, pressing the other answers it
+  // and writes the answer down against the domains. A page that activated domains because somebody
+  // wanted to see what was published would be a page with one button too few.
+  it('asks the panel check as a read, and Recheck as the write', () => {
     const fixture = open();
-    const req = http.expectOne(`${BASE}/projects/7/verification`);
-    expect(req.request.method).toBe('GET');
-    req.flush(verification());
+    expect(runCheck(fixture).request.method).toBe('GET');
     expect(fixture.componentInstance.verifyError()).toBeNull();
+
+    fixture.componentInstance.checkNow();
+    const recorded = http.expectOne(`${BASE}/projects/7/verification`);
+    expect(recorded.request.method).toBe('POST');
+    recorded.flush(verification());
+    http.expectOne(`${BASE}/projects/7`).flush(project());
   });
 
   // Waiting is not broken (task 4.1). A domain added five minutes ago has never been seen, and
   // the chip has to say so as an expectation rather than as a fault.
   it('reads a never-seen delegation as waiting, and one that stopped resolving as still active', () => {
     const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     const c: ProjectDetailComponent = fixture.componentInstance;
 
     expect(c.activation(domain({ lastCheckedAt: null, lastSuccessAt: null })).label).toBe('waiting for delegation');
@@ -235,7 +252,7 @@ describe('ProjectDetailComponent', () => {
     // project has a domain at all, including when every one of them is active, because an active
     // domain whose certificate expires in nine days is exactly what somebody re-checks.
     const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     fixture.detectChanges();
     // Rendering the rows renders the two panels below them, which ask for their own contents.
     // They are not what this spec is about, and an unanswered request fails http.verify().
@@ -257,7 +274,7 @@ describe('ProjectDetailComponent', () => {
     // a reader could name. The wording and the reasoning are unchanged (design A1): since when,
     // never how many failures, and no deadline because nothing is ever switched off for it (A3).
     const fixture = open();
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     const c: ProjectDetailComponent = fixture.componentInstance;
 
     expect(c.lookedAt(domain({ lastCheckedAt: null, lastSuccessAt: null }))).toContain('Not looked at yet');
@@ -272,7 +289,7 @@ describe('ProjectDetailComponent', () => {
     // would claim we meant to look. TLS is off here and no issuer is configured on the second
     // row, so each is absent for its own reason.
     const fixture = open(project([domain(), domain({ id: 'd-2', name: 'blog.example.com', expectedCaa: null })]));
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     const c: ProjectDetailComponent = fixture.componentInstance;
 
     expect(c.checks(domain()).caa).not.toBeNull();
@@ -293,7 +310,8 @@ describe('ProjectDetailComponent', () => {
       band: 'urgent',
       addresses: [],
     });
-    http.expectOne(`${BASE}/projects/7/verification`).flush(
+    runCheck(
+      fixture,
       verification({
         domains: [
           {
@@ -354,7 +372,7 @@ describe('ProjectDetailComponent', () => {
 
   it('deletes the project and leaves for the list', async () => {
     const fixture = open(adminProject());
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     const navigate = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
     answerConfirm(true);
 
@@ -372,7 +390,7 @@ describe('ProjectDetailComponent', () => {
 
   it('asks first, and does nothing at all when the answer is no', async () => {
     const fixture = open(adminProject());
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     const confirm = answerConfirm(false);
 
     await fixture.componentInstance.deleteProject(adminProject());
@@ -389,7 +407,7 @@ describe('ProjectDetailComponent', () => {
     // the handler behind it. The server refuses regardless; the point here is that a screen
     // without the grant never gets as far as the confirmation.
     const fixture = open(project());
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     const confirm = answerConfirm(true);
 
     await fixture.componentInstance.deleteProject(project());
@@ -403,7 +421,7 @@ describe('ProjectDetailComponent', () => {
     // The refusal that actually happens: the API declines to delete a project that still holds
     // domains. It belongs next to the control that produced it — `error` renders five screens up.
     const fixture = open(adminProject());
-    http.expectOne(`${BASE}/projects/7/verification`).flush(verification());
+    runCheck(fixture);
     const navigate = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
     answerConfirm(true);
 

@@ -91,28 +91,36 @@ describe('delegationChip', () => {
 
 describe('caaChip', () => {
   it('gives every outcome its own sentence', () => {
-    const all: CAAStatus[] = ['not-checked', 'correct', 'not-published', 'blocking', 'undetermined'];
+    const all: CAAStatus[] = ['not-checked', 'correct', 'unconstrained', 'not-published', 'blocking', 'undetermined'];
     const tooltips = all.map((s) => caaChip(s).tooltip);
-    expect(new Set(tooltips).size).toBe(5);
+    expect(new Set(tooltips).size).toBe(6);
   });
 
-  it('does not present an absent CAA record as a problem', () => {
-    // The commonest state, and entirely correct: absence means anyone may issue. A warning
-    // nearly every customer sees is one everybody learns to ignore (design D3).
+  it('reads an absent CAA record as the least bounded state, not the best one', () => {
+    // THIS REVERSES the chip's previous verdict, which was green on the grounds that absence lets
+    // anyone issue and therefore lets us. That is the wrong question for a customer who has
+    // delegated their challenge name to this service: "anyone may issue" then includes us, and
+    // saying "no restriction — nothing to do" was telling them the opposite of what was true.
     const chip = caaChip('not-published');
-    expect(chip.colour).not.toBe('red');
-    expect(chip.label).toBe('no restriction');
-    expect(chip.label).not.toContain('not configured');
+    expect(chip.colour).toBe('red');
+    expect(chip.label).toBe('no CAA published');
   });
 
-  it('gives the two do-nothing states the same colour and different sentences (G5)', () => {
-    // A chip carries a word and so could not share a colour without lying about one of them,
-    // which is why `not-published` was blue. A dot carries no word: the two are the same
-    // INSTRUCTION, and blue on a three-colour scale reads as "unclear".
-    expect(caaChip('not-published').colour).toBe('green');
+  it('separates a record that authorises everybody from one bound to an account', () => {
+    // The state most customers who have thought about CAA at all are in, and a real finding
+    // rather than a nag: the fix is one parameter on a line they already publish.
+    expect(caaChip('unconstrained').colour).toBe('orange');
     expect(caaChip('correct').colour).toBe('green');
-    expect(caaChip('not-published').tooltip).not.toBe(caaChip('correct').tooltip);
+    expect(caaChip('unconstrained').tooltip).toContain('accounturi');
     expect(caaChip('undetermined').colour).toBe('default');
+  });
+
+  it('never claims the pinned account is the customer\'s', () => {
+    // Nothing in DNS says whose an account URI is. Green means "bound to one account", and a
+    // chip asserting whose would be asserting something it cannot see.
+    const chip = caaChip('correct');
+    expect(chip.label).toBe('bound to one account');
+    expect(chip.tooltip).not.toContain('your account');
   });
 
   it('presents a CAA set that excludes us as blocking', () => {

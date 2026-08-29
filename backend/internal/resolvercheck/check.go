@@ -137,7 +137,11 @@ func (c *Checker) CheckCNAME(ctx context.Context, check CNAMECheck) Result {
 			continue
 		}
 		if strings.ToLower(cname.Target) == want {
-			return Result{Status: StatusCorrect}
+			// Found is filled in on the CORRECT path too, and it is not
+			// redundant with Expected: a screen that shows what a name needs
+			// beside what it has would otherwise print an empty second column
+			// for every row that is right, which reads as "we did not look".
+			return Result{Status: StatusCorrect, Found: cname.Target}
 		}
 		found = append(found, cname.Target)
 	}

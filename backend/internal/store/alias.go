@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -11,6 +12,20 @@ import (
 
 // CreateAlias inserts a new alias, keyed by challenge name (design D4), under a
 // project of the scope's account.
+// LabelTaken reports whether err is the aliases.label unique index refusing an
+// insert — that is, two transactions drew or derived the same label and this one
+// lost the race.
+//
+// It matches the CONSTRAINT and not merely the SQLSTATE, and the distinction is
+// the whole point of the function. The aliases table has three unique indexes
+// and only this one is worth retrying: aliases_challenge_fqdn_key means somebody
+// else already owns that challenge name, which is a real conflict a retry would
+// turn into an infinite loop of the same refusal, and the caller reports it as
+// such. Retrying on 23505 alone would have swallowed that.
+func LabelTaken(err error) bool {
+	return isUniqueViolation(err) && strings.Contains(err.Error(), "aliases_label_key")
+}
+
 func CreateAlias(ctx context.Context, db *gorm.DB, sc Scope, a *model.Alias) error {
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
 		var parent model.Project

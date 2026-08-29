@@ -7,7 +7,7 @@ import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
-import { ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, HelpHintComponent, LBNode, NOT_PERMITTED, Project, SessionService, apiErrorMessage, confirmAction, may } from '@acme/shared';
+import { apiErrorMessage, ApiKey, ApiKeyCreated, ApiService, CAN_WRITE_KEYS, confirmAction, HelpHintComponent, InfoBoxComponent, LBNode, may, NOT_PERMITTED, Project, SessionService } from '@acme/shared';
 import { openApiKeyCreateModal } from './apikey-create.modal';
 import { openApiKeyRevealModal } from './apikey-reveal.modal';
 
@@ -26,7 +26,7 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
  */
 @Component({
   selector: 'app-apikeys-panel',
-  imports: [DatePipe, HelpHintComponent, NzAlertModule, NzButtonModule, NzIconModule, NzTableModule, NzTagModule, NzToolTipModule],
+  imports: [DatePipe, HelpHintComponent, NzAlertModule, NzButtonModule, NzIconModule, NzTableModule, NzTagModule, NzToolTipModule, InfoBoxComponent],
   template: `
     <div class="panel-head">
       <h2>
@@ -202,12 +202,11 @@ import { openApiKeyRevealModal } from './apikey-reveal.modal';
       who does not. The rotation sentence is the load-bearing one: rotating does NOT revoke, and
       somebody who assumes otherwise leaves a live key they think is dead.
     -->
-    <nz-alert
+    <app-info-box
       class="panel-note"
-      nzType="info"
-      nzShowIcon
-      nzMessage="About project keys"
-      nzDescription="A project key goes in YOUR ACME client — the credentials of its DNS-01 resolver. It is what lets your client hand us the challenge value for a name in this project, so we can serve it. It reaches nothing else, and it is deleted with the project. Rotating mints a successor but does not revoke the current key: deploy the new secret, confirm it works, then revoke the old one. The two are valid side by side on purpose, so there is no gap."
+      key="project-keys"
+      heading="About project keys"
+      text="A project key goes in YOUR ACME client — the credentials of its DNS-01 resolver. It is what lets your client hand us the challenge value for a name in this project, so we can serve it. It reaches nothing else, and it is deleted with the project. Rotating mints a successor but does not revoke the current key: deploy the new secret, confirm it works, then revoke the old one. The two are valid side by side on purpose, so there is no gap."
     />
   `,
   styles: [

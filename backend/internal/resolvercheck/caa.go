@@ -7,18 +7,55 @@ import (
 	"github.com/miekg/dns"
 )
 
-// CAAStatus is the outcome of checking a CAA record set. Unlike Status, an
-// absent record is the good outcome here — design D5 and the spec
-// requirement "CAA verification distinguishes absent from conflicting" both
-// call this out because the intuitive reading is backwards.
+// CAAStatus is the outcome of checking a CAA record set.
+//
+// THIS VOCABULARY WAS REVERSED, and the reversal is the point of it. It used to
+// read absence as the good outcome, on the grounds that a domain publishing no
+// CAA lets any authority issue and therefore lets OURS issue. That is true and
+// it is the wrong question. The question a customer of this service should be
+// asking is not "may my authority issue" but "who else may", and the honest
+// answer to that on a delegated domain includes US: a customer publishes one
+// CNAME pointing the challenge name into our zone, and from that moment we can
+// complete a DNS-01 validation for that name — and for its wildcard, since a
+// wildcard and its base share one challenge name (dnsname.ChallengeName). Every
+// hosted responder for DNS-01 holds that power over the domains delegated to it.
+// It is what the customer is buying and it is not something we can give back.
+//
+// What a customer CAN do is bound it, and there is exactly one record that does:
+// RFC 8657's accounturi parameter, which pins issuance to one ACME account. A
+// CAA set that names our configured authority without accounturi does not
+// restrict us at all — any account at that authority may issue, and ours is one.
+// A set that carries accounturi does: an order from any other account is refused
+// by the authority itself, whatever this service does or says.
+//
+// So the three outcomes below grade a domain by how much of that is left open,
+// which is why absence is now the WORST of them rather than the best.
 type CAAStatus string
 
 const (
-	// CAACorrect means a CAA set exists and authorizes a configured issuer
-	// for both plain and wildcard issuance.
+	// CAACorrect means a CAA set exists, authorizes a configured issuer for
+	// both plain and wildcard issuance, AND pins every authorization it grants
+	// to a specific ACME account. This is the only state in which holding the
+	// customer's delegation does not also mean being able to obtain their
+	// certificates.
+	//
+	// It does NOT mean the account named is the customer's. Nothing visible in
+	// DNS says whose an account URI is, and a check that claimed otherwise
+	// would be asserting something it cannot see.
 	CAACorrect CAAStatus = "correct"
-	// CAANotPublished means no CAA record exists — NOT a failure: absent CAA
-	// permits any certificate authority to issue.
+	// CAAUnconstrained means the set authorizes a configured issuer but names
+	// no account: issuance works, and works for anybody holding the delegation.
+	// The remedy is a parameter on a record the customer already publishes,
+	// which is why this is its own state and not a variety of CAACorrect.
+	CAAUnconstrained CAAStatus = "unconstrained"
+	// CAANotPublished means no CAA record exists. Any authority may issue, by
+	// any method, from any account.
+	//
+	// It was previously reported as the good outcome and is not one. Nothing is
+	// BROKEN in this state — this is the state most domains on the internet are
+	// in, and certificates issue perfectly well — but nothing is bounded in it
+	// either, and it is the one state a delegating customer can leave by
+	// publishing a single record.
 	CAANotPublished CAAStatus = "not-published"
 	// CAABlocking means a CAA set exists but does not authorize a configured
 	// issuer — issuance will fail outright until it is fixed.
@@ -30,8 +67,11 @@ const (
 // CAAResult is what checking one registrable domain's CAA set produced.
 type CAAResult struct {
 	Status CAAStatus
-	// Found lists the authorities actually published, populated when Status
-	// is CAABlocking.
+	// Found is the issue and issuewild rdata actually published, in the order
+	// the answer carried it, and it is populated in EVERY state that has
+	// something to show — not only in CAABlocking as it once was. A screen that
+	// prints the record a domain needs beside the record it has cannot fill the
+	// second column from a field that is only set when the news is bad.
 	Found string
 }
 
@@ -79,15 +119,24 @@ func (c *Checker) CheckCAA(ctx context.Context, check CAACheck) CAAResult {
 		return CAAResult{Status: CAANotPublished}
 	}
 
+	found := strings.Join(append(append([]string{}, issue...), issuewild...), ", ")
+
 	// issuewild governs wildcard issuance instead of issue when present.
 	wildAuthority := issuewild
 	if len(wildAuthority) == 0 {
 		wildAuthority = issue
 	}
-	if authorizes(issue, check.Issuers) && authorizes(wildAuthority, check.Issuers) {
-		return CAAResult{Status: CAACorrect}
+	if !authorizes(issue, check.Issuers) || !authorizes(wildAuthority, check.Issuers) {
+		return CAAResult{Status: CAABlocking, Found: found}
 	}
-	return CAAResult{Status: CAABlocking, Found: strings.Join(append(append([]string{}, issue...), issuewild...), ", ")}
+	// Both halves are pinned or neither counts. A wildcard authorized by an
+	// account-pinned issuewild beside a bare issue is still a domain anybody
+	// holding the delegation can get a certificate for — just not a wildcard
+	// one — and calling that constrained would be reporting the better half.
+	if pinned(issue) && pinned(wildAuthority) {
+		return CAAResult{Status: CAACorrect, Found: found}
+	}
+	return CAAResult{Status: CAAUnconstrained, Found: found}
 }
 
 // authorizes reports whether tags is empty (no restriction of that kind) or
@@ -104,6 +153,50 @@ func authorizes(tags []string, issuers []string) bool {
 			if strings.EqualFold(identifier, want) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// pinned reports whether EVERY value in tags carries an accounturi parameter
+// (RFC 8657), which is what limits issuance to one ACME account.
+//
+// Every value and not any: a set is only as tight as its loosest entry, and one
+// unpinned `issue "letsencrypt.org"` beside a pinned one leaves issuance open to
+// every account at that authority.
+//
+// An empty tags list is NOT pinned, which is the case that matters most and
+// reads backwards next to authorizes() above. No issue tag means no restriction
+// on plain issuance at all — every authority, every account — so the two
+// functions disagree about the empty list on purpose: it authorizes everyone and
+// pins no one.
+func pinned(tags []string) bool {
+	if len(tags) == 0 {
+		return false
+	}
+	for _, t := range tags {
+		if !hasAccountURI(t) {
+			return false
+		}
+	}
+	return true
+}
+
+// hasAccountURI reports whether one CAA value carries a non-empty accounturi
+// parameter. Parameters follow the authority identifier after a ';' and are
+// themselves ';'-separated `name=value` pairs, so this walks the tail rather
+// than searching the whole string — `issue "accounturi.example.com"` names an
+// authority that happens to be spelled like the parameter and constrains
+// nothing.
+func hasAccountURI(value string) bool {
+	parts := strings.Split(value, ";")
+	for _, p := range parts[1:] {
+		name, v, ok := strings.Cut(p, "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(name), "accounturi") && strings.TrimSpace(v) != "" {
+			return true
 		}
 	}
 	return false

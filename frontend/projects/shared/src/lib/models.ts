@@ -109,6 +109,15 @@ export interface Domain {
    */
   cnameTarget: string;
   expectedCaa: string[] | null;
+  /**
+   * The name `expectedCaa` belongs at — the registrable domain, since CAA is inherited and the
+   * nearest ancestor wins. Empty exactly when `expectedCaa` is null.
+   *
+   * It comes from the service rather than being derived here because separating example.com from
+   * example.co.uk needs the public suffix list, and shipping that to a browser to recompute a name
+   * the service already knows would be a large download for a wrong answer.
+   */
+  caaName: string;
 }
 
 /**
@@ -330,15 +339,25 @@ export type CheckStatus = 'correct' | 'missing' | 'incorrect' | 'undetermined' |
 export type DelegationStatus = 'not-checked' | 'missing' | 'incorrect' | 'correct' | 'undetermined';
 
 /**
- * CAA's four states, on an axis of permission — plus `not-checked` for the same reason as above.
+ * CAA's five states, on an axis of permission — plus `not-checked` for the same reason as above.
  *
  * This is deliberately NOT `DelegationStatus` (design D3). CAA answers "who may issue", not "is
- * something published", and `not-published` — by far the commonest state — is entirely correct:
- * an absent CAA record lets anyone issue. Sharing one union with the delegation is how
- * `not-published` would come to be rendered as "not configured", warning nearly every customer
- * and burying `blocking`, the one state here that actually stops issuance.
+ * something published", and the two axes disagree about what good looks like: a delegation is
+ * judged by whether it is there, a CAA set by how little it leaves open.
+ *
+ * `unconstrained` is the state that made the axis worth having. It names the customer's authority
+ * and no account, so issuance works — and works for every account at that authority, ours among
+ * them, on a domain whose challenge name they have delegated to us. `correct` is that record plus
+ * an `accounturi` parameter (RFC 8657). `not-published` is neither, and is no longer reported as
+ * the good outcome it once was.
  */
-export type CAAStatus = 'not-checked' | 'correct' | 'not-published' | 'blocking' | 'undetermined';
+export type CAAStatus =
+  | 'not-checked'
+  | 'correct'
+  | 'unconstrained'
+  | 'not-published'
+  | 'blocking'
+  | 'undetermined';
 
 /** One record type's answer for one domain. `expected` is that domain's own value, not a sample. */
 export interface RecordCheck<S> {

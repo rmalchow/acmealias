@@ -4,7 +4,7 @@ import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzModalService } from 'ng-zorro-antd/modal';
-import { Account, NOT_IN_PERSONAL_ACCOUNT, PageHeaderComponent } from '@acme/shared';
+import { Account, InfoBoxComponent, NOT_IN_PERSONAL_ACCOUNT, PageHeaderComponent } from '@acme/shared';
 import { openCheckout } from './checkout.modal';
 
 /**
@@ -26,7 +26,7 @@ import { openCheckout } from './checkout.modal';
 @Component({
   selector: 'app-upgrade',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NzAlertModule, NzButtonModule, NzIconModule, PageHeaderComponent],
+  imports: [NzAlertModule, NzButtonModule, NzIconModule, PageHeaderComponent, InfoBoxComponent],
   template: `
     <app-page-header
       [crumbs]="[{ label: 'Team account' }]"
@@ -42,7 +42,7 @@ import { openCheckout } from './checkout.modal';
           would send the owner of an account of one looking for whoever can widen them, and there
           is nobody — the remedy is a different kind of account, which is the page they are on.
         -->
-        <nz-alert nzType="info" [nzMessage]="NOT_IN_PERSONAL_ACCOUNT" [nzDescription]="asked" />
+        <app-info-box key="team-only" [heading]="NOT_IN_PERSONAL_ACCOUNT" [body]="asked" />
         <ng-template #asked>
           <code>{{ from() }}</code> belongs to a team account.
         </ng-template>
@@ -97,10 +97,10 @@ import { openCheckout } from './checkout.modal';
         it, and find they cannot. So it says what is true — that nothing is permanently tied — and
         does not claim the mechanism exists yet.
       -->
-      <nz-alert
-        nzType="info"
-        nzMessage="Your personal account is not affected"
-        [nzDescription]="personalIsSafe"
+      <app-info-box
+        key="personal-is-safe"
+        heading="Your personal account is not affected"
+        [text]="personalIsSafe"
       />
     </div>
   `,

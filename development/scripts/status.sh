@@ -49,7 +49,7 @@ echo
 printf '\033[1mdata\033[0m\n'
 if compose_all ps --status running --format '{{.Service}}' 2>/dev/null | grep -qx postgres; then
   counts="$(compose exec -T postgres psql -qtAX -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
-    "select 'projects='||(select count(*) from projects)||' load_balancers='||(select count(*) from load_balancers)||' domains='||(select count(*) from domains)||' aliases='||(select count(*) from aliases)||' api_keys='||(select count(*) from api_keys)" 2>/dev/null || true)"
+    "select 'projects='||(select count(*) from projects)||' nodes='||(select count(*) from lb_nodes)||' domains='||(select count(*) from domains)||' aliases='||(select count(*) from aliases)||' api_keys='||(select count(*) from api_keys)" 2>/dev/null || true)"
   if [ -n "$counts" ]; then
     printf '  %s\n' "$counts"
     case "$counts" in *"projects=0"*) printf '  not seeded yet — ./scripts/dev.sh seed\n' ;; esac

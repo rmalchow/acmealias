@@ -148,8 +148,16 @@ func TestGenerateLabelIsValidAndUnpredictable(t *testing.T) {
 		if err := ValidateLabel(got); err != nil {
 			t.Fatalf("GenerateLabel() = %q, which is not a valid label: %v", got, err)
 		}
-		if len(got) != 16 {
-			t.Fatalf("GenerateLabel() = %q, want 16 octets, got %d", got, len(got))
+		// Ten, not sixteen: 48 bits, base32 with padding suppressed. The length is
+		// asserted rather than left to ValidateLabel because the failure this
+		// catches is padding creeping back in — StdEncoding would return
+		// "abcdefghij======", which ValidateLabel refuses for the wrong reason
+		// and which a change to the alphabet could make legal.
+		if len(got) != 10 {
+			t.Fatalf("GenerateLabel() = %q, want 10 octets, got %d", got, len(got))
+		}
+		if strings.Contains(got, "=") {
+			t.Fatalf("GenerateLabel() = %q carries base32 padding, which is not legal in a DNS label", got)
 		}
 		if seen[got] {
 			t.Fatalf("GenerateLabel() repeated %q within %d draws", got, n)

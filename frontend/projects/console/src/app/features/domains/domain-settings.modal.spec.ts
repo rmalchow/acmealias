@@ -21,6 +21,9 @@ function domain(over: Partial<Domain> = {}): Domain {
     observeTls: false,
     tlsTestHost: null,
     cnameTarget: 'shop-example-com.svc.example.net',
+    // Where the CAA rdata belongs. The DNS panel needs an owner name to print a record at, and a
+    // fixture without one silently tests the "no issuer configured" table instead.
+    caaName: 'example.com',
     expectedCaa: null,
     ...over,
   };

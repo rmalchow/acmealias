@@ -47,7 +47,7 @@ type DomainExpectation struct {
 	AliasID       model.ID // shared by a wildcard and its apex
 	Target        string   // what the CNAME must point at, "" when no alias exists yet
 	Registrable   string   // the name CAA for this domain lives at, "" when it has none
-	ExpectedCAA   []string // rendered rdata, `0 issue "letsencrypt.org"`; nil with no issuer configured
+	ExpectedCAA   []string // rendered rdata, `0 issue "letsencrypt.org; accounturi=…"`; nil with no issuer
 }
 
 // Expectations returns one DomainExpectation per domain in a project, in the
@@ -108,7 +108,7 @@ func buildExpectations(domains []model.Domain, aliases []model.Alias, opts PlanO
 			// Recorded even when no CAA is expected (no issuer configured): this
 			// says where CAA for the domain lives, not that we checked it.
 			e.Registrable = r
-			e.ExpectedCAA = caaLines(r, opts.CAAIssuers)
+			e.ExpectedCAA = CAALines(r, opts.CAAIssuers)
 		}
 		out = append(out, e)
 	}
@@ -125,7 +125,30 @@ func DelegationTarget(a model.Alias, zone string) string {
 	return a.Label + "." + strings.TrimSuffix(strings.ToLower(zone), ".")
 }
 
-// caaLines renders the CAA rdata expected at one registrable name.
+// AccountURIPlaceholder stands where the customer's own ACME account URL goes in
+// the CAA rdata this renders.
+//
+// A PLACEHOLDER AND NOT A VALUE, because this is the one part of the record we
+// genuinely cannot compute: an account URI is minted by the certificate
+// authority when the customer's ACME client registers, it lives in that client's
+// state — Traefik's acme.json, lego's account.json, certbot's directory — and
+// nothing about it is visible from here. Printing a plausible-looking URL would
+// be worse than printing nothing: a customer who published it would pin
+// issuance to somebody else's account and lock themselves out.
+//
+// Upper case and hyphenated so it cannot be mistaken for a real value in a line
+// somebody is about to paste into a zone file.
+const AccountURIPlaceholder = "YOUR-ACME-ACCOUNT-URL"
+
+// CAALines renders the CAA rdata expected at one registrable name.
+//
+// Exported because the httpapi package renders the same record on the domain
+// read, and for a while it did so with its own copy of this function. That
+// duplication was survivable while both spelled out the same minimal
+// `0 issue "letsencrypt.org"`; it stopped being survivable the moment this one
+// started recommending accounturi, because the two would then have shown a
+// customer two different records for one name — one that bounds the delegation
+// and one that does not.
 //
 // It is the registrable name and never the host: CAA is inherited and the
 // nearest ancestor wins, so a set at shop.example.com would shadow the one at
@@ -133,17 +156,26 @@ func DelegationTarget(a model.Alias, zone string) string {
 // issuewild governs wildcard issuance *instead of* issue, and wildcards are the
 // case this service exists for.
 //
+// EVERY LINE CARRIES accounturi (RFC 8657), and that is what makes this a
+// recommendation rather than a transcription of the minimum. The minimum — the
+// authority named, nothing else — authorizes every ACME account at that
+// authority, and one of those is ours: a customer who has published the
+// delegation CNAME has already given this service everything it needs to
+// complete a DNS-01 validation for their name and its wildcard, and accounturi
+// is the only record that takes it back. So the line we print as "needed" is the
+// line that bounds us, not the line that merely works.
+//
 // No issuer configured returns nil rather than a guess — naming a CA we do not
 // use would lock issuance out entirely — and nil is also what lets the console
 // hide the CAA dot rather than showing a grey one for a check nobody asked for.
-func caaLines(registrable string, issuers []string) []string {
+func CAALines(registrable string, issuers []string) []string {
 	if registrable == "" || len(issuers) == 0 {
 		return nil
 	}
 	var out []string
 	for _, tag := range []string{"issue", "issuewild"} {
 		for _, issuer := range issuers {
-			out = append(out, fmt.Sprintf("0 %s %q", tag, issuer))
+			out = append(out, fmt.Sprintf("0 %s %q", tag, issuer+"; accounturi="+AccountURIPlaceholder))
 		}
 	}
 	return out

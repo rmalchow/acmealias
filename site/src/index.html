@@ -243,7 +243,8 @@
         <h2>The whole integration, and how to check it</h2>
         <p class="section-lede">
           Six steps, once per domain. Everything after step&nbsp;4 is your ACME client doing what it
-          already does — and step&nbsp;3 is the only change anybody makes to their DNS, ever.
+          already does, and steps&nbsp;3 and&nbsp;4 are two records published once — the delegation
+          that makes this work, and the <code>CAA</code> record that bounds what it lets us do.
         </p>
 
         <ol class="steps">
@@ -276,7 +277,7 @@
 
           <li>
             <h3>In your DNS provider, add one CNAME record</h3>
-            <p class="brief">One <code>CNAME</code> at <code>_acme-challenge</code>, published once — the only change you ever make to your DNS.</p>
+            <p class="brief">One <code>CNAME</code> at <code>_acme-challenge</code>, published once and never touched again.</p>
             <p>
               Wherever your zone lives now — no account with us, no API token, no delegation of
               anything else:
@@ -292,15 +293,62 @@
             </p>
           </li>
 
+          <!--
+            THE STEP THAT SAYS WHAT WE CAN DO, and it took the place of a step that said the
+            opposite.
+
+            It used to read "most domains have no CAA record, and that is fine". That sentence is
+            true about issuance and false about this service. The CNAME in step 3 is the whole of
+            what DNS-01 validation consults for the name and, because a wildcard and its base share
+            one challenge name, for the wildcard too — so from the moment it is published, whoever
+            operates this service can complete a challenge for that name. Every hosted DNS-01
+            responder holds that over the domains delegated to it. It is not a flaw we can fix; it
+            is what the customer is buying.
+
+            So the step names it, and names the one record that bounds it. Saying it here rather
+            than in a security page nobody opens is the only version of this that counts: it is a
+            condition of step 3, and a reader deciding whether to publish that CNAME is exactly the
+            reader who needs it.
+
+            The accounturi value is a placeholder in every rendering of this record, on the site and
+            in the console alike, because an account URL is minted by the authority for the
+            customer's own ACME client and is not visible to us. Printing a real-looking one would
+            invite somebody to publish it and lock themselves out of their own domain.
+          -->
           <li>
-            <h3>If you publish CAA, authorise your certificate authority</h3>
-            <p class="brief">If you publish <code>CAA</code>, it must name your authority, with both the <code>issue</code> and <code>issuewild</code> tags.</p>
+            <h3>Publish a CAA record that names your authority and your account</h3>
+            <p class="brief">The record that bounds what step&nbsp;3 hands us — and it is the one step here we ask you to take against us.</p>
             <p>
-              Most domains have no <code>CAA</code> record, and that is fine — an absent
-              <code>CAA</code> means any authority may issue. If you do have one, it must name the
-              authority you are using, and it needs both tags: a present <code>issuewild</code>
-              governs wildcard issuance <em>instead of</em> <code>issue</code>, so authorising only
-              the first leaves wildcards blocked.
+              The <code>CNAME</code> above is the whole of what a certificate authority consults for
+              that name. That is the service: we answer the question so you do not have to. It also
+              means that from the moment you publish it, we could ask an authority for a certificate
+              for that name ourselves — and for <code>*.example.com</code> too, since a wildcard and
+              its base share one challenge name. Every hosted responder for <code>DNS-01</code> has
+              that over the domains delegated to it. We would rather you heard it here than worked
+              it out later.
+            </p>
+            <p>
+              One record takes it back. <code>CAA</code> with an <code>accounturi</code> parameter
+              pins issuance to a single ACME account — yours — and an order from any other account
+              is refused by the authority itself, whatever we do:
+            </p>
+            <div class="term" role="img"
+                 aria-label="Two CAA records authorising Let's Encrypt for one specific ACME account, covering plain and wildcard issuance.">
+              <pre>example.com.  300  IN  CAA  0 issue     "letsencrypt.org; accounturi=YOUR-ACME-ACCOUNT-URL"
+example.com.  300  IN  CAA  0 issuewild "letsencrypt.org; accounturi=YOUR-ACME-ACCOUNT-URL"</pre>
+            </div>
+            <p class="note">
+              Both tags, because a present <code>issuewild</code> governs wildcard issuance
+              <em>instead of</em> <code>issue</code> — authorising only the first leaves wildcards
+              blocked. The record goes at the registrable name, <code>example.com</code>, and covers
+              every host under it. Your account URL comes from the client you already run; with
+              Traefik it is <code>jq -r '.[].Account.Registration.uri' acme.json</code>, and the
+              console prints the same line for each of your domains with the value to substitute.
+            </p>
+            <p class="note">
+              Without this record, certificates still issue and everything works — that is the state
+              most of the internet is in. It is simply the state in which more people than you
+              intended could ask for one.
             </p>
           </li>
 

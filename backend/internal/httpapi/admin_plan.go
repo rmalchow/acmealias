@@ -33,6 +33,48 @@ import (
 // record type. Every citation names its change, because "D5" alone means two
 // things in this file.
 
+// recordKinds is which record types one verification pass asks about.
+//
+// The console has a button per table now — Delegation and CAA are separate
+// questions, asked at separate moments — and this is what keeps the request
+// honest about that. Filtering the ANSWER client-side would have been half a
+// line of code and a lie: the queries would still have gone to somebody's
+// recursor, and the user pressing "check the CAA" would have doubled the DNS
+// traffic of the screen without being told.
+//
+// The zero value asks everything, so a caller that says nothing — the recorded
+// re-check, an older console, curl — behaves exactly as before.
+type recordKinds struct {
+	delegation bool
+	caa        bool
+}
+
+func (r recordKinds) wants(kind string) bool {
+	if !r.delegation && !r.caa {
+		return true
+	}
+	return (kind == "CNAME" && r.delegation) || (kind == "CAA" && r.caa)
+}
+
+// parseRecordKinds reads ?records=delegation,caa.
+//
+// An unrecognised value is IGNORED rather than refused, and an empty result asks
+// everything. A typo in a query parameter should cost a caller nothing worse
+// than the answer they would have got without it — this is a filter on how much
+// work to do, not an instruction whose misspelling means something else.
+func parseRecordKinds(c echo.Context) recordKinds {
+	var out recordKinds
+	for _, want := range strings.Split(c.QueryParam("records"), ",") {
+		switch strings.TrimSpace(strings.ToLower(want)) {
+		case "delegation", "cname":
+			out.delegation = true
+		case "caa":
+			out.caa = true
+		}
+	}
+	return out
+}
+
 // statusNotChecked is the one status on the wire resolvercheck cannot produce,
 // because nothing was asked: the deployment configured no resolver. It is not a
 // finding about the customer's DNS and must never be rendered as one — we are
@@ -55,12 +97,18 @@ type recordCheck struct {
 // domainCheck is one domain's answer, one field per record type.
 //
 // The fields are kept apart deliberately (domain-setup-feedback D2, D3): the
-// delegation is
-// reported on an axis of presence and CAA on an axis of permission, and a
-// single verdict per domain would have to pick one of the two vocabularies and
-// then lie in the other. In particular CAA's commonest state, `not-published`,
-// is entirely correct — anyone may issue — and folding it into a domain verdict
-// would flag nearly every customer.
+// delegation is reported on an axis of presence and CAA on an axis of
+// permission, and a single verdict per domain would have to pick one of the two
+// vocabularies and then lie in the other. A missing delegation means nothing
+// works; an unpinned CAA set means everything works, for more people than the
+// customer intended. Those are not two points on one scale.
+//
+// CAA's commonest state, `not-published`, USED TO BE REPORTED AS CORRECT here on
+// the grounds that absence lets anybody issue and therefore lets us. It is now
+// the worst of the three, for the reason set out at length on CAAStatus: on a
+// domain that has delegated its challenge name to this service, "anybody may
+// issue" includes this service, and accounturi is the only record that says
+// otherwise.
 //
 // CAA is absent, rather than some fifth status, when the plan holds no CAA row
 // for this domain: with no issuer configured (ACME_CAA_ISSUER unset) there is
@@ -127,7 +175,7 @@ func (a *admin) ask(c echo.Context, exps []inventory.DomainExpectation) map[stri
 	if a.resolver == "" {
 		return nil
 	}
-	checks := groupForChecks(exps, a.opts.Config.CAAIssuers)
+	checks := groupForChecks(exps, a.opts.Config.CAAIssuers, parseRecordKinds(c))
 	answers := runChecks(c.Request().Context(), a.checker, checks)
 	// Zipped by position rather than by anything in the answer, which is what
 	// makes runChecks free to keep its results in a slice: the question already
@@ -267,21 +315,24 @@ func (p planCheck) run(ctx context.Context, ch *resolvercheck.Checker) recordChe
 // ponytail: this adapter lives here because the management API is its only
 // caller — there is no CLI verification subcommand. If one is ever added, move
 // it to internal/inventory beside Expectations rather than copying it.
-func groupForChecks(exps []inventory.DomainExpectation, issuers []string) []planCheck {
+func groupForChecks(exps []inventory.DomainExpectation, issuers []string, want recordKinds) []planCheck {
 	var out []planCheck
 	seen := map[string]bool{}
 	for _, e := range exps {
 		// No alias yet: nothing to ask for. The row still appears in the answer,
 		// reading "not checked", because domainChecks builds from the
-		// expectations rather than from these questions.
-		if e.Target != "" && !seen["CNAME|"+e.ChallengeName] {
+		// expectations rather than from these questions — and the same is true
+		// of a record type this pass was not asked about, which is what lets the
+		// console merge a delegation-only answer over the CAA answers it already
+		// has instead of losing them.
+		if want.wants("CNAME") && e.Target != "" && !seen["CNAME|"+e.ChallengeName] {
 			seen["CNAME|"+e.ChallengeName] = true
 			out = append(out, planCheck{
 				name: e.ChallengeName, kind: "CNAME", expected: []string{e.Target},
 				cname: &resolvercheck.CNAMECheck{Name: e.ChallengeName, Expected: dns.Fqdn(e.Target)},
 			})
 		}
-		if len(e.ExpectedCAA) > 0 && !seen["CAA|"+e.Registrable] {
+		if want.wants("CAA") && len(e.ExpectedCAA) > 0 && !seen["CAA|"+e.Registrable] {
 			seen["CAA|"+e.Registrable] = true
 			out = append(out, planCheck{
 				name: e.Registrable, kind: "CAA", expected: e.ExpectedCAA,

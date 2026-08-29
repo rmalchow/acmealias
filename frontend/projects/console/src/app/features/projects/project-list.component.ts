@@ -9,7 +9,7 @@ import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzTableModule, NzTableQueryParams } from 'ng-zorro-antd/table';
 import { NzToolTipModule } from 'ng-zorro-antd/tooltip';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
-import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionService, apiErrorMessage, may, openNameSlugModal } from '@acme/shared';
+import { apiErrorMessage, ApiService, CAN_ADMIN_PROJECT, InfoBoxComponent, may, openNameSlugModal, PageHeaderComponent, Project, SessionService } from '@acme/shared';
 /** 19.1 — the project list: filter, page, and create through a modal (creation is ADMIN-only, D10). */
 @Component({
   selector: 'app-project-list',
@@ -24,6 +24,7 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
     NzTableModule,
     NzToolTipModule,
     NzAlertModule,
+    InfoBoxComponent,
   ],
   template: `
     <app-page-header [crumbs]="[{ label: 'Projects' }]" title="Projects" [subtitle]="subtitle()" />
@@ -75,13 +76,7 @@ import { ApiService, CAN_ADMIN_PROJECT, PageHeaderComponent, Project, SessionSer
       explanation. Hence showIntro() rather than a bare length check.
     -->
     @if (showIntro()) {
-      <nz-alert
-        class="intro"
-        nzType="info"
-        nzShowIcon
-        nzMessage="What is a project?"
-        [nzDescription]="intro"
-      />
+      <app-info-box class="intro" key="what-is-a-project" heading="What is a project?" [body]="intro" />
       <ng-template #intro>
         <p>
           A project is one deployment held together: the load balancer nodes that terminate TLS,

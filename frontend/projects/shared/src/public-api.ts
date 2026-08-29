@@ -29,6 +29,7 @@ export * from './lib/core/wildcard.validator';
 export * from './lib/ui/confirm';
 export * from './lib/ui/page-header.component';
 export * from './lib/ui/help-hint.component';
+export * from './lib/ui/info-box.component';
 export * from './lib/ui/name-slug.modal';
 
 // The chrome around every screen. Both applications render it as their root component's body;

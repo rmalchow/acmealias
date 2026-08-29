@@ -70,7 +70,14 @@ func TestExpectationsShareOneDelegation(t *testing.T) {
 	// Every domain reads the one CAA set at the registrable domain, and reads
 	// it identically — three hosts under example.com are two lookups' worth of
 	// distinct values, not six.
-	want := []string{`0 issue "letsencrypt.org"`, `0 issuewild "letsencrypt.org"`}
+	// Both lines carry accounturi: the record this recommends is the one that
+	// BOUNDS the delegation, not the minimum that lets a certificate issue. The
+	// value is a placeholder because an account URI lives in the customer's ACME
+	// client and is not visible from here.
+	want := []string{
+		`0 issue "letsencrypt.org; accounturi=` + AccountURIPlaceholder + `"`,
+		`0 issuewild "letsencrypt.org; accounturi=` + AccountURIPlaceholder + `"`,
+	}
 	for _, e := range es {
 		if e.Registrable != "example.com" {
 			t.Errorf("%s: registrable = %q, want example.com", e.Name, e.Registrable)

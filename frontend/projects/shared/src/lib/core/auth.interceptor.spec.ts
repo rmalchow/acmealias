@@ -37,9 +37,17 @@ describe('authInterceptor', () => {
     return failed;
   }
 
-  it('goes to sign-in when there is no session yet, remembering the URL', () => {
+  it('does NOT navigate to sign-in when there is no session yet', () => {
+    // This spec asserted the opposite until today, and it asserted it into the void: the shared
+    // library's tests were compiled and never executed (no test target of its own), so nobody
+    // saw it go stale when the interceptor deliberately stopped calling signIn().
+    //
+    // The behaviour it now asserts is the intended one, and the interceptor says why at length:
+    // redirecting from an INTERCEPTOR means any request that happens to 401 can throw the window
+    // at the identity provider, so the trigger is whichever call lost the race rather than
+    // anything the person did. Signing in is SignedOutComponent's, on a screen with a button.
     const failed = fail401();
-    expect(signIn).toHaveBeenCalled();
+    expect(signIn).not.toHaveBeenCalled();
     expect(session.expired()).toBeFalse();
     expect(failed).toHaveBeenCalled();
   });

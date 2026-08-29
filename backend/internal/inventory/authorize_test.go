@@ -25,6 +25,7 @@ func TestEveryOperationAuthorizes(t *testing.T) {
 	// they touch no object, or they delegate to something here that does.
 	// Adding to this list should be a decision somebody makes on purpose.
 	exempt := map[string]string{
+		"CAALines":         "pure formatting of configured issuer identifiers; touches no object and reads nothing about the caller",
 		"DelegationTarget": "pure formatting of an alias the caller was already authorized to have",
 		"ListProjects":     "delegates wholesale to ListProjectsPage, which compiles the caller's grants into the query",
 	}

@@ -161,22 +161,57 @@ func CreateDomain(ctx context.Context, db *gorm.DB, sc store.Scope, subj authz.S
 		domains = append(domains, &model.Domain{ProjectID: projectID, Name: n})
 	}
 
-	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if created {
-			if err := store.CreateAlias(ctx, tx, sc, alias); err != nil {
-				return err
+	// THE SECOND HALF OF THE COLLISION HANDLING, and the half that survives a
+	// race. resolveLabel above picks a label that is free according to a
+	// snapshot of the table, which cannot see a label another transaction is in
+	// the middle of inserting; the database's unique index can, and refuses. So
+	// a refusal naming aliases_label_key is answered by drawing again rather
+	// than by failing a domain creation the customer did nothing wrong in.
+	//
+	// resolveLabel is called again rather than dnsname.GenerateLabel, so both
+	// label modes are covered by one path: a generated label is simply redrawn,
+	// and a label derived from the domain name re-reads the table — where the row
+	// that just beat us is now committed and visible, so the numeric suffix moves
+	// on by one instead of colliding a second time.
+	//
+	// Three attempts. At 48 bits a first collision is already a coincidence and a
+	// second is not one, so a third failure is a broken random source or a table
+	// so large the label space is the wrong size — both worth reporting rather
+	// than retrying past.
+	const attempts = 3
+	for attempt := 1; ; attempt++ {
+		err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if created {
+				if err := store.CreateAlias(ctx, tx, sc, alias); err != nil {
+					return err
+				}
 			}
+			for _, d := range domains {
+				d.AliasID = alias.ID
+				if err := store.CreateDomain(ctx, tx, sc, d); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err == nil {
+			break
 		}
+		if !created || attempt >= attempts || !store.LabelTaken(err) {
+			return nil, err
+		}
+		// The transaction rolled back, so nothing it assigned is in the database
+		// — but the ids it minted are still on these structs, and reusing one
+		// would insert a row with an id that was already published in a failed
+		// attempt's error path. Clearing them lets the next attempt mint its own.
+		label, gerr := resolveLabel(ctx, db, sc, challenge, useDomainLabel)
+		if gerr != nil {
+			return nil, gerr
+		}
+		alias.ID, alias.Label = model.NilID, label
 		for _, d := range domains {
-			d.AliasID = alias.ID
-			if err := store.CreateDomain(ctx, tx, sc, d); err != nil {
-				return err
-			}
+			d.ID = model.NilID
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 
 	return &DomainCreation{Domain: domains[0], Domains: domains, Alias: alias, AliasCreated: created, Warnings: warnings}, nil
