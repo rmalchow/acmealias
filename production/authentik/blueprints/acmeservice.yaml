@@ -215,6 +215,100 @@ entries:
       stage: !KeyOf enrollment-stage-login
       order: 40
 
+  # --- bounding what a stranger can do to us, and to third parties ------------
+  #
+  # PRODUCTION HAD NOTHING HERE AT ALL, which is worth stating plainly rather
+  # than fixing quietly: a count against this deployment's own authentik database
+  # returned zero reputation policies. authentik does not rate-limit sign-ins on
+  # its own — the reputation policy IS the mechanism — so until this block,
+  # `console.acmealias.com` accepted unlimited password guessing, and the
+  # enrolment flow accepted unlimited registrations, each of which makes US send
+  # mail to an address the stranger chose.
+  #
+  # The second is the worse half. It is a spam vector pointed at third parties
+  # with our domain in the From, and this deployment publishes no SPF, DKIM or
+  # DMARC yet (public-edition §1a, carried) — so a scripted signup run would get
+  # the domain listed with no authentication records to defend it, and the first
+  # casualty would be the confirmation mail our own customers depend on.
+  #
+  # HOW IT WORKS, because it reads backwards: authentik scores each client
+  # address and each typed identifier, dropping a point per failed identification
+  # or login and raising it on success. The policy PASSES when the score is bad,
+  # which is why it is bound to a deny stage rather than to the flow.
+  #
+  # WHAT IT DOES NOT BOUND, carried from development's copy: nothing lowers a
+  # score for a SUCCESSFUL enrolment. This stops an identifier that keeps
+  # failing; it does not stop somebody quietly registering a hundred throwaway
+  # accounts that all succeed. That rate limit is still unbuilt and is carried in
+  # public-edition's archive.
+  #
+  # THE THRESHOLD IS A LOCKOUT RISK AND IS SET DELIBERATELY. check_ip means a
+  # shared address — an office, a mobile carrier's NAT — accumulates the failures
+  # of everybody behind it, so a tight threshold locks out colleagues of whoever
+  # is fat-fingering their password. -5 is development's value and is kept:
+  # roughly five failures before a stranger is stopped, which is tight enough to
+  # matter against scripted guessing and loose enough that a person mistyping
+  # twice is unaffected. If this turns out to bite real customers the number is
+  # this one line, and the deny stage can be unbound the same way.
+  - model: authentik_policies_reputation.reputationpolicy
+    id: policy-reputation
+    identifiers: { name: acmeservice-reputation }
+    attrs:
+      name: acmeservice-reputation
+      check_ip: true
+      check_username: true
+      threshold: -5
+
+  - model: authentik_stages_deny.denystage
+    id: stage-deny-reputation
+    identifiers: { name: acmeservice-reputation-deny }
+    attrs:
+      name: acmeservice-reputation-deny
+      # Says nothing about whether the identifier exists. A message that
+      # distinguished "too many attempts for this account" from "too many
+      # attempts from here" would be an oracle reachable by failing on purpose.
+      deny_message: >-
+        Too many attempts from here. Wait a while and try again.
+
+  # `evaluate_on_plan: false` with `re_evaluate_policies: true` is the pair that
+  # makes a conditional stage work at all: evaluated when the flow is PLANNED the
+  # reputation of the person is not yet known, because they have not typed
+  # anything. Evaluated when the stage is REACHED, it is.
+  - model: authentik_flows.flowstagebinding
+    id: binding-enrollment-reputation
+    identifiers:
+      target: !KeyOf flow-enrollment
+      stage: !KeyOf stage-deny-reputation
+      order: 5
+    attrs:
+      evaluate_on_plan: false
+      re_evaluate_policies: true
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf binding-enrollment-reputation
+      policy: !KeyOf policy-reputation
+      order: 0
+
+  # Order 15 on the authentication flow: after identification (10) so there is an
+  # identifier to have a reputation for, and before the password stage (20) so a
+  # blocked caller is stopped without a password check to time.
+  - model: authentik_flows.flowstagebinding
+    id: binding-authentication-reputation
+    identifiers:
+      target: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      stage: !KeyOf stage-deny-reputation
+      order: 15
+    attrs:
+      evaluate_on_plan: false
+      re_evaluate_policies: true
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf binding-authentication-reputation
+      policy: !KeyOf policy-reputation
+      order: 0
+
   # --- the way back in --------------------------------------------------------
   #
   # Defined BEFORE the identification stage that references it: blueprint entries
