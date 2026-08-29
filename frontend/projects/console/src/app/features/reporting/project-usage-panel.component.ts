@@ -38,7 +38,21 @@ import { Outcome, UsageBucket, UsageResponse } from './reporting.models';
     <p class="ac-hint measure-note">{{ measureNote() }}</p>
 
     <div class="ac-filters">
-      <nz-range-picker name="range" [(ngModel)]="range" (ngModelChange)="load()" [nzAllowClear]="false" />
+      <!--
+        The placeholders are SPELLED OUT rather than left to the locale, which is what put Chinese
+        in this control on a deployed console. ng-zorro's default locale is zh_CN and it is compiled
+        into the date-picker bundle; en_US is provided in app.config and reaches the control in
+        every test we can write, so the fallback should never be chosen — and it was. Naming the two
+        words costs nothing and removes the question, here and on the audit filter that already
+        named them.
+      -->
+      <nz-range-picker
+        name="range"
+        [(ngModel)]="range"
+        (ngModelChange)="load()"
+        [nzAllowClear]="false"
+        [nzPlaceHolder]="['From', 'To']"
+      />
 
       <label class="pick">
         Count

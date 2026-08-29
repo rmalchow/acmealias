@@ -36,7 +36,7 @@ import { ApiService, AuditEntry, PageHeaderComponent, apiErrorMessage } from '@a
         [(ngModel)]="range"
         (ngModelChange)="reload()"
         [nzAllowClear]="true"
-        nzPlaceHolder="['From', 'To']"
+        [nzPlaceHolder]="['From', 'To']"
       />
 
       <input nz-input class="short" name="actor" [(ngModel)]="actor" placeholder="Actor" autocomplete="off" />
