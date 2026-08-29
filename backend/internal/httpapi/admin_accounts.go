@@ -69,7 +69,7 @@ type accountView struct {
 }
 
 // toAccount renders one account for the picker, from the reader's point of view.
-func toAccount(acc model.Account, selected bool, viewerID model.ID) accountView {
+func toAccount(acc model.Account, selected bool, viewerID model.ID, monetized bool) accountView {
 	return accountView{
 		ID: acc.ID, Slug: acc.Slug, Name: acc.Name, CreatedAt: acc.CreatedAt,
 		Selected: selected,
@@ -80,8 +80,8 @@ func toAccount(acc model.Account, selected bool, viewerID model.ID) accountView 
 		// than a second reading of the same columns. A view that recomputed
 		// "credits == 0" here would be a second definition of usable, and the
 		// two would disagree the day a third clause is added.
-		Suspended:       !store.Usable(&acc),
-		SuspendedReason: store.SuspensionReason(&acc),
+		Suspended:       !store.Usable(&acc, monetized),
+		SuspendedReason: store.SuspensionReason(&acc, monetized),
 	}
 }
 
@@ -89,8 +89,8 @@ func toAccount(acc model.Account, selected bool, viewerID model.ID) accountView 
 //
 // Separate rather than an argument, so a caller that has no counts cannot pass
 // zeroes by accident — the only way to report a count here is to have one.
-func toAccountListed(l store.AccountListing, selected bool, viewerID model.ID) accountView {
-	v := toAccount(l.Account, selected, viewerID)
+func toAccountListed(l store.AccountListing, selected bool, viewerID model.ID, monetized bool) accountView {
+	v := toAccount(l.Account, selected, viewerID, monetized)
 	v.ProjectCount, v.NodeCount, v.DomainCount = &l.ProjectCount, &l.NodeCount, &l.DomainCount
 	return v
 }
@@ -142,7 +142,7 @@ func (a *admin) listAccounts(c echo.Context) error {
 	out := make([]accountView, 0, len(accounts))
 	for _, acc := range accounts {
 		selected := sess.SelectedAccountID != nil && *sess.SelectedAccountID == acc.ID
-		out = append(out, toAccountListed(acc, selected, user.ID))
+		out = append(out, toAccountListed(acc, selected, user.ID, a.opts.Config.Monetized))
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -153,6 +153,13 @@ func (a *admin) listAccounts(c echo.Context) error {
 // account" screen renders before any account exists (design C12). It discloses
 // nothing: the offered amounts are the price list.
 func (a *admin) checkoutOffer(c echo.Context) error {
+	// Unmonetized: an empty list, not the price list. The console reads this to
+	// decide whether to render an amount at all, and a deployment that charges
+	// nobody must not answer "here is what it costs" to anybody who asks —
+	// including anybody reading the API without the console in front of them.
+	if !a.opts.Config.Monetized {
+		return c.JSON(http.StatusOK, checkoutAmountsView{Amounts: []int64{}, Currency: "EUR"})
+	}
 	return c.JSON(http.StatusOK, checkoutAmountsView{Amounts: store.CheckoutAmounts, Currency: "EUR"})
 }
 
@@ -205,8 +212,17 @@ func (a *admin) createAccount(c echo.Context) error {
 	if body.Name == "" {
 		return fmt.Errorf("%w: account name is empty", inventory.ErrInvalid)
 	}
-	if !store.IsOfferedAmount(body.Amount) {
-		return fmt.Errorf("%w: %d EUR; this service offers %v", store.ErrAmountNotOffered, body.Amount, store.CheckoutAmounts)
+	// The amount is only a question where money is (design C8). Unmonetized, a
+	// team account is created with a balance of zero and works — store.Usable
+	// takes the same flag — and an amount sent anyway is IGNORED rather than
+	// refused: it is a field an older console fills in, and refusing it would
+	// break that console for a value that now means nothing.
+	if a.opts.Config.Monetized {
+		if !store.IsOfferedAmount(body.Amount) {
+			return fmt.Errorf("%w: %d EUR; this service offers %v", store.ErrAmountNotOffered, body.Amount, store.CheckoutAmounts)
+		}
+	} else {
+		body.Amount = 0
 	}
 
 	ctx := c.Request().Context()
@@ -229,7 +245,7 @@ func (a *admin) createAccount(c echo.Context) error {
 	// "together or not at all" — is true now that it is one transaction.
 	var acc *model.Account
 	err = a.db().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		created, err := store.CreateAccountWithOwner(ctx, tx, body.Slug, body.Name, user.ID, body.Amount)
+		created, err := store.CreateAccountWithOwner(ctx, tx, body.Slug, body.Name, user.ID, body.Amount, a.opts.Config.Monetized)
 		if err != nil {
 			return err
 		}
@@ -269,7 +285,7 @@ func (a *admin) createAccount(c echo.Context) error {
 	if err := store.SelectAccount(ctx, a.db(), sess.ID, &acc.ID); err != nil {
 		return err
 	}
-	return c.JSON(http.StatusCreated, toAccount(*acc, true, user.ID))
+	return c.JSON(http.StatusCreated, toAccount(*acc, true, user.ID, a.opts.Config.Monetized))
 }
 
 // checkout adds credit to an account that already exists (task 5.1, design C8).
@@ -300,8 +316,17 @@ func (a *admin) checkout(c echo.Context) error {
 	if err := bind(c, &body); err != nil {
 		return err
 	}
-	if !store.IsOfferedAmount(body.Amount) {
-		return fmt.Errorf("%w: %d EUR; this service offers %v", store.ErrAmountNotOffered, body.Amount, store.CheckoutAmounts)
+	// The amount is only a question where money is (design C8). Unmonetized, a
+	// team account is created with a balance of zero and works — store.Usable
+	// takes the same flag — and an amount sent anyway is IGNORED rather than
+	// refused: it is a field an older console fills in, and refusing it would
+	// break that console for a value that now means nothing.
+	if a.opts.Config.Monetized {
+		if !store.IsOfferedAmount(body.Amount) {
+			return fmt.Errorf("%w: %d EUR; this service offers %v", store.ErrAmountNotOffered, body.Amount, store.CheckoutAmounts)
+		}
+	} else {
+		body.Amount = 0
 	}
 	ctx := c.Request().Context()
 	viewer, err := store.FindOrCreateUser(ctx, a.db(), sess.Subject, sess.DisplayName, "")
@@ -346,7 +371,7 @@ func (a *admin) checkout(c echo.Context) error {
 		return err
 	}
 	selected := sess.SelectedAccountID != nil && *sess.SelectedAccountID == after.ID
-	return c.JSON(http.StatusOK, toAccount(*after, selected, viewer.ID))
+	return c.JSON(http.StatusOK, toAccount(*after, selected, viewer.ID, a.opts.Config.Monetized))
 }
 
 // transferAccount hands a team account to somebody else (task 3.6).
@@ -473,13 +498,13 @@ func (a *admin) selectAccount(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if !store.Usable(acc) {
+	if !store.Usable(acc, a.opts.Config.Monetized) {
 		user, err := store.FindOrCreateUser(ctx, a.db(), sess.Subject, sess.DisplayName, "")
 		if err != nil {
 			return err
 		}
 		if acc.OwnerUserID != user.ID {
-			return fmt.Errorf("%w: %s, and its owner can restore it", store.ErrAccountSuspended, store.SuspensionReason(acc))
+			return fmt.Errorf("%w: %s, and its owner can restore it", store.ErrAccountSuspended, store.SuspensionReason(acc, a.opts.Config.Monetized))
 		}
 	}
 	if err := store.SelectAccount(ctx, a.db(), sess.ID, &accountID); err != nil {
@@ -750,6 +775,17 @@ type memberView struct {
 	UserID      model.ID `json:"userId"`
 	Subject     string   `json:"subject"`
 	DisplayName string   `json:"displayName"`
+	// Email is what a roster is actually read by. A display name comes from the
+	// identity provider and is often a first name or a duplicate; the address is
+	// the thing an administrator recognises, and it is the value an invitation
+	// was sent to, so a row that shows both closes the loop between "I invited
+	// somebody" and "this person is here".
+	//
+	// Empty for a user this service has never seen sign in — the address is
+	// learned from the id token (oidcauth records it on every sign-in), so a
+	// member added by subject from the CLI has none until they arrive. The
+	// console renders the name alone in that case rather than an empty bracket.
+	Email string `json:"email,omitempty"`
 	// RoleID and RoleName are absent for a member who holds no role — somebody
 	// who accepted an invitation and is waiting for one (account-invitations
 	// V6). `omitempty` rather than a zero identifier, so the console can tell
@@ -793,6 +829,9 @@ func (a *admin) listMembers(c echo.Context) error {
 		v := memberView{ID: m.ID, UserID: m.UserID, RoleID: m.RoleID, Owner: m.UserID == acc.OwnerUserID}
 		if m.User != nil {
 			v.Subject, v.DisplayName = m.User.Subject, m.User.DisplayName
+			if m.User.Email != nil {
+				v.Email = *m.User.Email
+			}
 		}
 		if m.Role != nil {
 			v.RoleName = m.Role.Name

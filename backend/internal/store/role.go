@@ -275,19 +275,43 @@ func AddMemberWithoutRole(ctx context.Context, db *gorm.DB, sc Scope, userID mod
 	})
 }
 
-// AssignRole gives a role to a membership that holds none, IN PLACE.
+// SetRole points a membership at a role, IN PLACE, whether it held one or not.
 //
 // In place, and not by inserting a second row, because memberships are per-role:
 // the unique key is (account_id, user_id, role_id), so a person may legitimately
-// hold several. Inserting would therefore leave the new member listed twice —
-// once with the role they were just given, and once as somebody still waiting
-// for one — and the roster would be reporting a state that no longer exists.
+// hold several. Inserting would therefore leave the member listed twice — once
+// with the role they were just given, and once as they were before — and the
+// roster would be reporting a state that no longer exists.
 //
-// The WHERE clause requires role_id to still be null, so two administrators
-// assigning different roles at once produce one winner and one ErrRecordNotFound
-// rather than a lost update. If an account genuinely wants somebody in two
-// roles, that is AddMember, afterwards.
-func AssignRole(ctx context.Context, db *gorm.DB, sc Scope, memberID, roleID model.ID) error {
+// IT USED TO REFUSE A MEMBERSHIP THAT ALREADY HELD A ROLE. The WHERE clause said
+// `role_id IS NULL` and the comment said that re-pointing an existing membership
+// was "a remove and an add". That made assigning a role the last step of an
+// invitation and nothing else: an administrator who wanted to move somebody from
+// read-only to operator had to remove them from the account and add them back,
+// which loses the membership row, and — if the person was the last holder of the
+// unrestricted role — could not be done at all. Changing a role is an ordinary
+// thing an account does, so it is one operation now.
+//
+// Three refusals survive that relaxation, and the first two are the ones the old
+// null check was accidentally providing:
+//
+//   - THE OWNER KEEPS THE UNRESTRICTED ROLE. Moving the person the account is
+//     billed to out of it would leave them unable to administer what they pay
+//     for, which is the same rule RemoveMember enforces and for the same reason.
+//   - THE LAST ADMINISTRATOR STAYS ONE. Read with SELECT ... FOR UPDATE inside
+//     this transaction, exactly as RemoveMember does: without the lock two
+//     concurrent changes each see two administrators, each concludes one will
+//     remain, and together they demote both — leaving an account nobody can
+//     administer and no single request that did anything wrong.
+//   - A DUPLICATE IS A CONFLICT, not a constraint violation. Pointing a
+//     membership at a role the same person already holds through another
+//     membership collides with the unique key; it is reported as
+//     ErrAlreadyMember, which says what happened.
+//
+// Refusing to change one's OWN role is deliberately NOT here. It is a rule about
+// who is asking rather than about what the data may look like, this package
+// never learns who is asking, and the handler that does enforces it.
+func SetRole(ctx context.Context, db *gorm.DB, sc Scope, memberID, roleID model.ID) error {
 	return sc.Run(ctx, db, func(tx *gorm.DB) error {
 		// Resolved under the scope first, so a role identifier from another
 		// account cannot be written onto this account's membership. The
@@ -295,20 +319,77 @@ func AssignRole(ctx context.Context, db *gorm.DB, sc Scope, memberID, roleID mod
 		// refusal into a legible error instead of a constraint violation.
 		var role model.Role
 		if err := sc.Where(tx).First(&role, "id = ?", roleID).Error; err != nil {
-			return fmt.Errorf("store: assign role %s: %w", roleID, err)
+			return fmt.Errorf("store: set role %s: %w", roleID, err)
+		}
+		var member model.AccountMember
+		if err := sc.Where(tx).First(&member, "id = ?", memberID).Error; err != nil {
+			return fmt.Errorf("store: set role: %w", err)
+		}
+		if member.RoleID != nil && *member.RoleID == roleID {
+			// Already where it is being asked to go. Answering success rather
+			// than touching the row keeps the operation idempotent, which is
+			// what a console that re-sends a select's value on every change
+			// needs.
+			return nil
+		}
+		if err := guardLeavingUnrestricted(ctx, tx, sc, member); err != nil {
+			return err
 		}
 		res := sc.Where(tx).
 			Model(&model.AccountMember{}).
-			Where("id = ? AND role_id IS NULL", memberID).
+			Where("id = ?", memberID).
 			Update("role_id", roleID)
 		if res.Error != nil {
-			return fmt.Errorf("store: assign role: %w", res.Error)
+			if isUniqueViolation(res.Error) {
+				return fmt.Errorf("%w: that person already holds %q", ErrAlreadyMember, role.Name)
+			}
+			return fmt.Errorf("store: set role: %w", res.Error)
 		}
 		if res.RowsAffected == 0 {
-			return fmt.Errorf("store: assign role: %w", gorm.ErrRecordNotFound)
+			return fmt.Errorf("store: set role: %w", gorm.ErrRecordNotFound)
 		}
 		return nil
 	})
+}
+
+// guardLeavingUnrestricted refuses a change that would move a membership OUT of
+// the unrestricted role when it must not.
+//
+// It is the pair of checks RemoveMember makes, factored out because the two
+// operations can strand an account in exactly the same way: removing the last
+// administrator and demoting the last administrator leave the identical account
+// behind. A membership that holds no role, or one whose role is not the
+// unrestricted one, is leaving nothing and passes.
+func guardLeavingUnrestricted(ctx context.Context, tx *gorm.DB, sc Scope, member model.AccountMember) error {
+	if member.RoleID == nil {
+		return nil
+	}
+	var current model.Role
+	if err := sc.Where(tx).First(&current, "id = ?", *member.RoleID).Error; err != nil {
+		return fmt.Errorf("store: read the role being left: %w", err)
+	}
+	if !current.Unrestricted {
+		return nil
+	}
+	// The owner first, because when the owner IS the last administrator both
+	// constraints are hit at once and only one of them names an action that
+	// would work.
+	acc, err := GetAccount(ctx, tx, sc)
+	if err != nil {
+		return err
+	}
+	if acc.OwnerUserID == member.UserID {
+		return fmt.Errorf("%w: %s is billed for %q and must be able to administer it; "+
+			"transfer the account first", ErrOwnerMustBeUnrestricted, member.UserID, acc.Slug)
+	}
+	remaining, err := CountUnrestrictedMembers(ctx, tx, sc, true)
+	if err != nil {
+		return err
+	}
+	if remaining <= 1 {
+		return fmt.Errorf("%w: %q would be left with none", ErrLastUnrestrictedMember, current.Name)
+	}
+	return nil
 }
 
 // RemoveMember unbinds a user from a role, refusing the removal that would leave

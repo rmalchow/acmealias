@@ -607,7 +607,39 @@ func (a *admin) invitationLink(token string) string {
 	return base + "?token=" + url.QueryEscape(token)
 }
 
-// assignMemberRole gives a role to a member who holds none.
+// memberIsSelf reports whether a membership id belongs to the person asking.
+//
+// By USER and not by membership row, which is the whole subtlety: memberships
+// are per-role, so one person can hold several in one account, and an
+// administrator editing "some other row that happens to be mine" is editing
+// their own authority just as surely as editing the row they signed in through.
+// Comparing membership ids would have caught only the obvious half.
+func (a *admin) memberIsSelf(c echo.Context, sc store.Scope, memberID model.ID) (bool, error) {
+	sess := authz.SessionFromContext(c)
+	if sess == nil {
+		return false, echo.ErrUnauthorized
+	}
+	ctx := c.Request().Context()
+	me, err := store.FindOrCreateUser(ctx, a.db(), sess.Subject, sess.DisplayName, "")
+	if err != nil {
+		return false, err
+	}
+	members, err := store.ListMembers(ctx, a.db(), sc)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range members {
+		if m.ID == memberID {
+			return m.UserID == me.ID, nil
+		}
+	}
+	// No such membership. Not self, and the operation that follows reports the
+	// absence — answering "self" here would turn a missing row into a refusal
+	// about the caller, which is a different and misleading sentence.
+	return false, nil
+}
+
+// assignMemberRole points a member at a role, whether they held one or not.
 //
 // This is the second half of what taking the role off the invitation created
 // (design V6). Somebody accepted, joined, and can do nothing; this is where an
@@ -641,14 +673,40 @@ func (a *admin) assignMemberRole(c echo.Context) error {
 		return fmt.Errorf("%w: roleId is required", inventory.ErrInvalid)
 	}
 	ctx := c.Request().Context()
+
+	// NOBODY CHANGES THEIR OWN ROLE, and this is the one rule in this operation
+	// that is about who is asking rather than about what the data may look like
+	// — which is why it is here and not in the store, a package that never
+	// learns who is asking.
+	//
+	// It is not a stranding guard; the store has two of those, and they are
+	// stricter. It is a separation rule: the authority to change roles comes
+	// from holding the unrestricted role, so an administrator editing their own
+	// membership is using a power to alter the source of that power. The
+	// failure it prevents is mundane rather than exotic — an administrator
+	// picking the wrong row in a list of colleagues and locking themselves out
+	// of the account they were tidying up — and the remedy for wanting a
+	// different role for oneself is another administrator, which is the same
+	// answer the removal rules give.
+	//
+	// The OWNER is not exempt. An owner who could demote themselves would hit
+	// the store's owner guard immediately afterwards anyway, and refusing here
+	// says the more useful of the two sentences.
+	self, err := a.memberIsSelf(c, sc, id)
+	if err != nil {
+		return err
+	}
+	if self {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{
+			"message": "you cannot change your own role; another administrator of this account can",
+			"code":    "own_role",
+		})
+	}
+
 	return a.mutate(c, func(tx *gorm.DB) ([]authz.Event, error) {
-		if err := store.AssignRole(ctx, tx, sc, id, body.RoleID); err != nil {
+		if err := store.SetRole(ctx, tx, sc, id, body.RoleID); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// Either there is no such membership, or it already holds a
-				// role. Same answer for both: assigning is only ever the
-				// completion of an invitation, and re-pointing an existing
-				// membership at a different role is a remove and an add.
-				return nil, fmt.Errorf("%w: no membership waiting for a role", inventory.ErrConflict)
+				return nil, fmt.Errorf("%w: no such membership in this account", inventory.ErrConflict)
 			}
 			return nil, err
 		}

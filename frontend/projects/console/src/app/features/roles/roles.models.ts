@@ -35,6 +35,14 @@ export interface Member {
   subject: string;
   displayName: string;
   /**
+   * The address this person signs in with, learned from the identity provider's id token.
+   *
+   * ABSENT for somebody this service has never seen sign in — a member added by subject from the
+   * command line, before they first arrive. The roster renders the name alone in that case rather
+   * than an empty pair of brackets.
+   */
+  email?: string;
+  /**
    * ABSENT for a member who holds no role.
    *
    * That is somebody who accepted an invitation and is waiting for one to be assigned, and it is

@@ -199,11 +199,81 @@ func TestIntegrationInvitationEndToEnd(t *testing.T) {
 	if waiting == nil {
 		t.Fatal("the roster shows nobody waiting for a role; the new member is invisible as a state to act on")
 	}
-	rec = admin.do(http.MethodPut,
-		"/api/v1/accounts/"+v.sc.AccountID().String()+"/members/"+waiting.ID.String()+"/role",
-		`{"roleId":"`+v.roleID.String()+`"}`)
+	rolePath := "/api/v1/accounts/" + v.sc.AccountID().String() + "/members/" + waiting.ID.String() + "/role"
+	rec = admin.do(http.MethodPut, rolePath, `{"roleId":"`+v.roleID.String()+`"}`)
 	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
 		t.Fatalf("assign a role: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// AND IT CAN BE CHANGED AFTERWARDS. This used to answer 409 "no membership
+	// waiting for a role": assigning was the last step of an invitation and
+	// nothing else, so moving somebody between roles meant removing them from
+	// the account and adding them back — which loses the membership row, and is
+	// refused outright for the last holder of the unrestricted role.
+	second := &model.Role{Name: "second-role", Description: "for the test"}
+	if err := store.CreateRole(t.Context(), v.db, v.sc, second, store.AllowAnyGrant); err != nil {
+		t.Fatalf("create a second role: %v", err)
+	}
+	rec = admin.do(http.MethodPut, rolePath, `{"roleId":"`+second.ID.String()+`"}`)
+	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+		t.Fatalf("change a role: %d %s, want it to succeed", rec.Code, rec.Body.String())
+	}
+
+	// Re-sending the role a member already holds is a no-op, not a refusal: the
+	// console seeds its select from the current value and would otherwise report
+	// an error for pressing the button without moving it.
+	rec = admin.do(http.MethodPut, rolePath, `{"roleId":"`+second.ID.String()+`"}`)
+	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+		t.Fatalf("re-setting the same role: %d %s, want a no-op", rec.Code, rec.Body.String())
+	}
+}
+
+// TestIntegrationNobodyChangesTheirOwnRole is the separation rule, and it is
+// about who is asking rather than about what the data may look like — which is
+// why it lives in the handler and is asserted here rather than in the store.
+//
+// The authority to change roles IS the unrestricted role, so an administrator
+// editing their own membership is using a power to alter the source of that
+// power. The failure it prevents is mundane: picking the wrong row in a list of
+// colleagues and locking yourself out of the account you were tidying up.
+func TestIntegrationNobodyChangesTheirOwnRole(t *testing.T) {
+	v := newAdminEnv(t)
+	admin := v.session("admin", roleAdmin)
+
+	me := admin.do(http.MethodGet, "/api/v1/me", "")
+	var identity struct {
+		Subject string `json:"subject"`
+	}
+	if err := json.Unmarshal(me.Body.Bytes(), &identity); err != nil {
+		t.Fatalf("decoding /me: %v", err)
+	}
+
+	rec := admin.do(http.MethodGet, "/api/v1/accounts/"+v.sc.AccountID().String()+"/members", "")
+	var members []struct {
+		ID      string `json:"id"`
+		Subject string `json:"subject"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &members); err != nil {
+		t.Fatalf("decoding the roster: %v", err)
+	}
+	var mine string
+	for _, m := range members {
+		if m.Subject == identity.Subject {
+			mine = m.ID
+		}
+	}
+	if mine == "" {
+		t.Fatalf("the caller is not in the roster of the account they administer: %+v", members)
+	}
+
+	rec = admin.do(http.MethodPut,
+		"/api/v1/accounts/"+v.sc.AccountID().String()+"/members/"+mine+"/role",
+		`{"roleId":"`+v.roleID.String()+`"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("changing one's own role: got %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "your own role") {
+		t.Errorf("the refusal does not name the reason: %s", rec.Body.String())
 	}
 }
 

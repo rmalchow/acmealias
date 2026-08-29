@@ -416,7 +416,7 @@ func TestIntegrationAssignRoleConsumesTheRolelessRow(t *testing.T) {
 			memberID = m.ID
 		}
 	}
-	if err := AssignRole(ctx, db, sc, memberID, role.ID); err != nil {
+	if err := SetRole(ctx, db, sc, memberID, role.ID); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
 
@@ -435,11 +435,31 @@ func TestIntegrationAssignRoleConsumesTheRolelessRow(t *testing.T) {
 			"row rather than insert beside it", n)
 	}
 
-	// A second assignment to the same row loses, which is what stops two
-	// administrators picking different roles at once from producing a lost
-	// update.
-	if err := AssignRole(ctx, db, sc, memberID, role.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("assigning to a membership that already holds a role = %v, want not-found", err)
+	// Setting the SAME role again is a no-op rather than a refusal. It used to
+	// be not-found, because assigning was only ever the last step of an
+	// invitation and a membership that held a role was out of scope; now that a
+	// role can be changed, a console that re-sends a select's current value must
+	// not be told it did something wrong.
+	if err := SetRole(ctx, db, sc, memberID, role.ID); err != nil {
+		t.Fatalf("setting the role a membership already holds = %v, want success", err)
+	}
+
+	// AND IT CAN BE CHANGED, which is the point of the relaxation. The old
+	// `role_id IS NULL` clause made moving somebody between roles a remove and
+	// an add — losing the membership row, and impossible altogether for the last
+	// holder of the unrestricted role.
+	second := &model.Role{Name: "read-only", Description: "for the test"}
+	if err := CreateRole(ctx, db, sc, second, AllowAnyGrant); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRole(ctx, db, sc, memberID, second.ID); err != nil {
+		t.Fatalf("changing a role: %v", err)
+	}
+	ms, _ = ListMembers(ctx, db, sc)
+	for _, m := range ms {
+		if m.UserID == kim.ID && (m.RoleID == nil || *m.RoleID != second.ID) {
+			t.Errorf("membership %s holds %v after the change, want %s", m.ID, m.RoleID, second.ID)
+		}
 	}
 }
 
