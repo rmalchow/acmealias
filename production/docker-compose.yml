@@ -219,6 +219,19 @@ services:
       # processor to defraud.
       ACME_ALLOW_ACCOUNT_CREATION: "true"
 
+      # Whether a balance gates anything (config.Config.Monetized).
+      #
+      # FALSE, and stated rather than left to the default, because the default is
+      # the same and a reader of this file should not have to know that to know
+      # what this deployment does with money. Team accounts are created without a
+      # payment and work at a balance of zero; the console shows no price, no
+      # balance and no Buy anywhere; store.Usable stops consulting credits.
+      #
+      # The credit machinery is intact underneath — balances stored, top-ups
+      # recorded, both console paths kept behind the flag — so turning this to
+      # "true" is the whole of starting to charge.
+      ACME_MONETIZED: "false"
+
       # A public resolver, for checking customers' delegations. It must NOT be
       # our own server: asking ourselves whether a customer published a CNAME
       # into our zone answers a different question.

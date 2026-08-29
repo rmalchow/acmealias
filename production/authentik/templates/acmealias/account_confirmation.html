@@ -4,7 +4,19 @@
 {% block content %}
 <tr>
   <td align="center">
-    <h1>{% blocktrans with username=user.username %}Hi {{ username }},{% endblocktrans %}</h1>
+    <!--
+      GREETED BY NAME, not by username.
+
+      It said user.username, which for somebody who signed up themselves is a
+      string authentik generated from the enrolment — a real recipient was
+      greeted "Hi mailagreement-1787999531974813004,". The username is an
+      identifier; the name is what the person told us they are called, and it is
+      the only one of the two worth putting after "Hi".
+
+      The fallback is the username rather than nothing, because a user created
+      from the command line has no name and "Hi ," is worse than an identifier.
+    -->
+    <h1>{% blocktrans with who=user.name|default:user.username %}Hi {{ who }},{% endblocktrans %}</h1>
   </td>
 </tr>
 <tr>

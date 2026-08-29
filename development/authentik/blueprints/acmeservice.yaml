@@ -268,6 +268,15 @@ entries:
   # APPROVING SOMEBODY IS TICKING `Active` ON THEIR USER. Refusing them is leaving
   # it alone, or deleting the user. There is nothing to build for either.
   #
+  # That sentence was true of the design and false of the deployment for a while,
+  # which is the kind of drift worth recording where somebody will read it. The
+  # deny stage further down gated on the PATH rather than on `Active`, so ticking
+  # the box approved nobody: the user stayed in users/pending-approval, the
+  # policy went on matching, and an approved person was still told their
+  # registration was under review. The policy reads `is_active` now and the path
+  # only chooses the wording. Nothing moves an approved user out of the folder,
+  # so the reviewer's queue keeps them; see the note on the policy.
+  #
   # TURNING THE GATE OFF IS AN ACTION, NOT ONLY A SETTING (design S8). Clearing
   # `create_users_as_inactive` stops the flow creating inactive users. It does NOT
   # activate the ones it already created. That asymmetry is right in one direction
@@ -1388,8 +1397,31 @@ entries:
     identifiers: { name: acmeservice-is-pending-approval }
     attrs:
       name: acmeservice-is-pending-approval
+      # `is_active` IS THE DECIDING FACTOR, and the path only says which kind of
+      # inactive this is.
+      #
+      # It read the path alone, which made the folder a second gate the design
+      # above explicitly says does not exist — "THE GATE ITSELF IS
+      # `create_users_as_inactive` ON STAGE 20, AND NOTHING ELSE", and "APPROVING
+      # SOMEBODY IS TICKING `Active` ON THEIR USER". Ticking Active did not let
+      # anybody in: the user stayed in users/pending-approval, because nothing
+      # moves them out, so this policy went on matching and the deny stage went
+      # on refusing an approved person. Found exactly that way, on a user who had
+      # been approved and still could not sign in.
+      #
+      # BOTH CLAUSES EARN THEIR PLACE. is_active decides. The path keeps the
+      # MESSAGE honest: a deny stage that fired for every inactive user would
+      # tell somebody whose account an administrator had disabled that their
+      # registration was still being reviewed, which is a different thing and not
+      # true.
+      #
+      # One consequence worth knowing rather than discovering: an approved user
+      # stays in users/pending-approval, so the reviewer's queue keeps showing
+      # them. The queue is a folder tree and nothing prunes it. If that starts to
+      # matter, the answer is a second user_write on approval — not another
+      # policy reading another path.
       expression: |
-        return request.user.path.startswith("users/pending-approval")
+        return not request.user.is_active and request.user.path.startswith("users/pending-approval")
 
   - model: authentik_stages_deny.denystage
     identifiers: { name: acmeservice-pending-approval-deny }

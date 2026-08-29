@@ -1,4 +1,4 @@
-{% load i18n %}{% autoescape off %}{% blocktrans with username=user.username %}Hi {{ username }},{% endblocktrans %}
+{% load i18n %}{% autoescape off %}{% blocktrans with who=user.name|default:user.username %}Hi {{ who }},{% endblocktrans %}
 
 {% trans "Somebody — we hope you — registered this address with AcmeAlias. Open the link below to confirm that the address is yours." %}
 
