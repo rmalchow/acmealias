@@ -1,9 +1,0 @@
-title: built a hosted service that speaks the acme-dns protocol — thank you, and one compatibility note
-
-hi — this isn't a bug report, and i'll keep it short.
-
-i've built a hosted challenge responder (acmealias, https://www.acmealias.com) for the delegation pattern acme-dns defines, aimed at people who want this shape without running an authoritative nameserver on a public ip themselves. it implements your `/update` endpoint, so the clients that already speak acme-dns — acme.sh, cert-manager's solver, certify the web, the certbot plugin — work against it without anyone writing an adapter. that interoperability is entirely a gift from this project, and i'd rather say so here than quietly benefit from it.
-
-the one thing worth stating plainly, so nobody is surprised: `POST /register` is deliberately not implemented as acme-dns defines it. in acme-dns, registration is open — reach the endpoint, get an account and a subdomain. in a multi-tenant hosted service that endpoint is an open door, so accounts and subdomains are created through an authenticated api instead, and a client that expects to self-register will fail against us. everything after registration is the protocol as written.
-
-no ask attached to this. if a link is unwelcome in this repo, say so and i'll remove it. thanks for building the thing the ecosystem standardised on.
