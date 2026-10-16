@@ -1,0 +1,23 @@
+{% comment %}
+THE FOOTER, AND THE ONE PLACE IT IS WRITTEN ON THIS SIDE.
+
+The service carries this same sentence as configuration (../../../config.yaml,
+`mail.footer`, overridable as ACME_MAIL_FOOTER) and appends it beneath a `-- `
+separator in internal/mail.(*SMTP).Render. authentik cannot read that: an email
+stage renders a Django template with a context of exactly four values — url,
+user, expires, token — and there is no settings access, no brand attribute and
+no environment in it. So the footer is a literal here, exactly as
+AUTHENTIK_EMAIL__FROM is a literal in compose.yaml, and for the same reason: two
+programs that cannot share a line of code share a SPECIFICATION instead, and the
+thing that keeps two implementations honest about a specification is a test that
+reads what each of them actually put on the wire. That test is
+backend/acceptance/mail_test.go.
+
+It is a separate file rather than a line in each template so that there is ONE
+place to edit on this side. A deployment that overrides ACME_MAIL_FOOTER has two
+files to change, and this is the second one.
+
+It is not decoration. It is the §5 DDG identification — who is sending, and
+where they can be written to — and a transactional message that omits it is
+non-compliant rather than merely bare.
+{% endcomment %}AcmeAlias Inc, Example Street 1234, Exampletown, Foobar Province — info@acmealias.com

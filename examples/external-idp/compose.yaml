@@ -1,0 +1,125 @@
+---
+# AcmeAlias signing in through an identity provider you already run, and NO TLS.
+#
+#   cp env.example .env   # fill it in, chmod 600
+#   docker compose up -d
+#
+# WHAT THIS STACK DOES NOT DO: terminate TLS. The HTTP port is published on
+# ${HTTP_BIND} (loopback by default) as plain HTTP, and something you already
+# run — nginx, Caddy, HAProxy, a cloud load balancer — must put HTTPS in front
+# of it:
+#
+#   https://${CONSOLE_HOST}  ->  ${HTTP_BIND}:${ACME_HTTP_PORT}
+#   https://${STAFF_HOST}    ->  ${HTTP_BIND}:${ACME_HTTP_PORT}   (same port, if used)
+#
+# This is not optional: the service sets its session and CSRF cookies
+# `Secure`, so over plain http on a real hostname the browser drops them and
+# sign-in loops forever without an error. Pass Host through unchanged and set
+# X-Forwarded-For.
+#
+# DNS is the exception: it is published on ${DNS_BIND} directly, because the
+# resolvers that must reach an authoritative nameserver are the whole internet
+# and there is no proxy in that path.
+#
+# THE IDENTITY PROVIDER is anything that speaks OpenID Connect discovery and
+# signs ID tokens with RS256 — Keycloak, authentik, Entra ID, Google, Okta,
+# Zitadel. Register a confidential client with the authorization_code grant and:
+#
+#   redirect URI:              https://${CONSOLE_HOST}/api/v1/auth/callback
+#   post-logout redirect URI:  ${POST_LOGOUT_URL}  (the console, by default)
+#
+# A groups claim on the ID token is optional; it is recorded, and grants
+# nothing. The service fetches ${OIDC_ISSUER}/.well-known/openid-configuration
+# at start-up, so it must be reachable from inside this container.
+
+name: acmealias
+
+networks:
+  default:
+    ipam:
+      config:
+        # PINNED, so ACME_TRUSTED_PROXY_CIDRS below can name it. A proxy on the
+        # host reaches the container through docker's port publishing, and what
+        # the service sees as the peer is this network's gateway.
+        - subnet: ${NETWORK_SUBNET:-172.29.53.0/24}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-acmeservice}
+      ACME_DB_ROLE: ${ACME_DB_ROLE:-acmeservice_app}
+      ACME_DB_PASSWORD: ${ACME_DB_PASSWORD:?set ACME_DB_PASSWORD in .env}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      # Run ONCE, on an empty data directory. Creates the non-superuser role the
+      # service connects as, so row-level security applies to it.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    # no ports: reachable only on the compose network
+
+  acmealias:
+    image: harbor.rand0m.me/public/acmealias:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      ACME_DATABASE_URL: postgres://${ACME_DB_ROLE:-acmeservice_app}:${ACME_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-acmeservice}?sslmode=disable
+      ACME_DB_ROLE: ${ACME_DB_ROLE:-acmeservice_app}
+      ACME_DB_PASSWORD: ${ACME_DB_PASSWORD}
+
+      ACME_ZONE: ${ACME_ZONE:?set ACME_ZONE in .env}
+      ACME_SOA_PRIMARY_NS: ${ACME_SOA_PRIMARY_NS:?set ACME_SOA_PRIMARY_NS in .env}
+      ACME_SOA_HOSTMASTER: ${ACME_SOA_HOSTMASTER:?set ACME_SOA_HOSTMASTER in .env}
+      ACME_NS_NAMES: ${ACME_NS_NAMES:-}
+      ACME_CAA_ISSUER: ${ACME_CAA_ISSUER:-}
+      ACME_DNS_LISTEN: ":53"
+      ACME_LISTEN: ":8080"
+
+      ACME_OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
+      ACME_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID in .env}
+      ACME_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+      ACME_OIDC_REDIRECT_URL: https://${CONSOLE_HOST:?set CONSOLE_HOST in .env}/api/v1/auth/callback
+      ACME_OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+      ACME_OIDC_GROUP_PREFIX: ${OIDC_GROUP_PREFIX:-}
+      ACME_POST_LOGOUT_REDIRECT_URL: ${POST_LOGOUT_URL:-https://${CONSOLE_HOST}/}
+
+      # The staff console: a second client at the same issuer, on its own
+      # hostname. Empty STAFF_HOST means there is none, and every hostname
+      # answers as the customer console.
+      ACME_STAFF_HOST: ${STAFF_HOST:-}
+      ACME_STAFF_OIDC_CLIENT_ID: ${STAFF_OIDC_CLIENT_ID:-}
+      ACME_STAFF_OIDC_CLIENT_SECRET: ${STAFF_OIDC_CLIENT_SECRET:-}
+      ACME_STAFF_OIDC_REDIRECT_URL: ${STAFF_HOST:+https://${STAFF_HOST}/api/admin/auth/callback}
+
+      ACME_TRUSTED_PROXY_CIDRS: ${NETWORK_SUBNET:-172.29.53.0/24}
+      ACME_VERIFY_RESOLVER: ${ACME_VERIFY_RESOLVER:-1.1.1.1:53}
+
+      # CLOSED by default here, which is the service's own default. An external
+      # provider usually signs in ONE organization, and with this open every
+      # person in it could mint a team account. Everybody still gets a personal
+      # account on first sign-in; team accounts come from `adminctl`.
+      ACME_ALLOW_ACCOUNT_CREATION: ${ACME_ALLOW_ACCOUNT_CREATION:-false}
+      ACME_MONETIZED: ${ACME_MONETIZED:-false}
+
+      # Invitations are mailed. Without a relay they are created and never sent.
+      ACME_MAIL_FROM: ${MAIL_FROM:-}
+      ACME_MAIL_SENDER: ${MAIL_SENDER:-AcmeAlias}
+      ACME_MAIL_REPLY_TO: ${MAIL_REPLY_TO:-${MAIL_FROM:-}}
+      ACME_MAIL_SMTP_ADDR: ${SMTP_HOST:-}${SMTP_HOST:+:${SMTP_PORT:-587}}
+      ACME_MAIL_SMTP_USER: ${SMTP_USER:-}
+      ACME_MAIL_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    ports:
+      # A NAMED ADDRESS, not `53:53`: a wildcard bind collides with
+      # systemd-resolved on 127.0.0.53 and publishes IPv4 only. For IPv6 add the
+      # same two lines with "[<your v6 address>]:53:53/…".
+      - ${DNS_BIND:?set DNS_BIND in .env}:53:53/udp
+      - ${DNS_BIND}:53:53/tcp
+      - ${HTTP_BIND:-127.0.0.1}:${ACME_HTTP_PORT:-8080}:8080
+    depends_on:
+      postgres: { condition: service_healthy }

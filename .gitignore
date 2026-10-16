@@ -37,3 +37,7 @@
 # `go build ./...` fail on a fresh clone.
 /backend/cmd/acmesite/dist/*
 !/backend/cmd/acmesite/dist/index.html
+
+# A copied-and-filled example stack: its secrets and its state.
+/examples/*/.env
+/examples/*/data/

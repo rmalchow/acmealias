@@ -1,0 +1,204 @@
+---
+# AcmeAlias with its own identity provider (authentik), and NO TLS.
+#
+#   cp env.example .env   # fill it in, chmod 600
+#   docker compose up -d postgres
+#   docker compose up -d authentik-server      # wait until it is healthy
+#   docker compose up -d
+#
+# WHAT THIS STACK DOES NOT DO: terminate TLS. Both HTTP ports are published on
+# ${HTTP_BIND} (loopback by default) as plain HTTP, and something you already
+# run — nginx, Caddy, HAProxy, a cloud load balancer — must put HTTPS in front
+# of them:
+#
+#   https://${CONSOLE_HOST}  ->  ${HTTP_BIND}:${ACME_HTTP_PORT}   (the service)
+#   https://${STAFF_HOST}    ->  ${HTTP_BIND}:${ACME_HTTP_PORT}   (same port, if used)
+#   https://${AUTH_HOST}     ->  ${HTTP_BIND}:${AUTHENTIK_HTTP_PORT}
+#
+# This is not optional, and not only for the usual reasons: the service sets
+# its session and CSRF cookies `Secure`, so over plain http on a real hostname
+# the browser drops them and sign-in loops forever without an error. The proxy
+# must also pass Host through unchanged and set X-Forwarded-For and
+# X-Forwarded-Proto — authentik builds its issuer and redirect URLs from them.
+#
+# DNS is the exception: it is published on ${DNS_BIND} directly, because the
+# resolvers that must reach an authoritative nameserver are the whole internet
+# and there is no proxy in that path.
+#
+# One postgres, two databases: authentik's schema and ours share a server and
+# never a database, and the service connects as a non-superuser role so
+# row-level security applies to it (postgres-init/).
+
+name: acmealias
+
+networks:
+  default:
+    ipam:
+      config:
+        # PINNED, so the two trusted-proxy settings below can name it. A proxy on
+        # the host reaches the containers through docker's port publishing, and
+        # what they see as the peer is this network's gateway — an address that
+        # would otherwise change with every `docker network` reshuffle.
+        - subnet: ${NETWORK_SUBNET:-172.29.53.0/24}
+
+x-authentik: &authentik
+  image: ghcr.io/goauthentik/server:2026.8.0
+  restart: unless-stopped
+  environment:
+    AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set AUTHENTIK_SECRET_KEY in .env}
+    AUTHENTIK_POSTGRESQL__HOST: postgres
+    AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_DB_NAME:-authentik}
+    AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_DB_ROLE:-authentik}
+    AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:?set AUTHENTIK_DB_PASSWORD in .env}
+    AUTHENTIK_REDIS__HOST: redis
+    # Without this authentik ignores X-Forwarded-Proto, builds its URLs as
+    # http://…:9000, and every sign-in bounces somewhere the browser cannot go.
+    AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: ${NETWORK_SUBNET:-172.29.53.0/24}
+    AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
+    AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    AUTHENTIK_LOG_LEVEL: warning
+    AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:?set AUTHENTIK_BOOTSTRAP_EMAIL in .env}
+    AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:?set AUTHENTIK_BOOTSTRAP_PASSWORD in .env}
+    AUTHENTIK_EMAIL__HOST: ${SMTP_HOST:-}
+    AUTHENTIK_EMAIL__PORT: ${SMTP_PORT:-587}
+    AUTHENTIK_EMAIL__USERNAME: ${SMTP_USER:-}
+    AUTHENTIK_EMAIL__PASSWORD: ${SMTP_PASSWORD:-}
+    AUTHENTIK_EMAIL__USE_TLS: ${SMTP_STARTTLS:-true}
+    AUTHENTIK_EMAIL__USE_SSL: ${SMTP_IMPLICIT_TLS:-false}
+    AUTHENTIK_EMAIL__FROM: ${MAIL_SENDER:-AcmeAlias} <${MAIL_FROM:?set MAIL_FROM in .env}>
+    # Read by the blueprint's !Env tags: the providers it creates carry the same
+    # client credentials, and the same URLs, the service uses.
+    ACME_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-acmeservice-console}
+    ACME_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in .env}
+    ACME_ADMIN_OIDC_CLIENT_ID: ${STAFF_OIDC_CLIENT_ID:-acmeservice-admin}
+    ACME_ADMIN_OIDC_CLIENT_SECRET: ${STAFF_OIDC_CLIENT_SECRET:?set STAFF_OIDC_CLIENT_SECRET in .env}
+    CONSOLE_HOST: ${CONSOLE_HOST:?set CONSOLE_HOST in .env}
+    # The blueprint always creates the staff application; with no staff host it
+    # gets a callback on a name that cannot resolve, rather than an empty one
+    # authentik would refuse — taking the rest of the blueprint with it.
+    STAFF_HOST: ${STAFF_HOST:-admin.invalid}
+    POST_LOGOUT_URL: ${POST_LOGOUT_URL:-https://${CONSOLE_HOST}/}
+  volumes:
+    - ./authentik/blueprints:/blueprints/custom:ro
+    # Both containers need the templates: the server lists them, the WORKER
+    # renders and sends. Mounted on one only, the confirmation mail fails at
+    # send time and nobody who registers ever hears from us.
+    - ./authentik/templates:/templates:ro
+    - ./data/authentik/media:/media
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-acmeservice}
+      ACME_DB_ROLE: ${ACME_DB_ROLE:-acmeservice_app}
+      ACME_DB_PASSWORD: ${ACME_DB_PASSWORD:?set ACME_DB_PASSWORD in .env}
+      AUTHENTIK_DB_NAME: ${AUTHENTIK_DB_NAME:-authentik}
+      AUTHENTIK_DB_ROLE: ${AUTHENTIK_DB_ROLE:-authentik}
+      AUTHENTIK_DB_PASSWORD: ${AUTHENTIK_DB_PASSWORD:?set AUTHENTIK_DB_PASSWORD in .env}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      # Run ONCE, on an empty data directory. Editing them later does nothing.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    # no ports: reachable only on the compose network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+
+  # The shared block above carries NO `ports`: the worker inheriting the
+  # server's publish fails its bind and loses its networking, and what it then
+  # logs is a misleading "failed to resolve host 'postgres'".
+  authentik-server:
+    <<: *authentik
+    command: server
+    ports:
+      - ${HTTP_BIND:-127.0.0.1}:${AUTHENTIK_HTTP_PORT:-9000}:9000
+
+  # The worker APPLIES THE BLUEPRINT. Without it there are no OIDC providers,
+  # and the symptom is a 404 on discovery that looks like the service's fault.
+  authentik-worker:
+    <<: *authentik
+    command: worker
+
+  acmealias:
+    image: harbor.rand0m.me/public/acmealias:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      ACME_DATABASE_URL: postgres://${ACME_DB_ROLE:-acmeservice_app}:${ACME_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-acmeservice}?sslmode=disable
+      ACME_DB_ROLE: ${ACME_DB_ROLE:-acmeservice_app}
+      ACME_DB_PASSWORD: ${ACME_DB_PASSWORD}
+
+      ACME_ZONE: ${ACME_ZONE:?set ACME_ZONE in .env}
+      ACME_SOA_PRIMARY_NS: ${ACME_SOA_PRIMARY_NS:?set ACME_SOA_PRIMARY_NS in .env}
+      ACME_SOA_HOSTMASTER: ${ACME_SOA_HOSTMASTER:?set ACME_SOA_HOSTMASTER in .env}
+      ACME_NS_NAMES: ${ACME_NS_NAMES:-}
+      ACME_CAA_ISSUER: ${ACME_CAA_ISSUER:-}
+      ACME_DNS_LISTEN: ":53"
+      ACME_LISTEN: ":8080"
+
+      # The issuer is authentik's PUBLIC https address, not http://authentik-server:9000.
+      # It is the `iss` the ID token carries, and the browser is sent there to
+      # sign in — so the service must reach ${AUTH_HOST} through your proxy too.
+      ACME_OIDC_ISSUER: https://${AUTH_HOST:?set AUTH_HOST in .env}/application/o/acmeservice-console/
+      ACME_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-acmeservice-console}
+      ACME_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      ACME_OIDC_REDIRECT_URL: https://${CONSOLE_HOST}/api/v1/auth/callback
+      ACME_POST_LOGOUT_REDIRECT_URL: ${POST_LOGOUT_URL:-https://${CONSOLE_HOST}/}
+
+      # The staff console. Empty STAFF_HOST means there is none, and every
+      # hostname answers as the customer console.
+      ACME_STAFF_HOST: ${STAFF_HOST:-}
+      ACME_STAFF_OIDC_CLIENT_ID: ${STAFF_OIDC_CLIENT_ID:-acmeservice-admin}
+      ACME_STAFF_OIDC_CLIENT_SECRET: ${STAFF_OIDC_CLIENT_SECRET}
+      ACME_STAFF_OIDC_REDIRECT_URL: ${STAFF_HOST:+https://${STAFF_HOST}/api/admin/auth/callback}
+
+      # Whose X-Forwarded-For is believed. Your proxy reaches us through this
+      # network's gateway, so this is the narrowest range that works without
+      # knowing more about the host.
+      ACME_TRUSTED_PROXY_CIDRS: ${NETWORK_SUBNET:-172.29.53.0/24}
+      ACME_VERIFY_RESOLVER: ${ACME_VERIFY_RESOLVER:-1.1.1.1:53}
+
+      # Open by default HERE, unlike the service's own default: with a private
+      # identity provider whose sign-up page is the front door, the people
+      # signing in are prospective customers and creating an account is what
+      # they came for.
+      ACME_ALLOW_ACCOUNT_CREATION: ${ACME_ALLOW_ACCOUNT_CREATION:-true}
+      ACME_MONETIZED: ${ACME_MONETIZED:-false}
+
+      # The same sender authentik uses above, so both programs mailing one
+      # person arrive as one correspondent.
+      ACME_MAIL_FROM: ${MAIL_FROM}
+      ACME_MAIL_SENDER: ${MAIL_SENDER:-AcmeAlias}
+      ACME_MAIL_REPLY_TO: ${MAIL_REPLY_TO:-${MAIL_FROM}}
+      ACME_MAIL_SMTP_ADDR: ${SMTP_HOST:-}${SMTP_HOST:+:${SMTP_PORT:-587}}
+      ACME_MAIL_SMTP_USER: ${SMTP_USER:-}
+      ACME_MAIL_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    ports:
+      # A NAMED ADDRESS, not `53:53`: a wildcard bind collides with
+      # systemd-resolved on 127.0.0.53 and publishes IPv4 only. For IPv6 add the
+      # same two lines with "[<your v6 address>]:53:53/…".
+      - ${DNS_BIND:?set DNS_BIND in .env}:53:53/udp
+      - ${DNS_BIND}:53:53/tcp
+      - ${HTTP_BIND:-127.0.0.1}:${ACME_HTTP_PORT:-8080}:8080
+    depends_on:
+      postgres: { condition: service_healthy }

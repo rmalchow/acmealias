@@ -1,0 +1,10 @@
+{% load i18n %}{% autoescape off %}{% blocktrans with who=user.name|default:user.username %}Hi {{ who }},{% endblocktrans %}
+
+{% trans "Somebody — we hope you — registered this address with AcmeAlias. Open the link below to confirm that the address is yours." %}
+
+{{ url }}
+
+{% trans "That is the last step: once the address is confirmed you can sign in straight away. If you did not register, ignore this message — an unconfirmed registration expires on its own and nothing was created in your name." %}
+
+-- 
+{% include "acmealias/_footer.txt" %}{% endautoescape %}
